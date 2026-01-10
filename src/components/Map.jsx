@@ -7,7 +7,7 @@ import { MOHAWK_TRAIL, getCurveColor } from '../data/routes'
 // IMPORTANT: Replace with your Mapbox token
 // Get one free at: https://mapbox.com
 // ================================
-mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN_HERE'
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'pk.eyJ1IjoiYW50b25mbGsiLCJhIjoiY21rOG0xaGE4MHMxZzNmb254bmE3Y2kxaCJ9.N5_5rwIZRbCye16OkkhpKg'
 
 // ================================
 // Map Component
