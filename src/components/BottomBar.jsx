@@ -1,11 +1,11 @@
 import useStore from '../store'
 
 // ================================
-// Bottom Bar - Navigation Controls
-// v2: Fixed stop button, better GPS status
+// Bottom Bar - v3
+// Stop → Preview, Back → Menu
 // ================================
 
-export default function BottomBar({ onStop }) {
+export default function BottomBar({ onStop, onBack }) {
   const {
     mode,
     setMode,
@@ -39,7 +39,7 @@ export default function BottomBar({ onStop }) {
 
   const progress = getRouteProgress()
 
-  // GPS accuracy indicator
+  // GPS/Mode indicator
   const getGpsStatus = () => {
     if (routeMode === 'demo') return { color: '#ffd500', label: 'DEMO', accuracy: null }
     if (routeMode === 'lookahead') return { color: '#00d4ff', label: 'LIVE', accuracy: gpsAccuracy }
@@ -78,20 +78,22 @@ export default function BottomBar({ onStop }) {
       {/* Main Controls Bar */}
       <div className="mx-3 mb-2">
         <div className="flex items-center gap-2">
-          {/* Back Button */}
+          {/* Back Button - Goes to MENU */}
           <button
-            onClick={onStop}
+            onClick={onBack}
             className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
+            title="Back to menu"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
             </svg>
           </button>
 
-          {/* Stop Button */}
+          {/* Stop Button - Goes to PREVIEW */}
           <button
             onClick={onStop}
             className="flex-1 h-12 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 bg-red-500/90 hover:bg-red-500 active:scale-[0.98]"
+            title="Stop navigation"
           >
             <span className="w-3 h-3 bg-white rounded-sm" />
             STOP
@@ -105,6 +107,7 @@ export default function BottomBar({ onStop }) {
                 ? 'bg-cyan-500/20 border-cyan-500/50' 
                 : 'bg-black/60 border-white/10'
             }`}
+            title={settings.voiceEnabled ? 'Mute voice' : 'Unmute voice'}
           >
             {settings.voiceEnabled ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
@@ -125,6 +128,7 @@ export default function BottomBar({ onStop }) {
           <button
             onClick={toggleSettings}
             className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
+            title="Settings"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
