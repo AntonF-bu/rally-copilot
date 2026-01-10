@@ -5,7 +5,7 @@ import { getCurveColor } from '../data/routes'
 
 // ================================
 // Route Preview Screen
-// Shows route overview before navigation
+// Updated: Shows ALL curves on map
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
@@ -95,16 +95,22 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       endEl.innerHTML = `<div style="width: 24px; height: 24px; background: #ef4444; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 10px rgba(239,68,68,0.5);"></div>`
       new mapboxgl.Marker({ element: endEl }).setLngLat(routeData.coordinates[routeData.coordinates.length - 1]).addTo(map.current)
 
-      // Sharp curve markers
+      // ALL curve markers (not just sharp ones)
       if (routeData.curves) {
-        routeData.curves.filter(c => c.severity >= 4).forEach(curve => {
+        routeData.curves.forEach(curve => {
           const el = document.createElement('div')
           const color = getCurveColor(curve.severity)
           const isLeft = curve.direction === 'LEFT'
+          
+          // Size based on severity - larger for sharper curves
+          const size = curve.severity >= 5 ? 14 : curve.severity >= 3 ? 12 : 10
+          const padding = curve.severity >= 5 ? '5px 9px' : curve.severity >= 3 ? '4px 7px' : '3px 6px'
+          const fontSize = curve.severity >= 5 ? '13px' : curve.severity >= 3 ? '11px' : '10px'
+          
           el.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 2px; background: rgba(10,10,15,0.9); padding: 4px 8px; border-radius: 8px; border: 1px solid ${color}50;">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
-              <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 12px; color: ${color}">${curve.severity}</span>
+            <div style="display: flex; align-items: center; gap: 2px; background: rgba(10,10,15,0.9); padding: ${padding}; border-radius: 8px; border: 1px solid ${color}50; opacity: ${curve.severity >= 3 ? 1 : 0.7};">
+              <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
+              <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: ${fontSize}; color: ${color}">${curve.severity}</span>
             </div>
           `
           new mapboxgl.Marker({ element: el }).setLngLat(curve.position).addTo(map.current)
