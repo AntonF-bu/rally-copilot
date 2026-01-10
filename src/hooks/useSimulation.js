@@ -60,25 +60,44 @@ export function useSimulation() {
   }, [route])
 
   // Calculate upcoming curves from current position
-  const calculateUpcomingCurves = useCallback((currentPos) => {
+  // Only returns curves that are AHEAD of the car on the route
+  const calculateUpcomingCurves = useCallback((currentPos, currentProgress) => {
     const curves = route.curves
     const upcoming = []
+    const coords = route.coordinates
 
+    // Find which curves are ahead based on route progress
     for (const curve of curves) {
-      const distance = getDistance(currentPos, curve.position)
+      // Calculate where this curve is on the route (0-1)
+      // by finding the closest point on the route to the curve
+      let minDist = Infinity
+      let curveProgress = 0
       
-      // Only include curves ahead (within 1km)
-      if (distance < 1000 && distance > -50) {
-        upcoming.push({
-          ...curve,
-          distance: Math.round(distance)
-        })
+      for (let i = 0; i < coords.length; i++) {
+        const dist = getDistance(coords[i], curve.position)
+        if (dist < minDist) {
+          minDist = dist
+          curveProgress = i / (coords.length - 1)
+        }
+      }
+
+      // Only include if curve is ahead of current position
+      if (curveProgress > currentProgress) {
+        const distance = getDistance(currentPos, curve.position)
+        
+        if (distance < 1000) { // Within 1km
+          upcoming.push({
+            ...curve,
+            distance: Math.round(distance),
+            routeProgress: curveProgress
+          })
+        }
       }
     }
 
-    // Sort by distance and take first 5
+    // Sort by route progress (not distance) to ensure correct order
     return upcoming
-      .sort((a, b) => a.distance - b.distance)
+      .sort((a, b) => a.routeProgress - b.routeProgress)
       .slice(0, 5)
   }, [route])
 
@@ -111,8 +130,8 @@ export function useSimulation() {
     const variation = Math.sin(Date.now() / 1500) * 8 + (Math.random() - 0.5) * 4
     setSpeed(Math.max(15, baseSpeed + variation))
 
-    // Update upcoming curves
-    const upcoming = calculateUpcomingCurves(position)
+    // Update upcoming curves (pass progress to know which are ahead)
+    const upcoming = calculateUpcomingCurves(position, newProgress)
     setUpcomingCurves(upcoming)
 
     // Set active curve if close enough
