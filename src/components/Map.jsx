@@ -4,8 +4,7 @@ import useStore from '../store'
 import { MOHAWK_TRAIL, getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - Beautiful Rally Style
-// Satellite hybrid + custom styling
+// Map - Premium Terrain Style
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
@@ -18,31 +17,19 @@ export default function Map() {
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isFollowing, setIsFollowing] = useState(true)
-  const [mapStyle, setMapStyle] = useState('satellite') // 'satellite' | 'dark' | 'streets'
+  const [mapStyle, setMapStyle] = useState('terrain')
   
-  const {
-    position,
-    heading,
-    speed,
-    isRunning,
-    upcomingCurves,
-    activeCurve,
-    mode,
-    settings
-  } = useStore()
+  const { position, heading, speed, isRunning, upcomingCurves, activeCurve, mode, settings } = useStore()
 
   const route = MOHAWK_TRAIL
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
 
-  // Map style URLs
   const mapStyles = {
-    satellite: 'mapbox://styles/mapbox/satellite-streets-v12',
-    dark: 'mapbox://styles/mapbox/dark-v11',
-    streets: 'mapbox://styles/mapbox/streets-v12',
-    outdoors: 'mapbox://styles/mapbox/outdoors-v12'
+    terrain: 'mapbox://styles/mapbox/outdoors-v12',
+    satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
   }
 
-  // Initialize map
+  // Initialize
   useEffect(() => {
     if (map.current) return
 
@@ -51,7 +38,7 @@ export default function Map() {
       style: mapStyles[mapStyle],
       center: route.coordinates[0],
       zoom: 15.5,
-      pitch: 70,
+      pitch: 65,
       bearing: 0,
       antialias: true,
       maxPitch: 85
@@ -60,213 +47,141 @@ export default function Map() {
     map.current.on('load', () => {
       setMapLoaded(true)
       
-      // Add 3D terrain
+      // 3D Terrain
       map.current.addSource('mapbox-dem', {
         type: 'raster-dem',
         url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
         tileSize: 512,
         maxzoom: 14
       })
-      map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.8 })
+      map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 2.0 })
 
-      // Add sky layer for atmosphere
+      // Sky atmosphere
       map.current.addLayer({
         id: 'sky',
         type: 'sky',
         paint: {
           'sky-type': 'atmosphere',
-          'sky-atmosphere-sun': [0.0, 0.0],
+          'sky-atmosphere-sun': [0.0, 90.0],
           'sky-atmosphere-sun-intensity': 15
         }
       })
 
-      // Route outer glow (larger, more diffuse)
+      // Route layers
       map.current.addSource('route', {
         type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: route.coordinates
-          }
-        }
+        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.coordinates }}
       })
 
-      // Outer glow layer
+      // Shadow
       map.current.addLayer({
-        id: 'route-glow-outer',
+        id: 'route-shadow',
         type: 'line',
         source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00d4ff',
-          'line-width': 24,
-          'line-blur': 15,
-          'line-opacity': 0.3
-        }
+        paint: { 'line-color': '#000', 'line-width': 10, 'line-blur': 4, 'line-opacity': 0.2, 'line-translate': [2, 2] }
       })
 
-      // Inner glow layer
+      // Glow
       map.current.addLayer({
-        id: 'route-glow-inner',
+        id: 'route-glow',
         type: 'line',
         source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00d4ff',
-          'line-width': 12,
-          'line-blur': 6,
-          'line-opacity': 0.5
-        }
+        paint: { 'line-color': '#00d4ff', 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.4 }
       })
 
-      // Main route line
+      // Main line
       map.current.addLayer({
         id: 'route-line',
         type: 'line',
         source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00d4ff',
-          'line-width': 6,
-          'line-opacity': 1
-        }
+        paint: { 'line-color': '#00d4ff', 'line-width': 4, 'line-opacity': 1 }
       })
 
-      // Route center highlight
+      // Center dashes
       map.current.addLayer({
-        id: 'route-center',
+        id: 'route-dashes',
         type: 'line',
         source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#ffffff',
-          'line-width': 2,
-          'line-opacity': 0.4
-        }
+        paint: { 'line-color': '#fff', 'line-width': 1, 'line-opacity': 0.5, 'line-dasharray': [3, 5] }
       })
     })
 
-    // User interaction handlers
     map.current.on('dragstart', () => setIsFollowing(false))
-    map.current.on('zoomstart', (e) => {
-      if (e.originalEvent) setIsFollowing(false)
-    })
-    map.current.on('pitchstart', (e) => {
-      if (e.originalEvent) setIsFollowing(false)
-    })
+    map.current.on('zoomstart', (e) => { if (e.originalEvent) setIsFollowing(false) })
 
-    return () => {
-      map.current?.remove()
-      map.current = null
-    }
-  }, [route, mapStyle])
+    return () => { map.current?.remove(); map.current = null }
+  }, [route])
 
-  // Create user marker (car icon)
+  // Style change handler
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+    
+    map.current.once('style.load', () => {
+      // Re-add terrain
+      if (!map.current.getSource('mapbox-dem')) {
+        map.current.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 })
+      }
+      map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 2.0 })
+      
+      // Re-add route
+      if (!map.current.getSource('route')) {
+        map.current.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.coordinates }}})
+      }
+      
+      const color = modeColors[mode] || modeColors.cruise
+      if (!map.current.getLayer('route-glow')) {
+        map.current.addLayer({ id: 'route-glow', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': color, 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.4 }})
+      }
+      if (!map.current.getLayer('route-line')) {
+        map.current.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': color, 'line-width': 4, 'line-opacity': 1 }})
+      }
+    })
+  }, [mapStyle, mapLoaded])
+
+  // User marker
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
     const el = document.createElement('div')
-    el.className = 'user-marker'
     el.innerHTML = `
-      <div style="position: relative; width: 56px; height: 56px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));">
-        <!-- Pulse ring -->
-        <div style="
-          position: absolute;
-          inset: 0;
-          border: 3px solid #ff6b35;
-          border-radius: 50%;
-          animation: markerPulse 2s ease-out infinite;
-        "></div>
-        
-        <!-- Direction arrow (heading indicator) -->
-        <div id="heading-arrow" style="
-          position: absolute;
-          top: -12px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 0;
-          height: 0;
-          border-left: 14px solid transparent;
-          border-right: 14px solid transparent;
-          border-bottom: 24px solid #ff6b35;
-          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
-        "></div>
-        
-        <!-- Car body -->
-        <div style="
-          position: absolute;
-          inset: 14px;
-          background: linear-gradient(135deg, #ff6b35 0%, #ff4500 100%);
-          border-radius: 50%;
-          border: 4px solid white;
-          box-shadow: 
-            0 4px 20px rgba(255, 107, 53, 0.6),
-            inset 0 2px 4px rgba(255,255,255,0.3);
-        "></div>
+      <div class="user-marker" style="position:relative;width:44px;height:44px;filter:drop-shadow(0 3px 6px rgba(0,0,0,0.35))">
+        <div style="position:absolute;inset:0;border:2px solid rgba(255,107,53,0.5);border-radius:50%;animation:pulse 2s ease-out infinite"></div>
+        <div id="heading-arrow" style="position:absolute;top:-8px;left:50%;transform:translateX(-50%)">
+          <svg width="16" height="20" viewBox="0 0 16 20"><path d="M8 0L16 16L8 12L0 16L8 0Z" fill="#ff6b35" stroke="#fff" stroke-width="1.5"/></svg>
+        </div>
+        <div style="position:absolute;inset:10px;background:linear-gradient(145deg,#ff6b35,#e55a2b);border-radius:50%;border:2.5px solid #fff"></div>
       </div>
     `
-
-    userMarker.current = new mapboxgl.Marker({
-      element: el,
-      rotationAlignment: 'map',
-      pitchAlignment: 'map'
-    })
-      .setLngLat(route.coordinates[0])
-      .addTo(map.current)
-
+    userMarker.current = new mapboxgl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(route.coordinates[0]).addTo(map.current)
     return () => userMarker.current?.remove()
   }, [mapLoaded, route])
 
-  // Update position and camera
+  // Position updates
   useEffect(() => {
     if (!map.current || !mapLoaded || !position || !userMarker.current) return
-
     userMarker.current.setLngLat(position)
-
-    // Update heading arrow
-    const el = userMarker.current.getElement()
-    const arrow = el.querySelector('#heading-arrow')
-    if (arrow) {
-      arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
-    }
-
-    // Camera follow
+    const arrow = userMarker.current.getElement().querySelector('#heading-arrow')
+    if (arrow) arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
     if (isRunning && isFollowing) {
-      map.current.easeTo({
-        center: position,
-        bearing: heading,
-        pitch: 70,
-        zoom: 16,
-        duration: 100,
-        easing: t => t
-      })
+      map.current.easeTo({ center: position, bearing: heading, pitch: 65, zoom: 16, duration: 100, easing: t => t })
     }
   }, [position, heading, isRunning, isFollowing, mapLoaded])
 
-  // Recenter
   const handleRecenter = useCallback(() => {
     if (!map.current || !position) return
     setIsFollowing(true)
-    map.current.easeTo({
-      center: position,
-      bearing: heading,
-      pitch: 70,
-      zoom: 16,
-      duration: 500
-    })
+    map.current.easeTo({ center: position, bearing: heading, pitch: 65, zoom: 16, duration: 500 })
   }, [position, heading])
 
-  // Resume follow when starting
-  useEffect(() => {
-    if (isRunning) setIsFollowing(true)
-  }, [isRunning])
+  useEffect(() => { if (isRunning) setIsFollowing(true) }, [isRunning])
 
-  // Update curve markers
+  // Curve markers - Premium design
   useEffect(() => {
     if (!map.current || !mapLoaded) return
-
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
 
@@ -274,180 +189,92 @@ export default function Map() {
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
       const isLeft = curve.direction === 'LEFT'
-      const dirColor = isLeft ? '#00d4ff' : '#ff6b35'
-      const severityColor = getCurveColor(curve.severity)
+      const sevColor = getCurveColor(curve.severity)
       
       el.innerHTML = `
-        <div style="
-          position: relative;
-          min-width: 54px;
-          height: 54px;
-          background: ${isActive ? dirColor : 'rgba(0,0,0,0.9)'};
-          border: 3px solid ${dirColor};
-          border-radius: 14px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: 'Orbitron', monospace, system-ui;
-          font-weight: 800;
-          font-size: 18px;
-          color: ${isActive ? 'white' : dirColor};
-          box-shadow: 
-            0 4px 20px ${dirColor}60,
-            inset 0 1px 0 rgba(255,255,255,0.1);
-          backdrop-filter: blur(8px);
-          transform: scale(${isActive ? 1.25 : 1});
-          transition: all 0.2s ease;
-        ">
-          ${curve.direction[0]}${curve.severity}
-          ${curve.modifier ? `<span style="
-            position: absolute;
-            bottom: -8px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 8px;
-            color: ${severityColor};
-            background: rgba(0,0,0,0.8);
-            padding: 2px 6px;
-            border-radius: 4px;
-            white-space: nowrap;
-          ">${curve.modifier}</span>` : ''}
+        <div style="display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.3))">
+          <div style="
+            display:flex;align-items:center;gap:3px;
+            background:${isActive ? sevColor : 'rgba(10,10,15,0.92)'};
+            padding:6px 10px;border-radius:6px;
+            border:1.5px solid ${sevColor};
+            transform:scale(${isActive ? 1.08 : 1});transition:transform 0.15s;
+          ">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="${isActive ? '#fff' : sevColor}" style="transform:${isLeft ? 'scaleX(-1)' : 'none'}">
+              <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+            </svg>
+            <span style="font-family:-apple-system,system-ui;font-weight:600;font-size:16px;color:${isActive ? '#fff' : sevColor}">${curve.severity}</span>
+          </div>
+          ${curve.modifier ? `<div style="margin-top:3px;padding:1px 6px;background:rgba(0,0,0,0.75);border-radius:3px;font-family:-apple-system,system-ui;font-size:8px;font-weight:600;color:${sevColor};letter-spacing:0.3px">${curve.modifier}</div>` : ''}
         </div>
       `
-
-      const marker = new mapboxgl.Marker({ element: el })
-        .setLngLat(curve.position)
-        .addTo(map.current)
-
-      curveMarkers.current.push(marker)
+      curveMarkers.current.push(new mapboxgl.Marker({ element: el }).setLngLat(curve.position).addTo(map.current))
     })
   }, [upcomingCurves, activeCurve, mapLoaded])
 
-  // Update route color based on mode
+  // Route color by mode
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     const color = modeColors[mode] || modeColors.cruise
-    
-    const layers = ['route-line', 'route-glow-inner', 'route-glow-outer']
-    layers.forEach(layer => {
-      if (map.current.getLayer(layer)) {
-        map.current.setPaintProperty(layer, 'line-color', color)
-      }
-    })
+    if (map.current.getLayer('route-line')) map.current.setPaintProperty('route-line', 'line-color', color)
+    if (map.current.getLayer('route-glow')) map.current.setPaintProperty('route-glow', 'line-color', color)
   }, [mode, mapLoaded])
 
-  // Screen wake lock
+  // Wake lock
   useEffect(() => {
     if (!isRunning) return
-    let wakeLock = null
-    
-    const requestWakeLock = async () => {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen')
-        }
-      } catch (err) {
-        console.log('Wake lock unavailable')
-      }
-    }
-    
-    requestWakeLock()
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && isRunning) requestWakeLock()
-    })
-    
-    return () => wakeLock?.release()
+    let wl = null
+    const req = async () => { try { if ('wakeLock' in navigator) wl = await navigator.wakeLock.request('screen') } catch(e){} }
+    req()
+    return () => wl?.release()
   }, [isRunning])
 
-  // Toggle map style
-  const cycleMapStyle = useCallback(() => {
-    const styles = ['satellite', 'dark', 'outdoors']
-    const currentIndex = styles.indexOf(mapStyle)
-    const nextStyle = styles[(currentIndex + 1) % styles.length]
-    setMapStyle(nextStyle)
-    
-    if (map.current) {
-      map.current.setStyle(mapStyles[nextStyle])
-    }
+  const toggleMapStyle = useCallback(() => {
+    const next = mapStyle === 'terrain' ? 'satellite' : 'terrain'
+    setMapStyle(next)
+    if (map.current) map.current.setStyle(mapStyles[next])
   }, [mapStyle])
 
-  // Speed display
-  const displaySpeed = settings?.speedUnit === 'kmh' 
-    ? Math.round((speed || 0) * 1.609) 
-    : Math.round(speed || 0)
+  const displaySpeed = settings?.speedUnit === 'kmh' ? Math.round((speed || 0) * 1.609) : Math.round(speed || 0)
 
   return (
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Speed Display */}
+      {/* Speed */}
       {isRunning && (
-        <div className="absolute bottom-36 left-4 z-10">
-          <div className="bg-black/85 backdrop-blur-xl rounded-2xl px-5 py-3 border border-white/20">
-            <div 
-              className="text-4xl font-black text-center"
-              style={{ 
-                fontFamily: 'Orbitron, monospace, system-ui',
-                color: modeColors[mode] || '#00d4ff',
-                textShadow: `0 0 20px ${modeColors[mode]}50`
-              }}
-            >
-              {displaySpeed}
-            </div>
-            <div className="text-xs text-gray-400 text-center mt-1 tracking-wider">
-              {(settings?.speedUnit || 'mph').toUpperCase()}
-            </div>
+        <div className="absolute bottom-36 left-4 z-10 bg-black/75 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/[0.08]">
+          <div className="text-2xl font-semibold tracking-tight" style={{ fontFamily: '-apple-system, system-ui', color: modeColors[mode] || '#00d4ff' }}>
+            {displaySpeed}
           </div>
+          <div className="text-[9px] text-white/35 font-medium tracking-widest">{(settings?.speedUnit || 'mph').toUpperCase()}</div>
         </div>
       )}
 
-      {/* Map Style Toggle */}
-      <button
-        onClick={cycleMapStyle}
-        className="absolute top-24 right-4 z-10 bg-black/80 backdrop-blur-xl rounded-xl p-3 border border-white/20 hover:bg-white/10 active:scale-95 transition-all"
-        title="Change map style"
-      >
-        🗺️
+      {/* Map toggle */}
+      <button onClick={toggleMapStyle} className="absolute top-24 right-4 z-10 w-9 h-9 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-lg border border-white/[0.08] hover:bg-white/10 active:scale-95 transition-all">
+        {mapStyle === 'terrain' ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/60"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.364 6.364l-1.414-1.414M7.05 7.05L5.636 5.636m12.728 0l-1.414 1.414M7.05 16.95l-1.414 1.414"/></svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/60"><path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+        )}
       </button>
 
-      {/* Recenter Button */}
+      {/* Recenter */}
       {isRunning && !isFollowing && (
-        <button
-          onClick={handleRecenter}
-          className="absolute bottom-36 right-4 z-10 bg-black/85 backdrop-blur-xl rounded-2xl p-4 border border-white/20 hover:bg-white/10 active:scale-95 transition-all"
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2.5" strokeLinecap="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M12 2v3m0 14v3M2 12h3m14 0h3" />
-          </svg>
+        <button onClick={handleRecenter} className="absolute bottom-36 right-4 z-10 w-11 h-11 flex items-center justify-center bg-black/75 backdrop-blur-sm rounded-lg border border-white/[0.08] hover:bg-white/10 active:scale-95 transition-all">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
         </button>
       )}
 
       {/* Loading */}
       {!mapLoaded && (
         <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-50">
-          <div className="text-center">
-            <div className="w-14 h-14 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4" />
-            <p className="text-gray-400 text-lg">Loading map...</p>
-          </div>
+          <div className="w-8 h-8 border-2 border-white/10 border-t-white/60 rounded-full animate-spin" />
         </div>
       )}
 
-      {/* Token warning */}
-      {mapLoaded && (!mapboxgl.accessToken || mapboxgl.accessToken === 'YOUR_MAPBOX_TOKEN_HERE') && (
-        <div className="absolute top-24 left-4 right-16 bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-4 backdrop-blur z-30">
-          <p className="text-yellow-400 text-sm font-medium">
-            ⚠️ Add Mapbox token in Vercel Environment Variables
-          </p>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes markerPulse {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(2.5); opacity: 0; }
-        }
-      `}</style>
+      <style>{`@keyframes pulse{0%{transform:scale(1);opacity:1}100%{transform:scale(2);opacity:0}}`}</style>
     </div>
   )
 }
