@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook - ElevenLabs + Native Fallback
+// Speech Hook - ElevenLabs + Queue Management
+// Fixes: inconsistent voice, cutoffs, overlapping audio
 // ================================
 
-// Adam voice ID from ElevenLabs
-const ELEVENLABS_VOICE_ID = 'pNInz6obpgDQGcFmaJgB'
+const ELEVENLABS_VOICE_ID = 'pNInz6obpgDQGcFmaJgB' // Adam
 
 export function useSpeech() {
   const { settings, mode, setSpeaking } = useStore()
@@ -17,20 +17,35 @@ export function useSpeech() {
   const audioRef = useRef(null)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
+  const isPlayingRef = useRef(false)
+  const queueRef = useRef([])
 
-  // Initialize native speech as fallback
+  // Initialize
   useEffect(() => {
     if (typeof window === 'undefined') return
 
     // Create audio element for ElevenLabs
     audioRef.current = new Audio()
-    audioRef.current.onended = () => setSpeaking(false, '')
-    audioRef.current.onerror = () => {
-      console.log('ElevenLabs audio error, falling back to native')
-      setUseElevenLabs(false)
+    
+    audioRef.current.onplay = () => {
+      isPlayingRef.current = true
+    }
+    
+    audioRef.current.onended = () => {
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+      // Process next in queue
+      processQueue()
+    }
+    
+    audioRef.current.onerror = (e) => {
+      console.log('Audio error:', e)
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+      processQueue()
     }
 
-    // Initialize native speech synthesis as fallback
+    // Initialize native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -38,7 +53,6 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
 
-        // Find best native voice
         const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
@@ -61,12 +75,25 @@ export function useSpeech() {
     return () => {
       audioRef.current?.pause()
       synthRef.current?.cancel()
+      queueRef.current = []
     }
   }, [setSpeaking])
 
-  // Speak using ElevenLabs
-  const speakElevenLabs = useCallback(async (text) => {
+  // Process speech queue
+  const processQueue = useCallback(() => {
+    if (queueRef.current.length === 0) return
+    if (isPlayingRef.current) return
+    
+    const next = queueRef.current.shift()
+    if (next) {
+      next()
+    }
+  }, [])
+
+  // Speak using ElevenLabs (internal)
+  const speakElevenLabsInternal = useCallback(async (text) => {
     try {
+      isPlayingRef.current = true
       setSpeaking(true, text)
 
       const response = await fetch('/api/tts', {
@@ -85,6 +112,11 @@ export function useSpeech() {
       const audioBlob = await response.blob()
       const audioUrl = URL.createObjectURL(audioBlob)
       
+      // Clean up previous URL
+      if (audioRef.current.src) {
+        URL.revokeObjectURL(audioRef.current.src)
+      }
+      
       audioRef.current.src = audioUrl
       await audioRef.current.play()
 
@@ -92,25 +124,23 @@ export function useSpeech() {
     } catch (err) {
       console.error('ElevenLabs error:', err)
       setError('Premium voice unavailable')
+      isPlayingRef.current = false
       setSpeaking(false, '')
       return false
     }
   }, [setSpeaking])
 
-  // Speak using native speech synthesis
-  const speakNative = useCallback((text) => {
+  // Speak using native (internal)
+  const speakNativeInternal = useCallback((text) => {
     if (!synthRef.current) return false
 
     try {
-      synthRef.current.cancel()
-
       const utterance = new SpeechSynthesisUtterance(text)
       
       if (voiceRef.current) {
         utterance.voice = voiceRef.current
       }
 
-      // Optimize for natural sound
       const modeSettings = {
         cruise: { rate: 0.95, pitch: 0.95 },
         fast: { rate: 1.0, pitch: 1.0 },
@@ -122,9 +152,20 @@ export function useSpeech() {
       utterance.pitch = pitch
       utterance.volume = 1.0
 
-      utterance.onstart = () => setSpeaking(true, text)
-      utterance.onend = () => setSpeaking(false, '')
-      utterance.onerror = () => setSpeaking(false, '')
+      utterance.onstart = () => {
+        isPlayingRef.current = true
+        setSpeaking(true, text)
+      }
+      utterance.onend = () => {
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+        processQueue()
+      }
+      utterance.onerror = () => {
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+        processQueue()
+      }
 
       synthRef.current.speak(utterance)
       return true
@@ -132,47 +173,69 @@ export function useSpeech() {
       console.error('Native speech error:', err)
       return false
     }
-  }, [mode, setSpeaking])
+  }, [mode, setSpeaking, processQueue])
 
-  // Main speak function - tries ElevenLabs first, falls back to native
+  // Main speak function with queue management
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled) return false
 
-    // Cancel any current speech
+    // High priority = clear queue and interrupt
     if (priority === 'high') {
-      audioRef.current?.pause()
+      queueRef.current = []
+      
+      // Stop current audio
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+      }
       synthRef.current?.cancel()
+      isPlayingRef.current = false
     }
 
-    // Try ElevenLabs first
+    // If something is playing, queue this one (unless high priority)
+    if (isPlayingRef.current && priority !== 'high') {
+      // Don't queue too many
+      if (queueRef.current.length < 2) {
+        queueRef.current.push(() => speak(text, 'normal'))
+      }
+      return true
+    }
+
+    // Try ElevenLabs
     if (useElevenLabs) {
-      const success = await speakElevenLabs(text)
+      const success = await speakElevenLabsInternal(text)
       if (success) return true
       
-      // If ElevenLabs fails, fall back to native
       console.log('Falling back to native voice')
       setUseElevenLabs(false)
     }
 
-    // Use native speech
-    return speakNative(text)
-  }, [settings.voiceEnabled, useElevenLabs, speakElevenLabs, speakNative])
+    // Fallback to native
+    return speakNativeInternal(text)
+  }, [settings.voiceEnabled, useElevenLabs, speakElevenLabsInternal, speakNativeInternal])
 
-  // Cancel speech
+  // Cancel all speech
   const cancel = useCallback(() => {
-    audioRef.current?.pause()
+    queueRef.current = []
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
     synthRef.current?.cancel()
+    isPlayingRef.current = false
     setSpeaking(false, '')
   }, [setSpeaking])
 
   // Test voice
   const test = useCallback(() => {
+    cancel() // Clear any existing
     speak('Left 3. Tightens. 45.', 'high')
-  }, [speak])
+  }, [speak, cancel])
 
-  // Toggle between ElevenLabs and native
+  // Toggle voice type
   const toggleVoiceType = useCallback(() => {
     setUseElevenLabs(prev => !prev)
+    setError(null)
   }, [])
 
   return {
@@ -208,7 +271,7 @@ export function generateCallout(curve, mode, speedUnit) {
   // Speed
   parts.push(String(displaySpeed))
 
-  // Use periods for natural pauses
+  // Periods create natural pauses in ElevenLabs
   return parts.join('. ') + '.'
 }
 
