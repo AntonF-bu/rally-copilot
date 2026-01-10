@@ -25,7 +25,10 @@ export function useRouteAnalysis() {
 
   // Process route and detect curves
   const processRoute = useCallback((coordinates) => {
-    if (!coordinates || coordinates.length < 3) return []
+    if (!coordinates || coordinates.length < 3) {
+      console.warn('Not enough coordinates to detect curves')
+      return []
+    }
     
     const curves = detectCurves(coordinates)
     console.log(`Detected ${curves.length} curves from ${coordinates.length} points`)
@@ -43,6 +46,8 @@ export function useRouteAnalysis() {
       return false
     }
 
+    console.log('Initializing destination route from', currentPosition, 'to', destinationQuery)
+
     try {
       // Geocode destination
       const results = await geocodeAddress(destinationQuery)
@@ -52,7 +57,7 @@ export function useRouteAnalysis() {
       }
 
       const destCoords = results[0].coordinates
-      console.log('Destination:', results[0].name, destCoords)
+      console.log('Destination coordinates:', destCoords)
 
       // Get route
       const route = await getRoute(currentPosition, destCoords)
@@ -61,7 +66,7 @@ export function useRouteAnalysis() {
         return false
       }
 
-      console.log('Route received:', route.coordinates.length, 'points')
+      console.log('Route received with', route.coordinates.length, 'points')
 
       // Process curves
       const curves = processRoute(route.coordinates)
@@ -74,6 +79,7 @@ export function useRouteAnalysis() {
         duration: route.duration
       })
 
+      console.log('Route data set successfully')
       return true
     } catch (error) {
       console.error('Error initializing destination route:', error)
@@ -83,7 +89,10 @@ export function useRouteAnalysis() {
 
   // Initialize route from Google Maps import
   const initImportedRoute = useCallback(async (url) => {
+    const currentPosition = useStore.getState().position
+
     try {
+      console.log('Parsing Google Maps URL...')
       const parsed = parseGoogleMapsUrl(url)
       
       if (!parsed) {
@@ -91,11 +100,25 @@ export function useRouteAnalysis() {
         return false
       }
 
+      console.log('Parsed result:', parsed)
+
       let waypoints = []
 
-      if (parsed.coordinates) {
+      if (parsed.coordinates && parsed.coordinates.length >= 2) {
+        // Have full coordinates
         waypoints = parsed.coordinates
+      } else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
+        // Only have destination, use current position as origin
+        if (currentPosition) {
+          waypoints = [currentPosition, parsed.coordinates[0]]
+        } else {
+          console.error('Need current position for route origin')
+          return false
+        }
       } else if (parsed.needsGeocoding) {
+        // Need to geocode place names
+        console.log('Geocoding places...')
+        
         if (parsed.origin && parsed.destination) {
           const originResults = await geocodeAddress(parsed.origin)
           const destResults = await geocodeAddress(parsed.destination)
@@ -103,20 +126,33 @@ export function useRouteAnalysis() {
           if (originResults?.length && destResults?.length) {
             waypoints = [originResults[0].coordinates, destResults[0].coordinates]
           }
+        } else if (parsed.destination) {
+          // Only destination, use current position
+          const destResults = await geocodeAddress(parsed.destination)
+          if (destResults?.length && currentPosition) {
+            waypoints = [currentPosition, destResults[0].coordinates]
+          }
         }
       }
 
+      console.log('Final waypoints:', waypoints)
+
       if (waypoints.length < 2) {
-        console.error('Could not extract waypoints from URL')
+        console.error('Could not extract enough waypoints')
         return false
       }
 
+      // Get route
+      console.log('Getting route from Mapbox...')
       const route = await getRouteWithWaypoints(waypoints)
       if (!route) {
-        console.error('Could not get route')
+        console.error('Could not get route from Mapbox')
         return false
       }
 
+      console.log('Route received with', route.coordinates.length, 'points')
+
+      // Process curves
       const curves = processRoute(route.coordinates)
       
       setRouteData({
@@ -127,6 +163,7 @@ export function useRouteAnalysis() {
         imported: true
       })
 
+      console.log('Imported route set successfully')
       return true
     } catch (error) {
       console.error('Error importing route:', error)
@@ -147,10 +184,12 @@ export function useRouteAnalysis() {
     }
 
     isFetchingRef.current = true
+    console.log('Fetching road ahead from', currentPosition)
 
     try {
       const route = await getRoadAhead(currentPosition, currentHeading || 0, 2000)
       if (route) {
+        console.log('Look-ahead route received with', route.coordinates.length, 'points')
         const curves = processRoute(route.coordinates)
         setRouteData({
           coordinates: route.coordinates,
@@ -166,9 +205,10 @@ export function useRouteAnalysis() {
     }
   }, [processRoute, setRouteData])
 
-  // Update upcoming curves based on position
+  // Update upcoming curves based on position (for non-demo modes)
   useEffect(() => {
-    if (!isRunning || !position || allCurvesRef.current.length === 0) return
+    if (!isRunning || !position || routeMode === 'demo') return
+    if (allCurvesRef.current.length === 0) return
 
     const upcoming = getUpcomingCurves(
       allCurvesRef.current,
@@ -184,7 +224,7 @@ export function useRouteAnalysis() {
     } else {
       setActiveCurve(null)
     }
-  }, [position, heading, isRunning, setUpcomingCurves, setActiveCurve])
+  }, [position, heading, isRunning, routeMode, setUpcomingCurves, setActiveCurve])
 
   // Look-ahead mode: periodically fetch
   useEffect(() => {
@@ -199,6 +239,7 @@ export function useRouteAnalysis() {
   useEffect(() => {
     if (routeData?.curves) {
       allCurvesRef.current = routeData.curves
+      console.log('Synced', routeData.curves.length, 'curves from route data')
     }
   }, [routeData])
 
