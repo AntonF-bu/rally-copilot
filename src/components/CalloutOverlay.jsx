@@ -2,65 +2,60 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Callout Overlay - Floating Card
-// Minimal, map-focused design
+// Callout Overlay - Premium Minimal Design
 // ================================
 
 export default function CalloutOverlay() {
-  const {
-    isRunning,
-    activeCurve,
-    upcomingCurves,
-    mode,
-    settings,
-    getRecommendedSpeed
-  } = useStore()
+  const { isRunning, activeCurve, upcomingCurves, mode, settings, getRecommendedSpeed } = useStore()
 
   const curve = activeCurve || upcomingCurves[0]
-  
   if (!isRunning || !curve) return null
 
   const recommendedSpeed = getRecommendedSpeed(curve)
   const isLeft = curve.direction === 'LEFT'
-  const color = isLeft ? '#00d4ff' : '#ff6b35'
   const severityColor = getCurveColor(curve.severity)
-  const distancePercent = Math.max(5, 100 - (curve.distance / 3))
+  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+  
+  // Progress calculation (inverse - fills as you get closer)
+  const maxDistance = 400
+  const progress = Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100))
 
   return (
     <div className="absolute top-0 left-0 right-0 p-4 safe-top z-20 pointer-events-none">
-      {/* Main Callout Card */}
-      <div 
-        className="bg-black/80 backdrop-blur-xl rounded-2xl p-4 border border-white/10 pointer-events-auto"
-        style={{ 
-          boxShadow: `0 4px 30px ${color}30`
-        }}
-      >
-        <div className="flex items-center justify-between">
-          {/* Direction Arrow + Severity */}
+      {/* Main Card */}
+      <div className="bg-black/80 backdrop-blur-md rounded-xl overflow-hidden border border-white/[0.06]">
+        {/* Content */}
+        <div className="px-4 py-3 flex items-center justify-between">
+          {/* Left: Direction + Severity */}
           <div className="flex items-center gap-3">
+            {/* Direction indicator */}
             <div 
-              className="text-4xl"
-              style={{ color }}
+              className="w-10 h-10 rounded-lg flex items-center justify-center"
+              style={{ background: `${severityColor}15`, border: `1.5px solid ${severityColor}40` }}
             >
-              {isLeft ? '←' : '→'}
+              <svg 
+                width="22" 
+                height="22" 
+                viewBox="0 0 24 24" 
+                fill={severityColor}
+                style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
+              >
+                <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+              </svg>
             </div>
+            
+            {/* Severity */}
             <div>
               <div 
-                className="text-3xl font-black"
-                style={{ color: severityColor, fontFamily: 'Orbitron, system-ui' }}
+                className="text-3xl font-semibold tracking-tight"
+                style={{ fontFamily: '-apple-system, system-ui', color: severityColor }}
               >
                 {curve.severity}
               </div>
               {curve.modifier && (
                 <div 
-                  className="text-xs font-bold tracking-wider"
-                  style={{ 
-                    color: curve.modifier === 'TIGHTENS' || curve.modifier === 'HAIRPIN' 
-                      ? '#ff3366' 
-                      : curve.modifier === 'OPENS' 
-                        ? '#00ff88' 
-                        : '#ffd500'
-                  }}
+                  className="text-[10px] font-semibold tracking-wide"
+                  style={{ color: severityColor }}
                 >
                   {curve.modifier}
                 </div>
@@ -68,65 +63,72 @@ export default function CalloutOverlay() {
             </div>
           </div>
 
-          {/* Speed Recommendation */}
+          {/* Center: Distance */}
+          <div className="text-center">
+            <div className="text-2xl font-medium text-white/90" style={{ fontFamily: '-apple-system, system-ui' }}>
+              {curve.distance}
+            </div>
+            <div className="text-[9px] text-white/30 font-medium tracking-widest">METERS</div>
+          </div>
+
+          {/* Right: Speed */}
           <div className="text-right">
             <div 
-              className="text-4xl font-black"
-              style={{ color: getModeColor(mode), fontFamily: 'Orbitron, system-ui' }}
+              className="text-3xl font-semibold tracking-tight"
+              style={{ fontFamily: '-apple-system, system-ui', color: modeColors[mode] }}
             >
               {recommendedSpeed}
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-[9px] text-white/30 font-medium tracking-widest">
               {settings.speedUnit.toUpperCase()}
             </div>
           </div>
         </div>
 
-        {/* Distance Bar */}
-        <div className="mt-3">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>{curve.distance}m</span>
-          </div>
-          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-            <div 
-              className="h-full rounded-full transition-all duration-200"
-              style={{
-                width: `${distancePercent}%`,
-                background: 'linear-gradient(90deg, #00ff88, #ffd500, #ff3366)'
-              }}
-            />
-          </div>
+        {/* Progress bar */}
+        <div className="h-[3px] bg-white/[0.06]">
+          <div 
+            className="h-full transition-all duration-150 ease-out"
+            style={{ 
+              width: `${progress}%`,
+              background: `linear-gradient(90deg, ${severityColor}60, ${severityColor})`
+            }}
+          />
         </div>
       </div>
 
-      {/* Next Curve Preview (compact) */}
+      {/* Upcoming curves - minimal pills */}
       {upcomingCurves.length > 1 && (
-        <div className="flex gap-2 mt-2">
-          {upcomingCurves.slice(1, 3).map((next) => (
-            <div 
-              key={next.id}
-              className="bg-black/60 backdrop-blur rounded-lg px-3 py-1.5 flex items-center gap-2 pointer-events-auto"
-            >
-              <span 
-                className="text-sm font-bold"
-                style={{ 
-                  color: next.direction === 'LEFT' ? '#00d4ff' : '#ff6b35',
-                  fontFamily: 'Orbitron, system-ui'
-                }}
+        <div className="flex gap-2 mt-2 justify-center">
+          {upcomingCurves.slice(1, 4).map((next) => {
+            const nextColor = getCurveColor(next.severity)
+            const nextIsLeft = next.direction === 'LEFT'
+            return (
+              <div 
+                key={next.id}
+                className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-2.5 py-1.5 rounded-md border border-white/[0.06]"
               >
-                {next.direction[0]}{next.severity}
-              </span>
-              <span className="text-xs text-gray-400">
-                {next.distance}m
-              </span>
-            </div>
-          ))}
+                <svg 
+                  width="10" 
+                  height="10" 
+                  viewBox="0 0 24 24" 
+                  fill={nextColor}
+                  style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
+                >
+                  <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                </svg>
+                <span 
+                  className="text-xs font-semibold"
+                  style={{ fontFamily: '-apple-system, system-ui', color: nextColor }}
+                >
+                  {next.severity}
+                </span>
+                <span className="text-[10px] text-white/30">{next.distance}m</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
   )
-}
-
-function getModeColor(mode) {
-  return { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }[mode] || '#00d4ff'
 }
