@@ -65,7 +65,8 @@ const useStore = create((set, get) => ({
   stopDrive: () => set({ 
     isRunning: false,
     activeCurve: null,
-    upcomingCurves: []
+    upcomingCurves: [],
+    simulationProgress: 0
   }),
   
   setMode: (mode) => set({ mode }),
@@ -119,7 +120,7 @@ const useStore = create((set, get) => ({
   },
 
   // ================================
-  // Reset
+  // Reset - Full reset to route selector
   // ================================
   resetToRouteSelector: () => set({
     showRouteSelector: true,
@@ -129,7 +130,21 @@ const useStore = create((set, get) => ({
     simulationProgress: 0,
     upcomingCurves: [],
     activeCurve: null,
-    lastAnnouncedCurveId: null
+    lastAnnouncedCurveId: null,
+    speed: 0,
+    heading: 0
+    // Note: we keep 'position' so GPS location persists
+  }),
+
+  // ================================
+  // Clear route data only (for mode switching)
+  // ================================
+  clearRouteData: () => set({
+    routeData: null,
+    upcomingCurves: [],
+    activeCurve: null,
+    lastAnnouncedCurveId: null,
+    simulationProgress: 0
   })
 }))
 
