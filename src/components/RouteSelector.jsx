@@ -13,7 +13,8 @@ export default function RouteSelector() {
     setShowRouteSelector, 
     startDrive,
     position,
-    setPosition
+    setPosition,
+    clearRouteData
   } = useStore()
   
   const { initDestinationRoute, initImportedRoute } = useRouteAnalysis()
@@ -74,6 +75,9 @@ export default function RouteSelector() {
     }
 
     try {
+      // Clear any previous route data first
+      clearRouteData()
+      
       setRouteMode('destination')
       const success = await initDestinationRoute(dest.name)
       
@@ -99,6 +103,9 @@ export default function RouteSelector() {
       return
     }
     
+    // Clear any previous route data first
+    clearRouteData()
+    
     setRouteMode('lookahead')
     setShowRouteSelector(false)
     startDrive()
@@ -112,6 +119,9 @@ export default function RouteSelector() {
     setIsLoading(true)
 
     try {
+      // Clear any previous route data first
+      clearRouteData()
+      
       setRouteMode('imported')
       const result = await initImportedRoute(importUrl)
       
@@ -134,6 +144,9 @@ export default function RouteSelector() {
 
   // Handle demo mode
   const handleDemo = () => {
+    // Clear any previous route data first
+    clearRouteData()
+    
     setRouteMode('demo')
     setShowRouteSelector(false)
     startDrive()
