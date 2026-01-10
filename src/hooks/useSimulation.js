@@ -60,44 +60,60 @@ export function useSimulation() {
   }, [route])
 
   // Calculate upcoming curves from current position
-  // Only returns curves that are AHEAD of the car on the route
+  // Uses ROUTE DISTANCE (along the road), not straight-line distance
   const calculateUpcomingCurves = useCallback((currentPos, currentProgress) => {
     const curves = route.curves
     const upcoming = []
     const coords = route.coordinates
 
-    // Find which curves are ahead based on route progress
+    // Calculate total route length
+    let totalRouteLength = 0
+    const segmentLengths = []
+    for (let i = 0; i < coords.length - 1; i++) {
+      const segLen = getDistance(coords[i], coords[i + 1])
+      segmentLengths.push(segLen)
+      totalRouteLength += segLen
+    }
+
+    // Current distance along route
+    const currentRouteDistance = currentProgress * totalRouteLength
+
+    // For each curve, calculate its distance along the route
     for (const curve of curves) {
-      // Calculate where this curve is on the route (0-1)
-      // by finding the closest point on the route to the curve
+      // Find which segment the curve is on
       let minDist = Infinity
-      let curveProgress = 0
+      let curveSegmentIndex = 0
       
       for (let i = 0; i < coords.length; i++) {
         const dist = getDistance(coords[i], curve.position)
         if (dist < minDist) {
           minDist = dist
-          curveProgress = i / (coords.length - 1)
+          curveSegmentIndex = i
         }
       }
 
-      // Only include if curve is ahead of current position
-      if (curveProgress > currentProgress) {
-        const distance = getDistance(currentPos, curve.position)
-        
-        if (distance < 1000) { // Within 1km
-          upcoming.push({
-            ...curve,
-            distance: Math.round(distance),
-            routeProgress: curveProgress
-          })
-        }
+      // Calculate curve's distance along route
+      let curveRouteDistance = 0
+      for (let i = 0; i < curveSegmentIndex; i++) {
+        curveRouteDistance += segmentLengths[i]
+      }
+
+      // Distance from current position to curve (along route)
+      const distanceToCurve = curveRouteDistance - currentRouteDistance
+
+      // Only include curves that are ahead (positive distance)
+      if (distanceToCurve > 0 && distanceToCurve < 1500) {
+        upcoming.push({
+          ...curve,
+          distance: Math.round(distanceToCurve),
+          routeProgress: curveRouteDistance / totalRouteLength
+        })
       }
     }
 
-    // Sort by route progress (not distance) to ensure correct order
+    // Sort by distance along route
     return upcoming
-      .sort((a, b) => a.routeProgress - b.routeProgress)
+      .sort((a, b) => a.distance - b.distance)
       .slice(0, 5)
   }, [route])
 
