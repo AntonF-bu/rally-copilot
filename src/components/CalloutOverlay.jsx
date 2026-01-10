@@ -3,7 +3,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Racing HUD - Compact Design
+// Racing HUD - v3
+// Shows chicanes, modifiers (tightens/opens), sequences
 // ================================
 
 export default function CalloutOverlay() {
@@ -31,7 +32,7 @@ export default function CalloutOverlay() {
     return { show: true, start: 40 }
   }
 
-  // Generate elevation data from route or use placeholder
+  // Generate elevation data
   const { elevationData, totalElevation, currentElevation } = useMemo(() => {
     const coords = routeData?.coordinates || []
     const points = []
@@ -44,14 +45,12 @@ export default function CalloutOverlay() {
       for (let i = 0; i < numPoints; i++) {
         const idx = Math.floor((i / numPoints) * coords.length)
         const coord = coords[Math.min(idx, coords.length - 1)]
-        // Simulated elevation based on coordinates
         const elev = 800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100
         points.push(elev)
         minElev = Math.min(minElev, elev)
         maxElev = Math.max(maxElev, elev)
       }
     } else {
-      // Placeholder data
       for (let i = 0; i < numPoints; i++) {
         const elev = 800 + Math.sin(i * 0.5) * 100
         points.push(elev)
@@ -136,6 +135,18 @@ export default function CalloutOverlay() {
   const progress = curve ? Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100)) : 0
   const inBrakingZone = brakingZone.show && progress >= brakingZone.start
 
+  // Get modifier display text
+  const getModifierDisplay = (modifier) => {
+    switch (modifier) {
+      case 'HAIRPIN': return 'HAIRPIN'
+      case 'SHARP': return 'SHARP'
+      case 'LONG': return 'LONG'
+      case 'TIGHTENS': return 'TIGHTENS'
+      case 'OPENS': return 'OPENS'
+      default: return null
+    }
+  }
+
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       
@@ -147,36 +158,64 @@ export default function CalloutOverlay() {
               
               {/* Direction + Severity */}
               <div className="flex items-center gap-3">
-                <div 
-                  className="w-12 h-12 rounded-xl flex items-center justify-center"
-                  style={{ 
-                    background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
-                    border: `1.5px solid ${severityColor}50`,
-                    boxShadow: `0 0 20px ${severityColor}30`
-                  }}
-                >
-                  <svg 
-                    width="28" height="28" viewBox="0 0 24 24" 
-                    fill={severityColor}
-                    style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
-                  >
-                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                  </svg>
-                </div>
-                
-                <div className="flex flex-col">
+                {curve.isChicane ? (
+                  // Chicane display
                   <div 
-                    className="text-4xl font-bold tracking-tight leading-none"
-                    style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
+                    className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
+                    style={{ 
+                      background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+                      border: `1.5px solid ${severityColor}50`,
+                      boxShadow: `0 0 20px ${severityColor}30`
+                    }}
                   >
-                    {curve.severity}
+                    <span className="text-[10px] font-bold tracking-wider" style={{ color: severityColor }}>
+                      {curve.chicaneType === 'CHICANE' ? 'CHICANE' : 'S-CURVE'}
+                    </span>
+                    <span className="text-lg font-bold" style={{ color: severityColor }}>
+                      {curve.startDirection === 'LEFT' ? '←' : '→'} {curve.severitySequence}
+                    </span>
                   </div>
-                  {curve.modifier && (
-                    <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: severityColor }}>
-                      {curve.modifier}
+                ) : (
+                  // Regular curve display
+                  <>
+                    <div 
+                      className="w-12 h-12 rounded-xl flex items-center justify-center"
+                      style={{ 
+                        background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+                        border: `1.5px solid ${severityColor}50`,
+                        boxShadow: `0 0 20px ${severityColor}30`
+                      }}
+                    >
+                      <svg 
+                        width="28" height="28" viewBox="0 0 24 24" 
+                        fill={severityColor}
+                        style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
+                      >
+                        <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                      </svg>
                     </div>
-                  )}
-                </div>
+                    
+                    <div className="flex flex-col">
+                      <div 
+                        className="text-4xl font-bold tracking-tight leading-none"
+                        style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
+                      >
+                        {curve.severity}
+                      </div>
+                      {curve.modifier && (
+                        <div 
+                          className="text-[10px] font-bold tracking-wider mt-0.5"
+                          style={{ 
+                            color: curve.modifier === 'TIGHTENS' ? '#f97316' : 
+                                   curve.modifier === 'OPENS' ? '#22c55e' : severityColor 
+                          }}
+                        >
+                          {getModifierDisplay(curve.modifier)}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Progress Bar */}
@@ -247,6 +286,19 @@ export default function CalloutOverlay() {
             {upcomingCurves.slice(1, 4).map((next) => {
               const nextColor = getCurveColor(next.severity)
               const nextIsLeft = next.direction === 'LEFT'
+              
+              if (next.isChicane) {
+                return (
+                  <div key={next.id} className="flex items-center gap-2">
+                    <span className="text-[9px] font-bold" style={{ color: nextColor }}>
+                      {next.chicaneType === 'CHICANE' ? 'CH' : 'S'}{next.startDirection === 'LEFT' ? '←' : '→'}
+                    </span>
+                    <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severitySequence}</span>
+                    <span className="text-[10px] text-white/30">{next.distance}m</span>
+                  </div>
+                )
+              }
+              
               return (
                 <div key={next.id} className="flex items-center gap-2">
                   <svg 
@@ -257,6 +309,14 @@ export default function CalloutOverlay() {
                     <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
                   </svg>
                   <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severity}</span>
+                  {next.modifier && (
+                    <span className="text-[8px]" style={{ 
+                      color: next.modifier === 'TIGHTENS' ? '#f97316' : 
+                             next.modifier === 'OPENS' ? '#22c55e' : nextColor 
+                    }}>
+                      {next.modifier === 'TIGHTENS' ? '⟩' : next.modifier === 'OPENS' ? '⟨' : ''}
+                    </span>
+                  )}
                   <span className="text-[10px] text-white/30">{next.distance}m</span>
                 </div>
               )
@@ -265,7 +325,7 @@ export default function CalloutOverlay() {
         </div>
       )}
 
-      {/* Elevation - Right side, fixed size */}
+      {/* Elevation - Right side */}
       <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
