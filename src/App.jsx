@@ -35,6 +35,7 @@ export default function App() {
 
   // ================================
   // Callout Logic - Distance-based triggering
+  // Triggers 200-400m before curve
   // ================================
   
   useEffect(() => {
@@ -47,19 +48,17 @@ export default function App() {
       return
     }
 
-    // Calculate announce distance based on speed
-    // At 30mph (~13m/s), 5 seconds = ~65m
-    // At 60mph (~27m/s), 5 seconds = ~135m
-    // We'll use a minimum of 150m and scale with speed
-    const speedMps = (currentSpeed * 1609.34) / 3600 // Convert mph to m/s
-    const announceDistance = Math.max(150, speedMps * settings.calloutTiming)
-    
-    // Add GPS lag offset (convert seconds to approximate meters)
-    const adjustedDistance = announceDistance + (settings.gpsLagOffset * speedMps)
+    // Fixed announce distance: 250m minimum, or 6 seconds at current speed
+    const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10) // min 10 m/s
+    const timeBasedDistance = speedMps * settings.calloutTiming
+    const announceDistance = Math.max(250, timeBasedDistance)
 
-    // Announce when curve is within trigger distance
-    // But not if we're already past it (distance < 20m)
-    if (nextCurve.distance <= adjustedDistance && nextCurve.distance > 20) {
+    // Debug log
+    console.log(`Curve ${nextCurve.id}: dist=${nextCurve.distance}m, trigger=${Math.round(announceDistance)}m`)
+
+    // Trigger when within announce distance
+    if (nextCurve.distance <= announceDistance) {
+      console.log(`🎤 Announcing curve ${nextCurve.id}`)
       const callout = generateCallout(nextCurve, mode, settings.speedUnit)
       speak(callout, 'high')
       setLastAnnouncedCurveId(nextCurve.id)
