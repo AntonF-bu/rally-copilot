@@ -4,8 +4,9 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v8
-// Fixed: Recenter button always shows when needed
+// Map Component - v9
+// Mode changes only update colors, not view
+// Recenter button always visible when panned
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -14,12 +15,13 @@ export default function Map() {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const userMarker = useRef(null)
+  const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const routeAddedRef = useRef(false)
   
   const [mapLoaded, setMapLoaded] = useState(false)
-  const [isFollowing, setIsFollowing] = useState(true)
   const [showRecenter, setShowRecenter] = useState(false)
+  const isFollowingRef = useRef(true)
   
   const {
     position,
@@ -35,7 +37,7 @@ export default function Map() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Initialize map ONCE
+  // Initialize map ONCE - empty dependency array
   useEffect(() => {
     if (map.current) return
 
@@ -43,9 +45,7 @@ export default function Map() {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: settings.mapStyle === 'satellite' 
-        ? 'mapbox://styles/mapbox/satellite-streets-v12'
-        : 'mapbox://styles/mapbox/dark-v11',
+      style: 'mapbox://styles/mapbox/dark-v11',
       center: startCoord,
       zoom: 16,
       pitch: 65,
@@ -57,101 +57,102 @@ export default function Map() {
       setMapLoaded(true)
       
       // 3D terrain
-      map.current.addSource('mapbox-dem', {
-        type: 'raster-dem',
-        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-        tileSize: 512,
-        maxzoom: 14
-      })
-      map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 })
+      try {
+        map.current.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14
+        })
+        map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 })
 
-      // Sky
-      map.current.addLayer({
-        id: 'sky',
-        type: 'sky',
-        paint: {
-          'sky-type': 'atmosphere',
-          'sky-atmosphere-sun': [0.0, 90.0],
-          'sky-atmosphere-sun-intensity': 15
-        }
-      })
+        map.current.addLayer({
+          id: 'sky',
+          type: 'sky',
+          paint: {
+            'sky-type': 'atmosphere',
+            'sky-atmosphere-sun': [0.0, 90.0],
+            'sky-atmosphere-sun-intensity': 15
+          }
+        })
+      } catch (e) {
+        console.log('Terrain setup error:', e)
+      }
     })
 
-    // Detect ANY user interaction to show recenter button
-    const handleUserInteraction = () => {
-      setIsFollowing(false)
+    // User interaction = show recenter button
+    const showRecenterBtn = () => {
+      isFollowingRef.current = false
       setShowRecenter(true)
     }
 
-    map.current.on('dragstart', handleUserInteraction)
+    map.current.on('dragstart', showRecenterBtn)
     map.current.on('zoomstart', (e) => {
-      if (e.originalEvent) handleUserInteraction()
+      if (e.originalEvent) showRecenterBtn()
     })
-    map.current.on('pitchstart', handleUserInteraction)
-    map.current.on('rotatestart', handleUserInteraction)
+    map.current.on('pitchstart', showRecenterBtn)
+    map.current.on('rotatestart', showRecenterBtn)
 
     return () => {
       map.current?.remove()
       map.current = null
-      routeAddedRef.current = false
     }
-  }, [])
+  }, []) // EMPTY - only run once
 
-  // Add route when map is loaded and we have route data
+  // Add route to map when loaded
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     if (!routeData?.coordinates?.length) return
     if (routeAddedRef.current) return
 
     try {
-      if (map.current.getLayer('route-glow')) map.current.removeLayer('route-glow')
-      if (map.current.getLayer('route-line')) map.current.removeLayer('route-line')
-      if (map.current.getSource('route')) map.current.removeSource('route')
-    } catch (e) {}
-
-    map.current.addSource('route', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: routeData.coordinates
+      map.current.addSource('route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: routeData.coordinates
+          }
         }
-      }
-    })
+      })
 
-    map.current.addLayer({
-      id: 'route-glow',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': modeColor,
-        'line-width': 14,
-        'line-blur': 10,
-        'line-opacity': 0.4
-      }
-    })
+      map.current.addLayer({
+        id: 'route-glow',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#00d4ff',
+          'line-width': 14,
+          'line-blur': 10,
+          'line-opacity': 0.4
+        }
+      })
 
-    map.current.addLayer({
-      id: 'route-line',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': modeColor,
-        'line-width': 5,
-        'line-opacity': 0.9
-      }
-    })
+      map.current.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#00d4ff',
+          'line-width': 5,
+          'line-opacity': 0.9
+        }
+      })
 
-    routeAddedRef.current = true
+      routeAddedRef.current = true
+      console.log('Route added with', routeData.coordinates.length, 'points')
+    } catch (e) {
+      console.log('Route add error:', e)
+    }
   }, [mapLoaded, routeData])
 
-  // Update route color when mode changes
+  // Update route color when mode changes - ONLY color, nothing else
   useEffect(() => {
-    if (!map.current || !mapLoaded || !routeAddedRef.current) return
+    if (!map.current || !mapLoaded) return
     
     try {
       if (map.current.getLayer('route-line')) {
@@ -161,50 +162,58 @@ export default function Map() {
         map.current.setPaintProperty('route-glow', 'line-color', modeColor)
       }
     } catch (e) {}
+    
+    // Update marker color too
+    if (userMarkerEl.current) {
+      const circles = userMarkerEl.current.querySelectorAll('div')
+      const arrow = userMarkerEl.current.querySelector('#heading-arrow')
+      if (circles[0]) circles[0].style.borderColor = modeColor
+      if (circles[2]) {
+        circles[2].style.background = modeColor
+        circles[2].style.boxShadow = `0 2px 15px ${modeColor}80`
+      }
+      if (arrow) {
+        arrow.style.borderBottomColor = modeColor
+      }
+    }
   }, [modeColor, mapLoaded])
 
-  // Create user marker
+  // Create user marker ONCE
   useEffect(() => {
     if (!map.current || !mapLoaded) return
-
-    if (userMarker.current) {
-      userMarker.current.remove()
-    }
+    if (userMarker.current) return // Already created
 
     const el = document.createElement('div')
     el.innerHTML = `
       <div style="position: relative; width: 44px; height: 44px;">
         <div style="
-          position: absolute;
-          inset: 0;
-          border: 2px solid ${modeColor};
+          position: absolute; inset: 0;
+          border: 2px solid #00d4ff;
           border-radius: 50%;
           animation: pulse 2s ease-out infinite;
         "></div>
         <div id="heading-arrow" style="
-          position: absolute;
-          top: -8px;
-          left: 50%;
+          position: absolute; top: -8px; left: 50%;
           transform: translateX(-50%);
-          width: 0;
-          height: 0;
+          width: 0; height: 0;
           border-left: 10px solid transparent;
           border-right: 10px solid transparent;
-          border-bottom: 18px solid ${modeColor};
+          border-bottom: 18px solid #00d4ff;
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
         "></div>
         <div style="
-          position: absolute;
-          inset: 10px;
-          background: ${modeColor};
+          position: absolute; inset: 10px;
+          background: #00d4ff;
           border-radius: 50%;
           border: 3px solid white;
-          box-shadow: 0 2px 15px ${modeColor}80;
+          box-shadow: 0 2px 15px #00d4ff80;
         "></div>
       </div>
     `
+    
+    userMarkerEl.current = el
 
-    const startPos = position || routeData?.coordinates?.[0] || [-71.0589, 42.3601]
+    const startPos = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
     
     userMarker.current = new mapboxgl.Marker({
       element: el,
@@ -214,7 +223,7 @@ export default function Map() {
       .setLngLat(startPos)
       .addTo(map.current)
 
-  }, [mapLoaded, modeColor])
+  }, [mapLoaded])
 
   // Update position and camera
   useEffect(() => {
@@ -223,17 +232,19 @@ export default function Map() {
     if (position) {
       userMarker.current.setLngLat(position)
 
-      const el = userMarker.current.getElement()
-      const arrow = el?.querySelector('#heading-arrow')
-      if (arrow) {
-        arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
+      // Update heading arrow rotation
+      if (userMarkerEl.current) {
+        const arrow = userMarkerEl.current.querySelector('#heading-arrow')
+        if (arrow) {
+          arrow.style.transform = `translateX(-50%) rotate(${heading || 0}deg)`
+        }
       }
 
-      // Only auto-follow if following is enabled
-      if (isRunning && isFollowing) {
+      // Follow camera if enabled
+      if (isRunning && isFollowingRef.current) {
         map.current.easeTo({
           center: position,
-          bearing: heading,
+          bearing: heading || 0,
           pitch: 65,
           zoom: 16,
           duration: 100,
@@ -241,16 +252,16 @@ export default function Map() {
         })
       }
     }
-  }, [position, heading, isRunning, isFollowing, mapLoaded])
+  }, [position, heading, isRunning, mapLoaded])
 
-  // Recenter function
+  // Recenter handler
   const handleRecenter = useCallback(() => {
     if (!map.current) return
     
     const centerPos = position || routeData?.coordinates?.[0]
     if (!centerPos) return
     
-    setIsFollowing(true)
+    isFollowingRef.current = true
     setShowRecenter(false)
     
     map.current.easeTo({
@@ -355,7 +366,7 @@ export default function Map() {
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Recenter Button - ALWAYS visible when showRecenter is true */}
+      {/* Recenter Button */}
       {showRecenter && (
         <button
           onClick={handleRecenter}
