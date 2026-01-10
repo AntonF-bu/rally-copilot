@@ -5,7 +5,7 @@ import { MOHAWK_TRAIL, getCurveColor } from '../data/routes'
 
 // ================================
 // Map - Dark Racing Style
-// Optimized for HUD overlay
+// Supports both demo and real routes
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
@@ -20,9 +20,25 @@ export default function Map() {
   const [isFollowing, setIsFollowing] = useState(true)
   const [mapStyle, setMapStyle] = useState('dark')
   
-  const { position, heading, isRunning, upcomingCurves, activeCurve, mode } = useStore()
+  const { 
+    position, 
+    heading, 
+    isRunning, 
+    upcomingCurves, 
+    activeCurve, 
+    mode,
+    routeMode,
+    routeData
+  } = useStore()
 
-  const route = MOHAWK_TRAIL
+  // Use real route data if available, otherwise demo route
+  const getRouteCoordinates = () => {
+    if (routeData?.coordinates && routeData.coordinates.length > 0) {
+      return routeData.coordinates
+    }
+    return MOHAWK_TRAIL.coordinates
+  }
+
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
 
   const mapStyles = {
@@ -30,14 +46,17 @@ export default function Map() {
     satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
   }
 
-  // Initialize
+  // Initialize map
   useEffect(() => {
     if (map.current) return
+
+    const coordinates = getRouteCoordinates()
+    const startPosition = position || coordinates[0]
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: mapStyles[mapStyle],
-      center: route.coordinates[0],
+      center: startPosition,
       zoom: 15.5,
       pitch: 60,
       bearing: 0,
@@ -74,7 +93,7 @@ export default function Map() {
         data: { 
           type: 'Feature', 
           properties: {}, 
-          geometry: { type: 'LineString', coordinates: route.coordinates }
+          geometry: { type: 'LineString', coordinates: coordinates }
         }
       })
 
@@ -119,7 +138,35 @@ export default function Map() {
     map.current.on('zoomstart', (e) => { if (e.originalEvent) setIsFollowing(false) })
 
     return () => { map.current?.remove(); map.current = null }
-  }, [route])
+  }, [])
+
+  // Update route when routeData changes
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+
+    const coordinates = getRouteCoordinates()
+    const source = map.current.getSource('route')
+    
+    if (source) {
+      source.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: coordinates }
+      })
+
+      // Fit map to route bounds for non-demo modes
+      if (routeMode !== 'demo' && routeData?.coordinates?.length > 0) {
+        const bounds = coordinates.reduce((bounds, coord) => {
+          return bounds.extend(coord)
+        }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]))
+
+        map.current.fitBounds(bounds, {
+          padding: { top: 150, bottom: 200, left: 50, right: 50 },
+          duration: 1000
+        })
+      }
+    }
+  }, [routeData, mapLoaded, routeMode])
 
   // Style change handler
   useEffect(() => {
@@ -129,8 +176,10 @@ export default function Map() {
         map.current.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 })
       }
       map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.8 })
+      
+      const coordinates = getRouteCoordinates()
       if (!map.current.getSource('route')) {
-        map.current.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.coordinates }}})
+        map.current.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coordinates }}})
       }
       const color = modeColors[mode] || modeColors.cruise
       if (!map.current.getLayer('route-glow-outer')) {
@@ -148,6 +197,10 @@ export default function Map() {
   // User marker
   useEffect(() => {
     if (!map.current || !mapLoaded) return
+    
+    const coordinates = getRouteCoordinates()
+    const startPos = position || coordinates[0]
+    
     const el = document.createElement('div')
     el.innerHTML = `
       <div style="position:relative;width:48px;height:48px;filter:drop-shadow(0 4px 12px rgba(255,107,53,0.5))">
@@ -160,9 +213,9 @@ export default function Map() {
         <div style="position:absolute;inset:12px;background:linear-gradient(145deg,#ff6b35,#e55a2b);border-radius:50%;border:3px solid #fff;box-shadow:0 0 20px rgba(255,107,53,0.6)"></div>
       </div>
     `
-    userMarker.current = new mapboxgl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(route.coordinates[0]).addTo(map.current)
+    userMarker.current = new mapboxgl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(startPos).addTo(map.current)
     return () => userMarker.current?.remove()
-  }, [mapLoaded, route])
+  }, [mapLoaded])
 
   // Position updates
   useEffect(() => {
