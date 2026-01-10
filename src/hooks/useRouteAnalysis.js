@@ -6,6 +6,7 @@ import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWit
 // ================================
 // Route Analysis Hook
 // With rerouting support
+// Fixed: Also handles demo mode curves
 // ================================
 
 export function useRouteAnalysis() {
@@ -67,7 +68,6 @@ export function useRouteAnalysis() {
       return false
     }
 
-    // Throttle rerouting (max once per 10 seconds)
     const now = Date.now()
     if (now - lastRerouteTimeRef.current < 10000) {
       console.log('Reroute throttled')
@@ -117,7 +117,6 @@ export function useRouteAnalysis() {
     console.log('Initializing destination route from', currentPosition, 'to', destinationQuery)
 
     try {
-      // Geocode destination
       const results = await geocodeAddress(destinationQuery)
       if (!results || results.length === 0) {
         console.error('Could not find destination')
@@ -127,13 +126,11 @@ export function useRouteAnalysis() {
       const destCoords = results[0].coordinates
       console.log('Destination coordinates:', destCoords)
 
-      // Store destination for rerouting
       destinationRef.current = {
         name: results[0].name,
         coordinates: destCoords
       }
 
-      // Get route
       const route = await getRoute(currentPosition, destCoords)
       if (!route) {
         console.error('Could not get route')
@@ -142,7 +139,6 @@ export function useRouteAnalysis() {
 
       console.log('Route received with', route.coordinates.length, 'points')
 
-      // Process curves
       const curves = processRoute(route.coordinates)
       
       setRouteData({
@@ -153,13 +149,21 @@ export function useRouteAnalysis() {
         duration: route.duration
       })
 
+      // Set initial upcoming curves
+      if (curves.length > 0) {
+        setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
+          ...c,
+          distance: c.distanceFromStart || (i * 200 + 100)
+        })))
+      }
+
       console.log('Route data set successfully')
       return true
     } catch (error) {
       console.error('Error initializing destination route:', error)
       return false
     }
-  }, [processRoute, setRouteData])
+  }, [processRoute, setRouteData, setUpcomingCurves])
 
   // Initialize route from Google Maps import
   const initImportedRoute = useCallback(async (url) => {
@@ -168,7 +172,6 @@ export function useRouteAnalysis() {
     try {
       console.log('Processing Google Maps URL...')
       
-      // Check if it's a short URL that needs expanding
       let fullUrl = url
       if (url.includes('goo.gl') || url.includes('maps.app.goo.gl')) {
         console.log('Short URL detected, expanding...')
@@ -194,11 +197,9 @@ export function useRouteAnalysis() {
 
       let waypoints = []
 
-      // Case 1: Both coordinates available
       if (parsed.coordinates && parsed.coordinates.length >= 2) {
         waypoints = parsed.coordinates
       }
-      // Case 2: Only one coordinate, need current position as origin
       else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
         if (currentPosition) {
           waypoints = [currentPosition, parsed.coordinates[0]]
@@ -207,7 +208,6 @@ export function useRouteAnalysis() {
           return false
         }
       }
-      // Case 3: Origin coords + destination needs geocoding
       else if (parsed.originCoordinates && parsed.destination) {
         console.log('Geocoding destination:', parsed.destination)
         const destResults = await geocodeAddress(parsed.destination)
@@ -219,7 +219,6 @@ export function useRouteAnalysis() {
           }
         }
       }
-      // Case 4: Destination coords + origin needs geocoding
       else if (parsed.destinationCoordinates && parsed.origin) {
         console.log('Geocoding origin:', parsed.origin)
         const originResults = await geocodeAddress(parsed.origin)
@@ -231,7 +230,6 @@ export function useRouteAnalysis() {
           }
         }
       }
-      // Case 5: Both need geocoding
       else if (parsed.needsGeocoding) {
         console.log('Geocoding both origin and destination...')
         
@@ -247,7 +245,6 @@ export function useRouteAnalysis() {
             }
           }
         } else if (parsed.destination) {
-          // Only destination, use current position
           const destResults = await geocodeAddress(parsed.destination)
           if (destResults?.length && currentPosition) {
             waypoints = [currentPosition, destResults[0].coordinates]
@@ -266,7 +263,6 @@ export function useRouteAnalysis() {
         return false
       }
 
-      // Store final destination for rerouting if not already set
       if (!destinationRef.current) {
         destinationRef.current = {
           name: 'Destination',
@@ -293,13 +289,21 @@ export function useRouteAnalysis() {
         imported: true
       })
 
+      // Set initial upcoming curves
+      if (curves.length > 0) {
+        setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
+          ...c,
+          distance: c.distanceFromStart || (i * 200 + 100)
+        })))
+      }
+
       console.log('Imported route set successfully')
       return true
     } catch (error) {
       console.error('Error importing route:', error)
       return false
     }
-  }, [processRoute, setRouteData])
+  }, [processRoute, setRouteData, setUpcomingCurves])
 
   // Look-ahead mode: fetch road ahead
   const fetchRoadAhead = useCallback(async () => {
@@ -342,12 +346,10 @@ export function useRouteAnalysis() {
 
     const distanceFromRoute = getDistanceFromRoute(position, routeData.coordinates)
     
-    // If more than 50 meters from route
     if (distanceFromRoute > 50) {
       offRouteCountRef.current++
       console.log(`Off route: ${Math.round(distanceFromRoute)}m (count: ${offRouteCountRef.current})`)
       
-      // If consistently off route for 3+ checks, reroute
       if (offRouteCountRef.current >= 3) {
         console.log('🚨 Off route detected, initiating reroute...')
         reroute()
@@ -357,10 +359,16 @@ export function useRouteAnalysis() {
     }
   }, [position, isRunning, routeMode, routeData, getDistanceFromRoute, reroute])
 
-  // Update upcoming curves based on position (for non-demo modes)
+  // Update upcoming curves based on position (for ALL modes including demo)
   useEffect(() => {
-    if (!isRunning || !position || routeMode === 'demo') return
+    if (!isRunning || !position) return
+    if (allCurvesRef.current.length === 0 && routeData?.curves?.length > 0) {
+      allCurvesRef.current = routeData.curves
+    }
     if (allCurvesRef.current.length === 0) return
+
+    // For demo mode, useSimulation handles curves - skip here
+    if (routeMode === 'demo') return
 
     const upcoming = getUpcomingCurves(
       allCurvesRef.current,
@@ -376,7 +384,7 @@ export function useRouteAnalysis() {
     } else {
       setActiveCurve(null)
     }
-  }, [position, heading, isRunning, routeMode, setUpcomingCurves, setActiveCurve])
+  }, [position, heading, isRunning, routeMode, routeData, setUpcomingCurves, setActiveCurve])
 
   // Look-ahead mode: periodically fetch
   useEffect(() => {
