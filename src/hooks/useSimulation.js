@@ -1,96 +1,98 @@
 import { useEffect, useRef } from 'react'
 import useStore from '../store'
-import { MOHAWK_TRAIL } from '../data/routes'
-import { detectCurves, getUpcomingCurves } from '../utils/curveDetection'
+import { WESTON_DEMO_ROUTE } from '../data/westonRoute'
 
 // ================================
-// Simulation Hook (Demo Mode Only)
+// Simulation Hook - Demo Mode
+// Uses the Weston route (Boston → Campion Center)
 // ================================
 
-export function useSimulation(enabled = true) {
+export function useSimulation(enabled = false) {
   const {
     isRunning,
-    routeMode,
     setPosition,
     setHeading,
     setSpeed,
     setSimulationProgress,
-    setUpcomingCurves,
-    setActiveCurve
+    routeData,
+    setRouteData,
+    setRouteMode
   } = useStore()
 
   const animationRef = useRef(null)
   const progressRef = useRef(0)
-  const curvesRef = useRef([])
+  const lastTimeRef = useRef(0)
 
-  // Only run for demo mode
-  const shouldRun = enabled && routeMode === 'demo'
-
-  // Detect curves from demo route on mount
+  // Set up demo route data when simulation starts
   useEffect(() => {
-    if (!shouldRun) return
-    
-    const curves = detectCurves(MOHAWK_TRAIL.coordinates)
-    curvesRef.current = curves
-    console.log(`Demo mode: Detected ${curves.length} curves`)
-  }, [shouldRun])
+    if (enabled && isRunning && !routeData) {
+      console.log('Setting up demo route with Weston data')
+      setRouteData({
+        name: WESTON_DEMO_ROUTE.name,
+        coordinates: WESTON_DEMO_ROUTE.coordinates,
+        distance: WESTON_DEMO_ROUTE.distance,
+        duration: WESTON_DEMO_ROUTE.duration
+      })
+      setRouteMode('demo')
+    }
+  }, [enabled, isRunning, routeData, setRouteData, setRouteMode])
 
+  // Animation loop
   useEffect(() => {
-    if (!isRunning || !shouldRun) {
+    if (!enabled || !isRunning) {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
+        animationRef.current = null
       }
       return
     }
 
-    const route = MOHAWK_TRAIL
-    const coordinates = route.coordinates
-    const totalPoints = coordinates.length
+    const coordinates = routeData?.coordinates || WESTON_DEMO_ROUTE.coordinates
+    if (!coordinates || coordinates.length < 2) return
 
-    // Simulation speeds (points per frame at 60fps)
-    const speeds = { cruise: 0.15, fast: 0.25, race: 0.35 }
+    // Simulate driving speed (adjust for demo)
+    const SIMULATION_SPEED = 0.0003 // Progress per frame at 60fps (~15 min route in ~2 min)
 
-    const animate = () => {
-      const { mode } = useStore.getState()
-      const speed = speeds[mode] || speeds.cruise
+    const animate = (timestamp) => {
+      if (!lastTimeRef.current) lastTimeRef.current = timestamp
+      const delta = timestamp - lastTimeRef.current
+      lastTimeRef.current = timestamp
 
-      progressRef.current += speed / 60
-      if (progressRef.current >= totalPoints - 1) {
-        progressRef.current = 0
+      // Update progress
+      progressRef.current += SIMULATION_SPEED * (delta / 16.67) // Normalize to 60fps
+      
+      if (progressRef.current >= 1) {
+        progressRef.current = 0 // Loop back
       }
 
-      const index = Math.floor(progressRef.current)
-      const nextIndex = Math.min(index + 1, totalPoints - 1)
-      const fraction = progressRef.current - index
+      setSimulationProgress(progressRef.current)
+
+      // Calculate current position along route
+      const totalSegments = coordinates.length - 1
+      const exactIndex = progressRef.current * totalSegments
+      const segmentIndex = Math.floor(exactIndex)
+      const segmentProgress = exactIndex - segmentIndex
+
+      const startCoord = coordinates[Math.min(segmentIndex, coordinates.length - 1)]
+      const endCoord = coordinates[Math.min(segmentIndex + 1, coordinates.length - 1)]
 
       // Interpolate position
-      const currentPos = coordinates[index]
-      const nextPos = coordinates[nextIndex]
-      const position = [
-        currentPos[0] + (nextPos[0] - currentPos[0]) * fraction,
-        currentPos[1] + (nextPos[1] - currentPos[1]) * fraction
-      ]
+      const lng = startCoord[0] + (endCoord[0] - startCoord[0]) * segmentProgress
+      const lat = startCoord[1] + (endCoord[1] - startCoord[1]) * segmentProgress
+
+      setPosition([lng, lat])
 
       // Calculate heading
-      const heading = getBearing(currentPos, nextPos)
-
-      // Simulated speed based on mode
-      const simSpeed = mode === 'race' ? 65 : mode === 'fast' ? 50 : 35
-
-      setPosition(position)
+      const dLng = endCoord[0] - startCoord[0]
+      const dLat = endCoord[1] - startCoord[1]
+      const heading = (Math.atan2(dLng, dLat) * 180 / Math.PI + 360) % 360
       setHeading(heading)
-      setSpeed(simSpeed + Math.sin(progressRef.current * 0.5) * 10)
-      setSimulationProgress(progressRef.current / totalPoints)
 
-      // Update upcoming curves
-      const upcoming = getUpcomingCurves(curvesRef.current, position, heading, 1000)
-      setUpcomingCurves(upcoming)
-
-      if (upcoming.length > 0 && upcoming[0].distance < 300) {
-        setActiveCurve(upcoming[0])
-      } else {
-        setActiveCurve(null)
-      }
+      // Simulate speed (vary based on curves - slower near tight curves)
+      // Base speed around 35-50 mph for demo
+      const baseSpeed = 42
+      const speedVariation = Math.sin(progressRef.current * Math.PI * 20) * 8
+      setSpeed(Math.max(25, baseSpeed + speedVariation))
 
       animationRef.current = requestAnimationFrame(animate)
     }
@@ -100,24 +102,20 @@ export function useSimulation(enabled = true) {
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
+        animationRef.current = null
       }
     }
-  }, [isRunning, shouldRun, setPosition, setHeading, setSpeed, setSimulationProgress, setUpcomingCurves, setActiveCurve])
+  }, [enabled, isRunning, routeData, setPosition, setHeading, setSpeed, setSimulationProgress])
+
+  // Reset on stop
+  useEffect(() => {
+    if (!isRunning) {
+      progressRef.current = 0
+      lastTimeRef.current = 0
+    }
+  }, [isRunning])
 
   return null
-}
-
-// Helper: Calculate bearing between two points
-function getBearing(from, to) {
-  const dLon = (to[0] - from[0]) * Math.PI / 180
-  const lat1 = from[1] * Math.PI / 180
-  const lat2 = to[1] * Math.PI / 180
-
-  const y = Math.sin(dLon) * Math.cos(lat2)
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
-
-  let bearing = Math.atan2(y, x) * 180 / Math.PI
-  return (bearing + 360) % 360
 }
 
 export default useSimulation
