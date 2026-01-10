@@ -15,8 +15,8 @@ import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
 
 // ================================
-// Rally Co-Pilot App - v5
-// Stop → Preview instead of Menu
+// Rally Co-Pilot App - v6
+// Simplified - BottomBar handles navigation
 // ================================
 
 export default function App() {
@@ -34,16 +34,13 @@ export default function App() {
     setShowRoutePreview,
     setShowRouteSelector,
     routeMode,
-    routeData,
     startDrive,
-    stopDrive
+    clearRouteData
   } = useStore()
 
-  // Track announced curves
   const announcedCurvesRef = useRef(new Set())
   const lastCalloutTimeRef = useRef(0)
   
-  // Use simulation for demo mode, geolocation for real driving
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
   useGeolocation(!isDemoMode && isRunning)
@@ -151,26 +148,7 @@ export default function App() {
   const handleBackFromPreview = () => {
     setShowRoutePreview(false)
     setShowRouteSelector(true)
-  }
-
-  // Handle stop - go to PREVIEW (not menu) if we have route data
-  const handleStop = () => {
-    stopDrive()
-    announcedCurvesRef.current = new Set()
-    
-    // Go to preview if we have route data, otherwise go to menu
-    if (routeData?.coordinates?.length > 0) {
-      setShowRoutePreview(true)
-    } else {
-      setShowRouteSelector(true)
-    }
-  }
-
-  // Handle back button - go to menu
-  const handleBack = () => {
-    stopDrive()
-    announcedCurvesRef.current = new Set()
-    setShowRouteSelector(true)
+    clearRouteData()
   }
 
   // SCREEN 1: Route Selector
@@ -194,7 +172,7 @@ export default function App() {
       <Map />
       <CalloutOverlay />
       <VoiceIndicator />
-      <BottomBar onStop={handleStop} onBack={handleBack} />
+      <BottomBar />
       <SettingsPanel />
     </div>
   )
