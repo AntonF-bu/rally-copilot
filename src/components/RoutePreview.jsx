@@ -5,7 +5,7 @@ import { getCurveColor } from '../data/routes'
 
 // ================================
 // Route Preview Screen
-// Shows ALL curves on map
+// v3: Shows chicanes, modifiers, improved markers
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
@@ -24,7 +24,8 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     distance: routeData?.distance ? (routeData.distance / 1609.34).toFixed(1) : 0,
     duration: routeData?.duration ? Math.round(routeData.duration / 60) : 0,
     curves: routeData?.curves?.length || 0,
-    sharpCurves: routeData?.curves?.filter(c => c.severity >= 4).length || 0
+    sharpCurves: routeData?.curves?.filter(c => c.severity >= 4).length || 0,
+    chicanes: routeData?.curves?.filter(c => c.isChicane).length || 0
   }
 
   const severityBreakdown = {
@@ -80,7 +81,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       }, new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
 
       map.current.fitBounds(bounds, {
-        padding: { top: 100, bottom: 280, left: 40, right: 40 },
+        padding: { top: 100, bottom: 320, left: 40, right: 40 },
         duration: 1000
       })
 
@@ -94,36 +95,67 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       endEl.innerHTML = `<div style="width: 24px; height: 24px; background: #ef4444; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 10px rgba(239,68,68,0.5);"></div>`
       new mapboxgl.Marker({ element: endEl }).setLngLat(routeData.coordinates[routeData.coordinates.length - 1]).addTo(map.current)
 
-      // *** ALL CURVE MARKERS ***
-      console.log('Adding curve markers:', routeData.curves?.length || 0)
-      
+      // Curve markers
       if (routeData.curves && routeData.curves.length > 0) {
-        routeData.curves.forEach((curve, index) => {
+        routeData.curves.forEach((curve) => {
           const el = document.createElement('div')
           const color = getCurveColor(curve.severity)
-          const isLeft = curve.direction === 'LEFT'
           
-          console.log(`Curve ${index + 1}: severity ${curve.severity}, position:`, curve.position)
-          
-          el.innerHTML = `
-            <div style="
-              display: flex; 
-              align-items: center; 
-              gap: 2px; 
-              background: rgba(10,10,15,0.95); 
-              padding: 4px 8px; 
-              border-radius: 8px; 
-              border: 1.5px solid ${color}; 
-              box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-            ">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
-                <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-              </svg>
-              <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 12px; color: ${color}">
-                ${curve.severity}
-              </span>
-            </div>
-          `
+          if (curve.isChicane) {
+            // Chicane/S-curve marker
+            const dirChar = curve.startDirection === 'LEFT' ? '←' : '→'
+            const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
+            
+            el.innerHTML = `
+              <div style="
+                display: flex; 
+                flex-direction: column;
+                align-items: center; 
+                background: rgba(10,10,15,0.95); 
+                padding: 4px 8px; 
+                border-radius: 8px; 
+                border: 2px solid ${color}; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+              ">
+                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 10px; color: ${color}; letter-spacing: 1px;">
+                  ${typeLabel}${dirChar}
+                </span>
+                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 11px; color: ${color};">
+                  ${curve.severitySequence}
+                </span>
+              </div>
+            `
+          } else {
+            // Regular curve marker
+            const isLeft = curve.direction === 'LEFT'
+            let modifierText = ''
+            
+            if (curve.modifier === 'TIGHTENS') modifierText = '⟩'
+            else if (curve.modifier === 'OPENS') modifierText = '⟨'
+            else if (curve.modifier === 'HAIRPIN') modifierText = '↩'
+            else if (curve.modifier === 'LONG') modifierText = '―'
+            
+            el.innerHTML = `
+              <div style="
+                display: flex; 
+                align-items: center; 
+                gap: 2px; 
+                background: rgba(10,10,15,0.95); 
+                padding: 4px 8px; 
+                border-radius: 8px; 
+                border: 1.5px solid ${color}; 
+                box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+              ">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
+                  <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                </svg>
+                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 12px; color: ${color}">
+                  ${curve.severity}
+                </span>
+                ${modifierText ? `<span style="font-size: 10px; color: ${color}; margin-left: 1px;">${modifierText}</span>` : ''}
+              </div>
+            `
+          }
           
           new mapboxgl.Marker({ element: el })
             .setLngLat(curve.position)
@@ -161,7 +193,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             </div>
           )}
 
-          <div className="grid grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-4 gap-3 mb-3">
             <div className="bg-white/5 rounded-xl p-3 text-center">
               <div className="text-2xl font-bold text-white">{routeStats.distance}</div>
               <div className="text-[10px] text-white/40 tracking-wider">MILES</div>
@@ -179,6 +211,28 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
               <div className="text-[10px] text-white/40 tracking-wider">SHARP</div>
             </div>
           </div>
+
+          {/* Additional stats row */}
+          {routeStats.chicanes > 0 && (
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <div className="flex items-center gap-1 text-[11px]">
+                <span className="text-purple-400 font-semibold">S-curves:</span>
+                <span className="text-white/60">{routeStats.chicanes}</span>
+              </div>
+              {routeData.curves?.filter(c => c.modifier === 'TIGHTENS').length > 0 && (
+                <div className="flex items-center gap-1 text-[11px]">
+                  <span className="text-orange-400 font-semibold">Tightens:</span>
+                  <span className="text-white/60">{routeData.curves.filter(c => c.modifier === 'TIGHTENS').length}</span>
+                </div>
+              )}
+              {routeData.curves?.filter(c => c.modifier === 'OPENS').length > 0 && (
+                <div className="flex items-center gap-1 text-[11px]">
+                  <span className="text-green-400 font-semibold">Opens:</span>
+                  <span className="text-white/60">{routeData.curves.filter(c => c.modifier === 'OPENS').length}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-2 mb-5">
             <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden flex">
