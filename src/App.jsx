@@ -29,13 +29,19 @@ export default function App() {
     setLastAnnouncedCurveId,
     getDisplaySpeed,
     showRouteSelector,
-    routeMode
+    routeMode,
+    routeData
   } = useStore()
 
-  // Initialize hooks based on mode
-  useSimulation() // For demo mode
-  useGeolocation() // For real GPS modes
-  useRouteAnalysis() // For route processing
+  // Only use simulation for demo mode
+  const isDemoMode = routeMode === 'demo'
+  useSimulation(isDemoMode)
+  
+  // Use real GPS for other modes
+  useGeolocation()
+  
+  // Route analysis for all modes
+  useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
 
