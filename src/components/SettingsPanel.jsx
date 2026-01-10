@@ -1,241 +1,328 @@
+import { useState } from 'react'
 import useStore from '../store'
 import { useSpeech } from '../hooks/useSpeech'
 
 // ================================
-// Settings Panel - Slide-up Modal
+// Settings Panel - Complete Overhaul
 // ================================
 
 export default function SettingsPanel() {
-  const {
-    showSettings,
-    settings,
-    updateSettings,
-    toggleSettings
-  } = useStore()
-
   const { 
-    test: testVoice, 
-    error: voiceError,
-    useElevenLabs,
-    toggleVoiceType
-  } = useSpeech()
+    showSettings, 
+    toggleSettings, 
+    settings, 
+    updateSettings,
+    mode,
+    setMode
+  } = useStore()
+  
+  const { speak } = useSpeech()
+  const [testPlaying, setTestPlaying] = useState(false)
 
   if (!showSettings) return null
 
+  const handleTestVoice = async () => {
+    setTestPlaying(true)
+    await speak('Left 4 tightens into right 3', 'high')
+    setTimeout(() => setTestPlaying(false), 2000)
+  }
+
+  const timingOptions = [
+    { value: 4, label: '4s (Early)' },
+    { value: 6, label: '6s (Normal)' },
+    { value: 8, label: '8s (Late)' },
+    { value: 10, label: '10s (Very Early)' },
+  ]
+
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={toggleSettings}
       />
       
       {/* Panel */}
-      <div 
-        className="absolute bottom-0 left-0 right-0 bg-[#0a0a0f] border-t border-white/10 rounded-t-3xl safe-bottom"
-        style={{ animation: 'slideUp 0.3s ease-out' }}
-      >
-        <div className="p-6 max-h-[70vh] overflow-y-auto">
-          {/* Handle */}
-          <div className="flex justify-center mb-4">
-            <div className="w-10 h-1 bg-white/20 rounded-full" />
-          </div>
+      <div className="relative w-full max-w-lg bg-[#0d0d12] rounded-t-3xl border-t border-white/10 overflow-hidden safe-bottom">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h2 className="text-lg font-bold text-white">Settings</h2>
+          <button 
+            onClick={toggleSettings}
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
 
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold">Settings</h2>
-            <button 
-              onClick={toggleSettings}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-
+        {/* Content */}
+        <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+          
           {/* Voice Section */}
-          <Section title="VOICE">
-            {voiceError && (
-              <div className="mb-3 p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-sm text-red-400">
-                ⚠️ {voiceError}
-              </div>
+          <div className="mb-6">
+            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">VOICE</div>
+            
+            {/* Voice Enabled */}
+            <SettingRow 
+              label="Voice Callouts"
+              description="Announce upcoming curves"
+            >
+              <Toggle 
+                enabled={settings.voiceEnabled} 
+                onChange={(v) => updateSettings({ voiceEnabled: v })}
+              />
+            </SettingRow>
+
+            {/* Volume Slider */}
+            {settings.voiceEnabled && (
+              <SettingRow label="Volume">
+                <div className="flex items-center gap-3 w-40">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={settings.volume || 1}
+                    onChange={(e) => updateSettings({ volume: parseFloat(e.target.value) })}
+                    className="flex-1 accent-cyan-500"
+                  />
+                  <span className="text-white/60 text-sm w-8">
+                    {Math.round((settings.volume || 1) * 100)}%
+                  </span>
+                </div>
+              </SettingRow>
             )}
 
-            <button 
-              onClick={testVoice}
-              className="w-full py-3 bg-green-500/20 text-green-400 rounded-xl font-medium hover:bg-green-500/30 transition-colors mb-4 border border-green-500/30"
-            >
-              🔊 Test Voice
-            </button>
-
-            <div className="flex items-center justify-between py-3 mb-2">
-              <div>
-                <span className="text-sm text-gray-200">Premium Voice</span>
-                <p className="text-xs text-gray-500">ElevenLabs AI voice</p>
-              </div>
-              <button 
-                onClick={toggleVoiceType}
-                className={`w-12 h-7 rounded-full transition-all relative ${
-                  useElevenLabs ? 'bg-cyan-500' : 'bg-gray-600'
-                }`}
-              >
-                <div 
-                  className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${
-                    useElevenLabs ? 'left-6' : 'left-1'
+            {/* Test Voice */}
+            {settings.voiceEnabled && (
+              <SettingRow label="Test Voice">
+                <button
+                  onClick={handleTestVoice}
+                  disabled={testPlaying}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    testPlaying 
+                      ? 'bg-cyan-500/20 text-cyan-400' 
+                      : 'bg-white/10 text-white hover:bg-white/20'
                   }`}
-                />
-              </button>
-            </div>
-
-            <Toggle
-              label="Voice Callouts"
-              value={settings.voiceEnabled}
-              onChange={(v) => updateSettings({ voiceEnabled: v })}
-            />
-          </Section>
+                >
+                  {testPlaying ? 'Playing...' : 'Play Sample'}
+                </button>
+              </SettingRow>
+            )}
+          </div>
 
           {/* Timing Section */}
-          <Section title="TIMING">
-            <Slider
+          <div className="mb-6">
+            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">TIMING</div>
+            
+            <SettingRow 
               label="Callout Timing"
-              value={settings.calloutTiming}
-              min={2}
-              max={10}
-              suffix="s before"
-              onChange={(v) => updateSettings({ calloutTiming: v })}
-            />
-
-            <Slider
-              label="GPS Lag Offset"
-              value={settings.gpsLagOffset}
-              min={-3}
-              max={3}
-              step={0.5}
-              suffix="s"
-              showSign
-              onChange={(v) => updateSettings({ gpsLagOffset: v })}
-            />
-            <p className="text-xs text-gray-600 -mt-2 mb-4">
-              Positive = earlier callouts, Negative = later
-            </p>
-          </Section>
+              description="How far ahead to announce curves"
+            >
+              <select
+                value={settings.calloutTiming || 6}
+                onChange={(e) => updateSettings({ calloutTiming: parseInt(e.target.value) })}
+                className="bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-cyan-500"
+              >
+                {timingOptions.map(opt => (
+                  <option key={opt.value} value={opt.value} className="bg-[#1a1a1f]">
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+          </div>
 
           {/* Display Section */}
-          <Section title="DISPLAY">
-            <SegmentPicker
-              label="Speed Unit"
-              value={settings.speedUnit}
-              options={[
-                { id: 'mph', label: 'MPH' },
-                { id: 'kmh', label: 'KM/H' }
-              ]}
-              onChange={(v) => updateSettings({ speedUnit: v })}
-            />
+          <div className="mb-6">
+            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">DISPLAY</div>
+            
+            {/* Speed Unit */}
+            <SettingRow label="Speed Unit">
+              <div className="flex bg-white/10 rounded-lg p-1">
+                <button
+                  onClick={() => updateSettings({ speedUnit: 'mph' })}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    settings.speedUnit === 'mph' 
+                      ? 'bg-cyan-500 text-black' 
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  MPH
+                </button>
+                <button
+                  onClick={() => updateSettings({ speedUnit: 'kmh' })}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    settings.speedUnit === 'kmh' 
+                      ? 'bg-cyan-500 text-black' 
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  KMH
+                </button>
+              </div>
+            </SettingRow>
 
-            <Toggle
+            {/* Map Style */}
+            <SettingRow label="Map Style">
+              <div className="flex bg-white/10 rounded-lg p-1">
+                <button
+                  onClick={() => updateSettings({ mapStyle: 'dark' })}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    (settings.mapStyle || 'dark') === 'dark' 
+                      ? 'bg-cyan-500 text-black' 
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  Dark
+                </button>
+                <button
+                  onClick={() => updateSettings({ mapStyle: 'satellite' })}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    settings.mapStyle === 'satellite' 
+                      ? 'bg-cyan-500 text-black' 
+                      : 'text-white/60 hover:text-white'
+                  }`}
+                >
+                  Satellite
+                </button>
+              </div>
+            </SettingRow>
+
+            {/* Keep Screen On */}
+            <SettingRow 
+              label="Keep Screen On"
+              description="Prevent display from sleeping"
+            >
+              <Toggle 
+                enabled={settings.keepScreenOn !== false} 
+                onChange={(v) => updateSettings({ keepScreenOn: v })}
+              />
+            </SettingRow>
+          </div>
+
+          {/* Feedback Section */}
+          <div className="mb-6">
+            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">FEEDBACK</div>
+            
+            {/* Haptic Feedback */}
+            <SettingRow 
               label="Haptic Feedback"
-              value={settings.hapticFeedback}
-              onChange={(v) => updateSettings({ hapticFeedback: v })}
-            />
-          </Section>
+              description="Vibrate on curve callouts"
+            >
+              <Toggle 
+                enabled={settings.hapticFeedback || false} 
+                onChange={(v) => updateSettings({ hapticFeedback: v })}
+              />
+            </SettingRow>
+          </div>
 
-          {/* Version */}
-          <div className="text-center text-xs text-gray-600 pt-4 border-t border-white/10">
-            Rally Co-Pilot v0.2.0
+          {/* Driving Mode Section */}
+          <div className="mb-6">
+            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">DRIVING MODE</div>
+            
+            <div className="grid grid-cols-3 gap-2">
+              <ModeButton 
+                mode="cruise" 
+                currentMode={mode} 
+                setMode={setMode}
+                icon="🛣️"
+                label="Cruise"
+                color="#00d4ff"
+              />
+              <ModeButton 
+                mode="fast" 
+                currentMode={mode} 
+                setMode={setMode}
+                icon="🏁"
+                label="Fast"
+                color="#ffd500"
+              />
+              <ModeButton 
+                mode="race" 
+                currentMode={mode} 
+                setMode={setMode}
+                icon="🔥"
+                label="Race"
+                color="#ff3366"
+              />
+            </div>
+            <p className="text-white/30 text-xs mt-2">
+              {mode === 'cruise' && 'Relaxed driving with conservative speed recommendations'}
+              {mode === 'fast' && 'Spirited driving with moderate speed recommendations'}
+              {mode === 'race' && 'Aggressive driving with maximum speed recommendations'}
+            </p>
+          </div>
+
+          {/* Info */}
+          <div className="text-center text-white/20 text-xs py-4 border-t border-white/5">
+            Rally Co-Pilot v1.0 • Use responsibly
           </div>
         </div>
       </div>
-
-      <style>{`
-        @keyframes slideUp {
-          from { transform: translateY(100%); }
-          to { transform: translateY(0); }
-        }
-      `}</style>
     </div>
   )
 }
 
-// ================================
-// Helper Components
-// ================================
-
-function Section({ title, children }) {
+// Setting Row Component
+function SettingRow({ label, description, children }) {
   return (
-    <div className="mb-6">
-      <h3 className="text-xs text-gray-500 tracking-widest mb-3">{title}</h3>
+    <div className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
+      <div className="flex-1 mr-4">
+        <div className="text-white text-sm font-medium">{label}</div>
+        {description && (
+          <div className="text-white/40 text-xs mt-0.5">{description}</div>
+        )}
+      </div>
       {children}
     </div>
   )
 }
 
-function Toggle({ label, value, onChange }) {
+// Toggle Component
+function Toggle({ enabled, onChange }) {
   return (
-    <div className="flex items-center justify-between py-3">
-      <span className="text-sm text-gray-200">{label}</span>
-      <button 
-        onClick={() => onChange(!value)}
-        className={`w-12 h-7 rounded-full transition-all relative ${
-          value ? 'bg-green-500' : 'bg-gray-600'
+    <button
+      onClick={() => onChange(!enabled)}
+      className={`relative w-12 h-7 rounded-full transition-colors ${
+        enabled ? 'bg-cyan-500' : 'bg-white/20'
+      }`}
+    >
+      <div 
+        className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-transform ${
+          enabled ? 'left-6' : 'left-1'
         }`}
-      >
-        <div 
-          className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${
-            value ? 'left-6' : 'left-1'
-          }`}
-        />
-      </button>
-    </div>
+      />
+    </button>
   )
 }
 
-function Slider({ label, value, min, max, step = 1, suffix = '', showSign, onChange }) {
-  const display = showSign && value > 0 ? `+${value}` : value
+// Mode Button Component
+function ModeButton({ mode, currentMode, setMode, icon, label, color }) {
+  const isActive = currentMode === mode
   
   return (
-    <div className="py-3">
-      <div className="flex justify-between text-sm mb-2">
-        <span className="text-gray-200">{label}</span>
-        <span className="text-gray-400">{display}{suffix}</span>
-      </div>
-      <input 
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-2 bg-white/10 rounded-full appearance-none cursor-pointer
-          [&::-webkit-slider-thumb]:appearance-none
-          [&::-webkit-slider-thumb]:w-5
-          [&::-webkit-slider-thumb]:h-5
-          [&::-webkit-slider-thumb]:rounded-full
-          [&::-webkit-slider-thumb]:bg-cyan-500
-          [&::-webkit-slider-thumb]:shadow-lg
-          [&::-webkit-slider-thumb]:cursor-pointer"
-      />
-    </div>
-  )
-}
-
-function SegmentPicker({ label, value, options, onChange }) {
-  return (
-    <div className="flex items-center justify-between py-3">
-      <span className="text-sm text-gray-200">{label}</span>
-      <div className="flex bg-white/5 rounded-lg p-1">
-        {options.map(opt => (
-          <button
-            key={opt.id}
-            onClick={() => onChange(opt.id)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-              value === opt.id 
-                ? 'bg-cyan-500/30 text-cyan-400' 
-                : 'text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      onClick={() => setMode(mode)}
+      className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 transition-all ${
+        isActive 
+          ? 'bg-white/10' 
+          : 'bg-transparent border-transparent hover:bg-white/5'
+      }`}
+      style={{ 
+        borderColor: isActive ? color : 'transparent',
+        boxShadow: isActive ? `0 0 20px ${color}30` : 'none'
+      }}
+    >
+      <span className="text-xl">{icon}</span>
+      <span 
+        className="text-xs font-semibold"
+        style={{ color: isActive ? color : 'rgba(255,255,255,0.5)' }}
+      >
+        {label}
+      </span>
+    </button>
   )
 }
