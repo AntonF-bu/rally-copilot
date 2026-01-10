@@ -45,7 +45,7 @@ export default function RouteSelector() {
     }
   }, [setPosition])
 
-  // Search for destinations as user types
+  // Search for destinations
   useEffect(() => {
     if (!destination || destination.length < 3) {
       setSearchResults([])
@@ -113,14 +113,16 @@ export default function RouteSelector() {
 
     try {
       setRouteMode('imported')
-      const success = await initImportedRoute(importUrl)
+      const result = await initImportedRoute(importUrl)
       
-      if (success) {
+      if (result === true) {
         setShowImport(false)
         setShowRouteSelector(false)
         startDrive()
+      } else if (result && result.error === 'SHORT_URL') {
+        setError(result.message)
       } else {
-        setError('Could not parse route from URL. Make sure it\'s a valid Google Maps link.')
+        setError('Could not parse route. Please use the full URL from your browser address bar (not a shortened link).')
       }
     } catch (err) {
       setError('Error importing route. Please try again.')
@@ -270,7 +272,6 @@ export default function RouteSelector() {
               autoFocus
             />
 
-            {/* Search Results */}
             <div className="flex-1 overflow-auto mt-3">
               {isSearching && (
                 <div className="text-white/40 text-sm text-center py-4">Searching...</div>
@@ -319,17 +320,26 @@ export default function RouteSelector() {
                 </svg>
               </button>
             </div>
-            <p className="text-white/40 text-sm mb-3">
-              Open Google Maps → Plan a route → Share → Copy link
-            </p>
+            
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-3">
+              <p className="text-yellow-400/80 text-xs">
+                <strong>How to get the URL:</strong><br/>
+                1. Open Google Maps and create your route<br/>
+                2. Click Share → Copy link<br/>
+                3. Open the link in your browser<br/>
+                4. Copy the full URL from the address bar
+              </p>
+            </div>
+
             <input
               type="text"
               value={importUrl}
               onChange={(e) => setImportUrl(e.target.value)}
-              placeholder="Paste Google Maps link..."
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50"
+              placeholder="Paste the full Google Maps URL..."
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 text-sm"
               autoFocus
             />
+            
             <button
               onClick={handleImport}
               disabled={!importUrl.trim() || isLoading}
