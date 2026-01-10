@@ -1,6 +1,6 @@
 // ================================
 // Curve Detection Algorithm
-// Analyzes road geometry to find curves
+// Improved: Lower thresholds, better sensitivity
 // ================================
 
 /**
@@ -20,26 +20,46 @@ export function detectCurves(coordinates) {
     headings.push(getBearing(coordinates[i], coordinates[i + 1]))
   }
 
+  // Calculate cumulative distance at each point
+  const distances = [0]
+  for (let i = 1; i < coordinates.length; i++) {
+    distances.push(distances[i - 1] + getDistance(coordinates[i - 1], coordinates[i]))
+  }
+
   // Analyze heading changes to find curves
+  // LOWERED THRESHOLD: 8 degrees instead of 15
+  const CURVE_START_THRESHOLD = 8
+  const CURVE_CONTINUE_THRESHOLD = 5
+
   let i = 0
   while (i < headings.length - 1) {
     const headingChange = getHeadingChange(headings[i], headings[i + 1])
     
     // If heading change is significant, we're entering a curve
-    if (Math.abs(headingChange) > 15) {
-      // Find the extent of this curve
+    if (Math.abs(headingChange) > CURVE_START_THRESHOLD) {
       let curveStart = i
       let curveEnd = i + 1
       let totalHeadingChange = headingChange
       
-      // Keep going while still turning
+      // Keep going while still turning in same direction
       while (curveEnd < headings.length - 1) {
         const nextChange = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
         
         // Same direction turn and still significant
-        if (Math.sign(nextChange) === Math.sign(headingChange) && Math.abs(nextChange) > 8) {
+        if (Math.sign(nextChange) === Math.sign(headingChange) && Math.abs(nextChange) > CURVE_CONTINUE_THRESHOLD) {
           totalHeadingChange += nextChange
           curveEnd++
+        } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
+          // Small change, might be mid-curve - check if we continue turning after
+          const lookAhead = curveEnd + 2 < headings.length ? 
+            getHeadingChange(headings[curveEnd + 1], headings[curveEnd + 2]) : 0
+          
+          if (Math.sign(lookAhead) === Math.sign(headingChange) && Math.abs(lookAhead) > CURVE_CONTINUE_THRESHOLD) {
+            totalHeadingChange += nextChange
+            curveEnd++
+          } else {
+            break
+          }
         } else {
           break
         }
@@ -49,26 +69,33 @@ export function detectCurves(coordinates) {
       const curveCoords = coordinates.slice(curveStart, curveEnd + 2)
       const curveLength = calculatePathLength(curveCoords)
       const radius = estimateRadius(curveLength, Math.abs(totalHeadingChange))
-      const severity = getSeverityFromRadius(radius)
+      const severity = getSeverityFromRadius(radius, Math.abs(totalHeadingChange))
       const direction = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
       
       // Get the apex (middle) of the curve
       const apexIndex = Math.floor((curveStart + curveEnd) / 2)
       const position = coordinates[Math.min(apexIndex, coordinates.length - 1)]
 
+      // Calculate distance from start
+      const distanceFromStart = distances[curveStart]
+
       // Determine modifier
       const modifier = getModifier(totalHeadingChange, severity, curveLength)
 
-      curves.push({
-        id: curveId++,
-        position,
-        direction,
-        severity,
-        modifier,
-        radius: Math.round(radius),
-        totalAngle: Math.round(Math.abs(totalHeadingChange)),
-        ...getSpeedRecommendations(severity, radius)
-      })
+      // Only add if it's a meaningful curve (skip very gentle ones)
+      if (severity >= 1 && Math.abs(totalHeadingChange) >= 15) {
+        curves.push({
+          id: curveId++,
+          position,
+          direction,
+          severity,
+          modifier,
+          radius: Math.round(radius),
+          totalAngle: Math.round(Math.abs(totalHeadingChange)),
+          distanceFromStart: Math.round(distanceFromStart),
+          ...getSpeedRecommendations(severity, radius)
+        })
+      }
 
       // Skip past this curve
       i = curveEnd + 1
@@ -77,6 +104,7 @@ export function detectCurves(coordinates) {
     }
   }
 
+  console.log(`Curve detection: Found ${curves.length} curves from ${coordinates.length} points`)
   return curves
 }
 
@@ -130,15 +158,24 @@ function estimateRadius(arcLength, angleDegrees) {
 }
 
 /**
- * Convert radius to severity (1-6 scale)
+ * Convert radius and angle to severity (1-6 scale)
+ * IMPROVED: Also considers total angle for better classification
  */
-function getSeverityFromRadius(radius) {
-  if (radius > 200) return 1  // Flat out
-  if (radius > 120) return 2  // Easy
-  if (radius > 70) return 3   // Medium
-  if (radius > 40) return 4   // Tight
-  if (radius > 20) return 5   // Very tight
-  return 6                     // Hairpin
+function getSeverityFromRadius(radius, totalAngle) {
+  // Base severity on radius
+  let severity
+  if (radius > 200) severity = 1       // Very gentle
+  else if (radius > 120) severity = 2  // Easy
+  else if (radius > 70) severity = 3   // Medium
+  else if (radius > 40) severity = 4   // Tight
+  else if (radius > 20) severity = 5   // Very tight
+  else severity = 6                     // Hairpin
+
+  // Increase severity for high-angle turns even if radius is large
+  if (totalAngle > 120 && severity < 5) severity = Math.min(6, severity + 1)
+  if (totalAngle > 90 && severity < 4) severity = Math.min(5, severity + 1)
+  
+  return severity
 }
 
 /**
@@ -152,8 +189,6 @@ function getModifier(totalAngle, severity, length) {
   if (severity >= 5 && length > 100) return 'LONG'
   if (length > 150 && severity <= 3) return 'LONG'
   
-  // TODO: Could detect TIGHTENS/OPENS by analyzing radius change through curve
-  
   return null
 }
 
@@ -161,7 +196,6 @@ function getModifier(totalAngle, severity, length) {
  * Get speed recommendations based on severity and radius
  */
 function getSpeedRecommendations(severity, radius) {
-  // Base speeds for each severity level (in mph)
   const baseSpeeds = {
     1: { cruise: 65, fast: 75, race: 85 },
     2: { cruise: 55, fast: 65, race: 75 },
