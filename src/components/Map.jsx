@@ -4,8 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v7
-// Fixed: Mode change doesn't reset camera
+// Map Component - v8
+// Fixed: Recenter button always shows when needed
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -16,10 +16,10 @@ export default function Map() {
   const userMarker = useRef(null)
   const curveMarkers = useRef([])
   const routeAddedRef = useRef(false)
-  const initialFitDone = useRef(false)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isFollowing, setIsFollowing] = useState(true)
+  const [showRecenter, setShowRecenter] = useState(false)
   
   const {
     position,
@@ -47,8 +47,8 @@ export default function Map() {
         ? 'mapbox://styles/mapbox/satellite-streets-v12'
         : 'mapbox://styles/mapbox/dark-v11',
       center: startCoord,
-      zoom: 14,
-      pitch: 60,
+      zoom: 16,
+      pitch: 65,
       bearing: 0,
       antialias: true
     })
@@ -77,34 +77,38 @@ export default function Map() {
       })
     })
 
-    // Detect user interaction to pause following
-    map.current.on('dragstart', () => setIsFollowing(false))
+    // Detect ANY user interaction to show recenter button
+    const handleUserInteraction = () => {
+      setIsFollowing(false)
+      setShowRecenter(true)
+    }
+
+    map.current.on('dragstart', handleUserInteraction)
     map.current.on('zoomstart', (e) => {
-      if (e.originalEvent) setIsFollowing(false)
+      if (e.originalEvent) handleUserInteraction()
     })
+    map.current.on('pitchstart', handleUserInteraction)
+    map.current.on('rotatestart', handleUserInteraction)
 
     return () => {
       map.current?.remove()
       map.current = null
       routeAddedRef.current = false
-      initialFitDone.current = false
     }
-  }, []) // Empty deps - only run once
+  }, [])
 
   // Add route when map is loaded and we have route data
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     if (!routeData?.coordinates?.length) return
-    if (routeAddedRef.current) return // Already added
+    if (routeAddedRef.current) return
 
-    // Remove existing route layers if any
     try {
       if (map.current.getLayer('route-glow')) map.current.removeLayer('route-glow')
       if (map.current.getLayer('route-line')) map.current.removeLayer('route-line')
       if (map.current.getSource('route')) map.current.removeSource('route')
     } catch (e) {}
 
-    // Add route source
     map.current.addSource('route', {
       type: 'geojson',
       data: {
@@ -117,7 +121,6 @@ export default function Map() {
       }
     })
 
-    // Route glow
     map.current.addLayer({
       id: 'route-glow',
       type: 'line',
@@ -131,7 +134,6 @@ export default function Map() {
       }
     })
 
-    // Route line
     map.current.addLayer({
       id: 'route-line',
       type: 'line',
@@ -145,23 +147,9 @@ export default function Map() {
     })
 
     routeAddedRef.current = true
+  }, [mapLoaded, routeData])
 
-    // Fit bounds only once at start
-    if (!initialFitDone.current && routeData.coordinates.length > 1) {
-      const bounds = routeData.coordinates.reduce((bounds, coord) => {
-        return bounds.extend(coord)
-      }, new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-
-      map.current.fitBounds(bounds, {
-        padding: { top: 150, bottom: 250, left: 50, right: 50 },
-        duration: 1000
-      })
-      initialFitDone.current = true
-    }
-
-  }, [mapLoaded, routeData]) // Don't include modeColor here!
-
-  // Update route color when mode changes (without re-adding route)
+  // Update route color when mode changes
   useEffect(() => {
     if (!map.current || !mapLoaded || !routeAddedRef.current) return
     
@@ -175,7 +163,7 @@ export default function Map() {
     } catch (e) {}
   }, [modeColor, mapLoaded])
 
-  // Create user marker (only when mapLoaded changes or modeColor changes)
+  // Create user marker
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -241,6 +229,7 @@ export default function Map() {
         arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
       }
 
+      // Only auto-follow if following is enabled
       if (isRunning && isFollowing) {
         map.current.easeTo({
           center: position,
@@ -262,6 +251,8 @@ export default function Map() {
     if (!centerPos) return
     
     setIsFollowing(true)
+    setShowRecenter(false)
+    
     map.current.easeTo({
       center: centerPos,
       bearing: heading || 0,
@@ -364,13 +355,14 @@ export default function Map() {
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Recenter Button - always show when not following */}
-      {!isFollowing && (
+      {/* Recenter Button - ALWAYS visible when showRecenter is true */}
+      {showRecenter && (
         <button
           onClick={handleRecenter}
-          className="absolute top-24 right-4 z-10 bg-black/70 backdrop-blur-xl rounded-full p-3 border border-white/10 hover:bg-black/90 transition-all active:scale-95"
+          className="absolute top-24 right-4 z-30 bg-cyan-500 hover:bg-cyan-400 rounded-full p-3 border-2 border-white shadow-lg transition-all active:scale-95"
+          style={{ boxShadow: '0 4px 20px rgba(0,212,255,0.5)' }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
