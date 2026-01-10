@@ -1,8 +1,8 @@
 import useStore from '../store'
 
 // ================================
-// Bottom Bar - v4
-// Uses store actions directly
+// Bottom Bar - v5
+// Uses goToMenu and goToPreview actions
 // ================================
 
 export default function BottomBar() {
@@ -16,10 +16,9 @@ export default function BottomBar() {
     simulationProgress,
     routeData,
     routeMode,
-    // Actions for navigation
-    stopDrive,
-    setShowRoutePreview,
-    setShowRouteSelector
+    // Navigation actions
+    goToMenu,
+    goToPreview
   } = useStore()
 
   const modes = [
@@ -35,16 +34,14 @@ export default function BottomBar() {
 
   // STOP - go to preview
   const handleStop = () => {
-    console.log('STOP pressed - going to preview')
-    stopDrive()
-    setShowRoutePreview(true)
+    console.log('STOP button clicked')
+    goToPreview()
   }
 
   // BACK - go to menu
   const handleBack = () => {
-    console.log('BACK pressed - going to menu')
-    stopDrive()
-    setShowRouteSelector(true)
+    console.log('BACK button clicked')
+    goToMenu()
   }
 
   // Calculate route progress
