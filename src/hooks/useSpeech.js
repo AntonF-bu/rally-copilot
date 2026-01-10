@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
 // Speech Hook - ElevenLabs + Native Fallback
 // Voice ID: puLAe8o1npIDg374vYZp
+// ALWAYS tries ElevenLabs first on each call
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
-  const [useElevenLabs, setUseElevenLabs] = useState(true)
   
   const audioRef = useRef(null)
   const isPlayingRef = useRef(false)
@@ -42,11 +42,13 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
 
-        const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava']
+        // Try to find a good male voice for native fallback
+        const preferred = ['Daniel', 'Alex', 'Tom', 'David', 'James', 'Samantha', 'Karen', 'Ava']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
             voiceRef.current = found
+            console.log('Native voice fallback:', found.name)
             break
           }
         }
@@ -68,7 +70,7 @@ export function useSpeech() {
   // Speak using ElevenLabs
   const speakElevenLabs = useCallback(async (text) => {
     try {
-      setSpeaking(true, text)
+      console.log('🎤 Trying ElevenLabs for:', text)
       
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -79,21 +81,33 @@ export function useSpeech() {
         }),
       })
 
+      console.log('🎤 ElevenLabs response status:', response.status)
+
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+        const errorText = await response.text()
+        console.error('🎤 ElevenLabs API error:', response.status, errorText)
+        return false
       }
 
       const audioBlob = await response.blob()
+      console.log('🎤 ElevenLabs audio blob size:', audioBlob.size)
+      
+      if (audioBlob.size < 1000) {
+        console.error('🎤 ElevenLabs returned suspiciously small audio')
+        return false
+      }
+
       const audioUrl = URL.createObjectURL(audioBlob)
       
       isPlayingRef.current = true
+      setSpeaking(true, text)
       audioRef.current.src = audioUrl
       await audioRef.current.play()
 
+      console.log('🎤 ElevenLabs playing successfully')
       return true
     } catch (err) {
-      console.error('ElevenLabs error:', err)
-      setSpeaking(false, '')
+      console.error('🎤 ElevenLabs error:', err)
       return false
     }
   }, [setSpeaking])
@@ -103,17 +117,19 @@ export function useSpeech() {
     if (!synthRef.current) return false
 
     try {
+      console.log('🔊 Using native speech for:', text)
       synthRef.current.cancel()
 
       const utterance = new SpeechSynthesisUtterance(text)
       
       if (voiceRef.current) {
         utterance.voice = voiceRef.current
+        console.log('🔊 Using voice:', voiceRef.current.name)
       }
 
       utterance.rate = 1.0
       utterance.pitch = 1.0
-      utterance.volume = 1.0
+      utterance.volume = settings.volume || 1.0
 
       utterance.onstart = () => setSpeaking(true, text)
       utterance.onend = () => setSpeaking(false, '')
@@ -122,12 +138,12 @@ export function useSpeech() {
       synthRef.current.speak(utterance)
       return true
     } catch (err) {
-      console.error('Native speech error:', err)
+      console.error('🔊 Native speech error:', err)
       return false
     }
-  }, [setSpeaking])
+  }, [setSpeaking, settings.volume])
 
-  // Main speak function
+  // Main speak function - ALWAYS tries ElevenLabs first
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled || !text) return false
 
@@ -149,17 +165,16 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try ElevenLabs first
-    if (useElevenLabs) {
-      const success = await speakElevenLabs(text)
-      if (success) return true
-      
-      // Fall back to native if ElevenLabs fails
-      setUseElevenLabs(false)
+    // ALWAYS try ElevenLabs first (don't remember failures)
+    const elevenLabsSuccess = await speakElevenLabs(text)
+    if (elevenLabsSuccess) {
+      return true
     }
 
+    // Fall back to native only if ElevenLabs fails THIS time
+    console.log('🔊 Falling back to native speech')
     return speakNative(text)
-  }, [settings.voiceEnabled, useElevenLabs, speakElevenLabs, speakNative])
+  }, [settings.voiceEnabled, speakElevenLabs, speakNative])
 
   const isSpeaking = useCallback(() => {
     return isPlayingRef.current || (synthRef.current?.speaking ?? false)
