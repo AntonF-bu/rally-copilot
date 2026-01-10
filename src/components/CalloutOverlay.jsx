@@ -3,8 +3,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Racing HUD - v3
-// Shows chicanes, modifiers (tightens/opens), sequences
+// Racing HUD - v4
+// Fixed curve display state
 // ================================
 
 export default function CalloutOverlay() {
@@ -73,16 +73,18 @@ export default function CalloutOverlay() {
 
   if (!isRunning) return null
 
-  // If no curves detected yet, show waiting state
+  // Show minimal HUD when no curves yet (but don't say "searching")
   if (!curve && upcomingCurves.length === 0) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        {/* Empty main HUD - just show we're running */}
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-center gap-3">
-            <div className="w-5 h-5 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             <span className="text-white/50 text-sm">
-              {routeMode === 'lookahead' ? 'Analyzing road ahead...' : 'Detecting curves...'}
+              {routeMode === 'demo' ? 'Demo Mode Active' : 'Route Active'}
             </span>
+            <span className="text-white/30 text-xs">• No curves ahead</span>
           </div>
         </div>
         
@@ -270,7 +272,7 @@ export default function CalloutOverlay() {
                   {recommendedSpeed}
                 </div>
                 <div className="text-[10px] font-semibold text-white/40 tracking-wider mt-0.5">
-                  {settings.speedUnit.toUpperCase()}
+                  {settings.speedUnit?.toUpperCase() || 'MPH'}
                 </div>
               </div>
             </div>
