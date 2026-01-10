@@ -1,139 +1,136 @@
 import { create } from 'zustand'
 
 // ================================
-// Rally Co-Pilot Global Store
+// Rally Co-Pilot Store
 // ================================
 
-export const useStore = create((set, get) => ({
-  // ========== Driving State ==========
+const useStore = create((set, get) => ({
+  // ================================
+  // Route Selection State
+  // ================================
+  routeMode: null, // 'destination' | 'lookahead' | 'imported' | 'demo'
+  showRouteSelector: true,
+  routeData: null,
+  
+  setRouteMode: (mode) => set({ routeMode: mode }),
+  setShowRouteSelector: (show) => set({ showRouteSelector: show }),
+  setRouteData: (data) => set({ routeData: data }),
+
+  // ================================
+  // Driving State
+  // ================================
   isRunning: false,
-  mode: 'cruise', // cruise | fast | race
+  mode: 'cruise', // 'cruise' | 'fast' | 'race'
   
-  // ========== Position & Movement ==========
-  position: null, // { lat, lng }
+  // Position & Movement
+  position: null,
   heading: 0,
-  speed: 0, // Current speed in mph
-  accuracy: null, // GPS accuracy in meters
+  speed: 0,
   
-  // ========== Simulation ==========
+  // Simulation
   useSimulation: true,
-  simulationProgress: 0, // 0-1 along route
+  simulationProgress: 0,
   
-  // ========== Curves ==========
+  // Curves
   upcomingCurves: [],
   activeCurve: null,
   lastAnnouncedCurveId: null,
   
-  // ========== Settings ==========
-  settings: {
-    calloutTiming: 5, // seconds before curve
-    gpsLagOffset: 0, // manual GPS adjustment
-    voiceEnabled: true,
-    speedUnit: 'mph', // mph | kmh
-    mapStyle: 'dark', // dark | satellite
-    showSpeedLimit: true,
-    hapticFeedback: true,
-  },
-  
-  // ========== UI State ==========
+  // UI State
   showSettings: false,
-  bottomPanelMinimized: false,
-  activeTab: 'drive', // drive | discover | social
-  
-  // ========== Voice State ==========
-  isSpeaking: false,
-  lastSpokenText: '',
-  
-  // ========== Actions ==========
-  
+  speaking: false,
+  speakingText: '',
+
+  // ================================
+  // Settings
+  // ================================
+  settings: {
+    voiceEnabled: true,
+    hapticFeedback: true,
+    speedUnit: 'mph', // 'mph' | 'kmh'
+    calloutTiming: 5, // seconds before curve
+    gpsLagOffset: 0.5, // seconds
+    volume: 1.0,
+  },
+
+  // ================================
+  // Actions - Driving
+  // ================================
   startDrive: () => set({ 
     isRunning: true, 
-    lastAnnouncedCurveId: null,
-    simulationProgress: 0 
+    simulationProgress: 0,
+    lastAnnouncedCurveId: null 
   }),
   
   stopDrive: () => set({ 
-    isRunning: false, 
-    activeCurve: null 
+    isRunning: false,
+    activeCurve: null,
+    upcomingCurves: []
   }),
   
   setMode: (mode) => set({ mode }),
   
   setPosition: (position) => set({ position }),
-  
   setHeading: (heading) => set({ heading }),
-  
   setSpeed: (speed) => set({ speed }),
-  
-  setUpcomingCurves: (curves) => set({ upcomingCurves: curves }),
-  
-  setActiveCurve: (curve) => set({ activeCurve: curve }),
-  
-  setLastAnnouncedCurveId: (id) => set({ lastAnnouncedCurveId: id }),
   
   setSimulationProgress: (progress) => set({ simulationProgress: progress }),
   
-  updateSettings: (updates) => set((state) => ({
-    settings: { ...state.settings, ...updates }
+  setUpcomingCurves: (curves) => set({ upcomingCurves: curves }),
+  setActiveCurve: (curve) => set({ activeCurve: curve }),
+  setLastAnnouncedCurveId: (id) => set({ lastAnnouncedCurveId: id }),
+
+  // ================================
+  // Actions - UI
+  // ================================
+  toggleSettings: () => set((state) => ({ showSettings: !state.showSettings })),
+  closeSettings: () => set({ showSettings: false }),
+  
+  setSpeaking: (speaking, text = '') => set({ speaking, speakingText: text }),
+
+  // ================================
+  // Actions - Settings
+  // ================================
+  updateSettings: (newSettings) => set((state) => ({
+    settings: { ...state.settings, ...newSettings }
   })),
-  
-  toggleSettings: () => set((state) => ({ 
-    showSettings: !state.showSettings 
-  })),
-  
-  toggleBottomPanel: () => set((state) => ({ 
-    bottomPanelMinimized: !state.bottomPanelMinimized 
-  })),
-  
-  setActiveTab: (tab) => set({ activeTab: tab }),
-  
-  setSpeaking: (isSpeaking, text = '') => set({ 
-    isSpeaking, 
-    lastSpokenText: text 
-  }),
-  
-  // ========== Computed Getters ==========
-  
-  getModeConfig: () => {
-    const modes = {
-      cruise: { 
-        name: 'Cruise', 
-        color: '#00d4ff', 
-        speedKey: 'speedCruise',
-        description: 'Relaxed scenic driving'
-      },
-      fast: { 
-        name: 'Fast', 
-        color: '#ffd500', 
-        speedKey: 'speedFast',
-        description: 'Spirited, focused'
-      },
-      race: { 
-        name: 'Race', 
-        color: '#ff3366', 
-        speedKey: 'speedRace',
-        description: 'Full engagement'
-      }
-    }
-    return modes[get().mode]
-  },
-  
+
+  // ================================
+  // Computed Values
+  // ================================
   getDisplaySpeed: () => {
     const { speed, settings } = get()
-    return settings.speedUnit === 'kmh' 
-      ? Math.round(speed * 1.609) 
-      : Math.round(speed)
+    if (settings.speedUnit === 'kmh') {
+      return Math.round(speed * 1.609)
+    }
+    return Math.round(speed)
   },
-  
+
   getRecommendedSpeed: (curve) => {
-    if (!curve) return null
+    if (!curve) return 0
     const { mode, settings } = get()
     const speedKey = `speed${mode.charAt(0).toUpperCase() + mode.slice(1)}`
-    const speed = curve[speedKey] || curve.speedCruise
-    return settings.speedUnit === 'kmh' 
-      ? Math.round(speed * 1.609) 
-      : speed
-  }
+    const speed = curve[speedKey] || curve.speedCruise || 30
+    
+    if (settings.speedUnit === 'kmh') {
+      return Math.round(speed * 1.609)
+    }
+    return Math.round(speed)
+  },
+
+  // ================================
+  // Reset
+  // ================================
+  resetToRouteSelector: () => set({
+    showRouteSelector: true,
+    isRunning: false,
+    routeMode: null,
+    routeData: null,
+    simulationProgress: 0,
+    upcomingCurves: [],
+    activeCurve: null,
+    lastAnnouncedCurveId: null
+  })
 }))
 
 export default useStore
