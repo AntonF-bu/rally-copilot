@@ -119,45 +119,81 @@ export function parseGoogleMapsUrl(url) {
   try {
     console.log('Parsing Google Maps URL:', url)
     
-    const waypoints = []
-    const decodedUrl = decodeURIComponent(url)
+    // Decode URL
+    let decodedUrl = url
+    try {
+      decodedUrl = decodeURIComponent(url)
+    } catch (e) {
+      // URL might not be encoded
+    }
+    
+    console.log('Decoded URL:', decodedUrl)
 
-    // Format 1: /dir/ with coordinates or place names
-    const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@]+)/)
+    // Format 1: /dir/origin/destination (most common from sharing)
+    // Example: /dir/42.3528330,-71.0755902/Campion+Center,+319+Concord+Rd,+Weston,+MA+02493
+    const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@?]+)/)
     if (dirMatch) {
-      const origin = dirMatch[1]
-      const dest = dirMatch[2]
+      const originStr = dirMatch[1].replace(/\+/g, ' ')
+      const destStr = dirMatch[2].replace(/\+/g, ' ')
       
-      const originCoords = parseCoordinateString(origin)
-      const destCoords = parseCoordinateString(dest)
+      console.log('Parsed /dir/ format - Origin:', originStr, 'Dest:', destStr)
       
+      const originCoords = parseCoordinateString(originStr)
+      const destCoords = parseCoordinateString(destStr)
+      
+      // Both are coordinates
       if (originCoords && destCoords) {
+        console.log('Both are coordinates')
         return { coordinates: [originCoords, destCoords] }
       }
       
+      // Origin is coordinates, destination needs geocoding
+      if (originCoords && !destCoords) {
+        console.log('Origin is coords, dest needs geocoding')
+        return {
+          originCoordinates: originCoords,
+          needsGeocoding: true,
+          destination: destStr
+        }
+      }
+      
+      // Destination is coordinates, origin needs geocoding
+      if (!originCoords && destCoords) {
+        console.log('Dest is coords, origin needs geocoding')
+        return {
+          destinationCoordinates: destCoords,
+          needsGeocoding: true,
+          origin: originStr
+        }
+      }
+      
+      // Both need geocoding
+      console.log('Both need geocoding')
       return {
         needsGeocoding: true,
-        origin: origin.replace(/\+/g, ' '),
-        destination: dest.replace(/\+/g, ' ')
+        origin: originStr,
+        destination: destStr
       }
     }
 
-    // Format 2: @lat,lng in path
-    const atMatches = decodedUrl.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/g)
-    if (atMatches) {
-      for (const match of atMatches) {
-        const coords = match.replace('@', '').split(',')
-        const lat = parseFloat(coords[0])
-        const lng = parseFloat(coords[1])
-        if (isValidCoordinate(lat, lng)) {
-          waypoints.push([lng, lat])
+    // Format 2: @lat,lng in path (viewing a location)
+    const atMatch = decodedUrl.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)
+    if (atMatch) {
+      const lat = parseFloat(atMatch[1])
+      const lng = parseFloat(atMatch[2])
+      if (isValidCoordinate(lat, lng)) {
+        console.log('Found @lat,lng format')
+        return { 
+          coordinates: [[lng, lat]],
+          needsOrigin: true
         }
       }
     }
 
-    // Format 3: !3d and !4d markers
+    // Format 3: !3d and !4d markers (embedded in data parameter)
     const dMatches = decodedUrl.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/g)
-    if (dMatches) {
+    if (dMatches && dMatches.length > 0) {
+      const waypoints = []
       for (const match of dMatches) {
         const parts = match.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/)
         if (parts) {
@@ -168,71 +204,55 @@ export function parseGoogleMapsUrl(url) {
           }
         }
       }
+      if (waypoints.length >= 2) {
+        console.log('Found !3d!4d format with', waypoints.length, 'waypoints')
+        return { coordinates: waypoints }
+      }
+      if (waypoints.length === 1) {
+        return { coordinates: waypoints, needsOrigin: true }
+      }
     }
 
     // Format 4: /place/ URL
     const placeMatch = decodedUrl.match(/\/place\/([^/@]+)/)
-    if (placeMatch && waypoints.length === 0) {
+    if (placeMatch) {
+      const placeName = placeMatch[1].replace(/\+/g, ' ')
+      console.log('Found /place/ format:', placeName)
       return {
         needsGeocoding: true,
-        destination: placeMatch[1].replace(/\+/g, ' ')
+        destination: placeName
       }
     }
 
     // Format 5: ?q= parameter
     const qMatch = decodedUrl.match(/[?&]q=([^&]+)/)
     if (qMatch) {
-      const qValue = qMatch[1]
+      const qValue = qMatch[1].replace(/\+/g, ' ')
       const coords = parseCoordinateString(qValue)
       if (coords) {
-        waypoints.push(coords)
-      } else {
-        return {
-          needsGeocoding: true,
-          destination: qValue.replace(/\+/g, ' ')
-        }
+        return { coordinates: [coords], needsOrigin: true }
+      }
+      return {
+        needsGeocoding: true,
+        destination: qValue
       }
     }
 
     // Format 6: destination= parameter
     const destParam = decodedUrl.match(/destination=([^&]+)/)
     if (destParam) {
-      const destValue = destParam[1]
+      const destValue = destParam[1].replace(/\+/g, ' ')
       const coords = parseCoordinateString(destValue)
       if (coords) {
-        waypoints.push(coords)
-      } else {
-        return {
-          needsGeocoding: true,
-          destination: destValue.replace(/\+/g, ' ')
-        }
+        return { coordinates: [coords], needsOrigin: true }
+      }
+      return {
+        needsGeocoding: true,
+        destination: destValue
       }
     }
 
-    // Format 7: origin= parameter
-    const originParam = decodedUrl.match(/origin=([^&]+)/)
-    if (originParam) {
-      const originValue = originParam[1]
-      const coords = parseCoordinateString(originValue)
-      if (coords) {
-        waypoints.unshift(coords)
-      }
-    }
-
-    console.log('Parsed waypoints:', waypoints)
-
-    if (waypoints.length >= 2) {
-      return { coordinates: waypoints }
-    }
-
-    if (waypoints.length === 1) {
-      return { 
-        coordinates: waypoints,
-        needsOrigin: true
-      }
-    }
-
-    console.warn('Could not parse coordinates from URL')
+    console.warn('Could not parse URL with any known format')
     return null
 
   } catch (error) {
@@ -241,15 +261,30 @@ export function parseGoogleMapsUrl(url) {
   }
 }
 
+/**
+ * Parse coordinate string in various formats
+ * Supports: "lat,lng" or "lat, lng" or "lat lng"
+ */
 function parseCoordinateString(str) {
   if (!str) return null
   
-  const parts = str.split(',')
+  // Clean up the string
+  const cleaned = str.trim()
+  
+  // Try comma-separated (most common)
+  let parts = cleaned.split(',')
+  
+  // Try space-separated if comma didn't work
+  if (parts.length < 2) {
+    parts = cleaned.split(/\s+/)
+  }
+  
   if (parts.length >= 2) {
-    const lat = parseFloat(parts[0])
-    const lng = parseFloat(parts[1])
+    const lat = parseFloat(parts[0].trim())
+    const lng = parseFloat(parts[1].trim())
+    
     if (isValidCoordinate(lat, lng)) {
-      return [lng, lat]
+      return [lng, lat] // Return as [lng, lat] for Mapbox
     }
   }
   
