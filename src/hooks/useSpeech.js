@@ -9,7 +9,7 @@ import useStore from '../store'
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
 export function useSpeech() {
-  const { settings, mode, setSpeaking } = useStore()
+  const { settings, setSpeaking } = useStore()
   const [useElevenLabs, setUseElevenLabs] = useState(true)
   
   const audioRef = useRef(null)
@@ -23,17 +23,13 @@ export function useSpeech() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    console.log('🎤 Speech hook initializing...')
-
     // Create audio element for ElevenLabs
     audioRef.current = new Audio()
     audioRef.current.onended = () => {
-      console.log('🎤 Audio ended')
       isPlayingRef.current = false
       setSpeaking(false, '')
     }
-    audioRef.current.onerror = (e) => {
-      console.error('🎤 Audio error:', e)
+    audioRef.current.onerror = () => {
       isPlayingRef.current = false
       setSpeaking(false, '')
     }
@@ -44,8 +40,6 @@ export function useSpeech() {
 
       const loadVoices = () => {
         const voices = synthRef.current.getVoices()
-        console.log('🎤 Available voices:', voices.length)
-        
         if (voices.length === 0) return
 
         const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava']
@@ -53,13 +47,11 @@ export function useSpeech() {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
             voiceRef.current = found
-            console.log('🎤 Selected native voice:', found.name)
             break
           }
         }
         if (!voiceRef.current) {
           voiceRef.current = voices.find(v => v.lang.startsWith('en')) || voices[0]
-          console.log('🎤 Fallback native voice:', voiceRef.current?.name)
         }
       }
 
@@ -75,12 +67,8 @@ export function useSpeech() {
 
   // Speak using ElevenLabs
   const speakElevenLabs = useCallback(async (text) => {
-    console.log('🎤 Trying ElevenLabs for:', text)
-    
     try {
       setSpeaking(true, text)
-      
-      console.log('🎤 Calling /api/tts with voice:', ELEVENLABS_VOICE_ID)
       
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -91,41 +79,28 @@ export function useSpeech() {
         }),
       })
 
-      console.log('🎤 TTS Response status:', response.status)
-
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('🎤 TTS Error:', errorText)
-        throw new Error(`API error: ${response.status} - ${errorText}`)
+        throw new Error(`API error: ${response.status}`)
       }
 
       const audioBlob = await response.blob()
-      console.log('🎤 Got audio blob, size:', audioBlob.size)
-      
       const audioUrl = URL.createObjectURL(audioBlob)
       
       isPlayingRef.current = true
       audioRef.current.src = audioUrl
-      
       await audioRef.current.play()
-      console.log('🎤 ElevenLabs audio playing!')
 
       return true
     } catch (err) {
-      console.error('🎤 ElevenLabs failed:', err)
+      console.error('ElevenLabs error:', err)
       setSpeaking(false, '')
       return false
     }
   }, [setSpeaking])
 
-  // Speak using native speech synthesis
+  // Speak using native speech synthesis (fallback)
   const speakNative = useCallback((text) => {
-    console.log('🎤 Using native speech for:', text)
-    
-    if (!synthRef.current) {
-      console.error('🎤 No speech synthesis available')
-      return false
-    }
+    if (!synthRef.current) return false
 
     try {
       synthRef.current.cancel()
@@ -134,46 +109,33 @@ export function useSpeech() {
       
       if (voiceRef.current) {
         utterance.voice = voiceRef.current
-        console.log('🎤 Using voice:', voiceRef.current.name)
       }
 
       utterance.rate = 1.0
       utterance.pitch = 1.0
       utterance.volume = 1.0
 
-      utterance.onstart = () => {
-        console.log('🎤 Native speech started')
-        setSpeaking(true, text)
-      }
-      utterance.onend = () => {
-        console.log('🎤 Native speech ended')
-        setSpeaking(false, '')
-      }
-      utterance.onerror = (e) => {
-        console.error('🎤 Native speech error:', e)
-        setSpeaking(false, '')
-      }
+      utterance.onstart = () => setSpeaking(true, text)
+      utterance.onend = () => setSpeaking(false, '')
+      utterance.onerror = () => setSpeaking(false, '')
 
       synthRef.current.speak(utterance)
       return true
     } catch (err) {
-      console.error('🎤 Native speech error:', err)
+      console.error('Native speech error:', err)
       return false
     }
   }, [setSpeaking])
 
   // Main speak function
   const speak = useCallback(async (text, priority = 'normal') => {
-    if (!settings.voiceEnabled || !text) {
-      console.log('🎤 Voice disabled or no text')
-      return false
-    }
+    if (!settings.voiceEnabled || !text) return false
 
     const now = Date.now()
     const MIN_INTERVAL = 1500
     
+    // Don't repeat same callout too quickly
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < MIN_INTERVAL) {
-      console.log('🎤 Skipping duplicate callout')
       return false
     }
 
@@ -187,21 +149,15 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    console.log('🎤 Speaking:', text, '| ElevenLabs enabled:', useElevenLabs)
-
     // Try ElevenLabs first
     if (useElevenLabs) {
       const success = await speakElevenLabs(text)
-      if (success) {
-        console.log('🎤 ElevenLabs success!')
-        return true
-      }
+      if (success) return true
       
-      console.log('🎤 ElevenLabs failed, switching to native')
+      // Fall back to native if ElevenLabs fails
       setUseElevenLabs(false)
     }
 
-    // Use native speech
     return speakNative(text)
   }, [settings.voiceEnabled, useElevenLabs, speakElevenLabs, speakNative])
 
