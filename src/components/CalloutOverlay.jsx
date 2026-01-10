@@ -3,8 +3,7 @@ import useStore from '../store'
 import { getCurveColor, MOHAWK_TRAIL } from '../data/routes'
 
 // ================================
-// Racing HUD - Premium Glass Design
-// Braking zones + Elevation graph
+// Racing HUD - Compact Design
 // ================================
 
 export default function CalloutOverlay() {
@@ -14,26 +13,21 @@ export default function CalloutOverlay() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Calculate braking zone based on severity
   const getBrakingZone = (severity) => {
     if (severity <= 2) return { show: false, start: 0 }
-    if (severity <= 3) return { show: true, start: 75, intensity: 0.5 }
-    if (severity <= 4) return { show: true, start: 60, intensity: 0.7 }
-    if (severity <= 5) return { show: true, start: 50, intensity: 0.85 }
-    return { show: true, start: 40, intensity: 1 }
+    if (severity <= 3) return { show: true, start: 75 }
+    if (severity <= 4) return { show: true, start: 60 }
+    if (severity <= 5) return { show: true, start: 50 }
+    return { show: true, start: 40 }
   }
 
-  // Generate elevation data points for mini graph
   const elevationData = useMemo(() => {
     const coords = MOHAWK_TRAIL.coordinates
     const points = []
-    const numPoints = 20
-    
-    for (let i = 0; i < numPoints; i++) {
-      const idx = Math.floor((i / numPoints) * coords.length)
+    for (let i = 0; i < 20; i++) {
+      const idx = Math.floor((i / 20) * coords.length)
       const coord = coords[Math.min(idx, coords.length - 1)]
-      const elevation = 800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100
-      points.push(elevation)
+      points.push(800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100)
     }
     return points
   }, [])
@@ -63,20 +57,17 @@ export default function CalloutOverlay() {
               {/* Direction + Severity */}
               <div className="flex items-center gap-3">
                 <div 
-                  className="w-12 h-12 rounded-xl flex items-center justify-center relative overflow-hidden"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center"
                   style={{ 
                     background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
                     border: `1.5px solid ${severityColor}50`,
-                    boxShadow: `0 0 20px ${severityColor}30, inset 0 1px 0 ${severityColor}20`
+                    boxShadow: `0 0 20px ${severityColor}30`
                   }}
                 >
                   <svg 
-                    width="28" 
-                    height="28" 
-                    viewBox="0 0 24 24" 
+                    width="28" height="28" viewBox="0 0 24 24" 
                     fill={severityColor}
                     style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
-                    className="drop-shadow-lg"
                   >
                     <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
                   </svg>
@@ -85,35 +76,25 @@ export default function CalloutOverlay() {
                 <div className="flex flex-col">
                   <div 
                     className="text-4xl font-bold tracking-tight leading-none"
-                    style={{ 
-                      fontFamily: 'SF Pro Display, -apple-system, system-ui',
-                      color: severityColor,
-                      textShadow: `0 0 30px ${severityColor}50`
-                    }}
+                    style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
                   >
                     {curve.severity}
                   </div>
                   {curve.modifier && (
-                    <div 
-                      className="text-[10px] font-bold tracking-wider mt-0.5"
-                      style={{ color: severityColor }}
-                    >
+                    <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: severityColor }}>
                       {curve.modifier}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Progress Bar with Braking Zone */}
+              {/* Progress Bar */}
               <div className="flex-1 px-2">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
                   <span 
                     className="text-lg font-bold tracking-tight"
-                    style={{ 
-                      fontFamily: 'SF Mono, monospace',
-                      color: inBrakingZone ? '#ff3366' : 'white'
-                    }}
+                    style={{ color: inBrakingZone ? '#ff3366' : 'white' }}
                   >
                     {curve.distance}<span className="text-xs text-white/40 ml-1">m</span>
                   </span>
@@ -132,37 +113,29 @@ export default function CalloutOverlay() {
                   )}
                   
                   <div 
-                    className="h-full rounded-full transition-all duration-150 relative"
+                    className="h-full rounded-full transition-all duration-150"
                     style={{ 
                       width: `${progress}%`,
                       background: inBrakingZone 
                         ? `linear-gradient(90deg, ${modeColor}, #ffd500, #ff3366)`
                         : `linear-gradient(90deg, ${modeColor}90, ${modeColor})`,
-                      boxShadow: inBrakingZone 
-                        ? '0 0 15px #ff336680' 
-                        : `0 0 10px ${modeColor}50`
+                      boxShadow: inBrakingZone ? '0 0 15px #ff336680' : `0 0 10px ${modeColor}50`
                     }}
                   />
                   
                   {inBrakingZone && (
                     <div className="absolute inset-0 flex items-center justify-end pr-2">
-                      <span className="text-[9px] font-black text-white tracking-wider animate-pulse">
-                        BRAKE
-                      </span>
+                      <span className="text-[9px] font-black text-white tracking-wider animate-pulse">BRAKE</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Speed Recommendation */}
+              {/* Speed */}
               <div className="text-right pl-2">
                 <div 
                   className="text-4xl font-bold tracking-tight leading-none"
-                  style={{ 
-                    fontFamily: 'SF Pro Display, -apple-system, system-ui',
-                    color: modeColor,
-                    textShadow: `0 0 30px ${modeColor}50`
-                  }}
+                  style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}
                 >
                   {recommendedSpeed}
                 </div>
@@ -175,113 +148,59 @@ export default function CalloutOverlay() {
         </div>
       )}
 
-      {/* Upcoming Curves Strip */}
-      {upcomingCurves.length > 1 && (
-        <div className="hud-glass rounded-xl mt-2 px-3 py-2">
-          <div className="flex items-center gap-1">
-            <span className="text-[9px] font-semibold text-white/30 tracking-wider mr-2">NEXT</span>
-            <div className="flex items-center gap-2 overflow-x-auto">
-              {upcomingCurves.slice(1, 5).map((next) => {
+      {/* Compact boxes row */}
+      <div className="flex gap-2 mt-2">
+        
+        {/* Upcoming Curves - Compact */}
+        {upcomingCurves.length > 1 && (
+          <div className="hud-glass rounded-xl px-3 py-2">
+            <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
+            <div className="flex items-center gap-2">
+              {upcomingCurves.slice(1, 4).map((next) => {
                 const nextColor = getCurveColor(next.severity)
                 const nextIsLeft = next.direction === 'LEFT'
-                const nextBrake = getBrakingZone(next.severity)
-                
                 return (
-                  <div 
-                    key={next.id}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg shrink-0"
-                    style={{ 
-                      background: `${nextColor}15`,
-                      border: `1px solid ${nextColor}30`
-                    }}
-                  >
+                  <div key={next.id} className="flex items-center gap-1">
                     <svg 
-                      width="12" height="12" viewBox="0 0 24 24" 
+                      width="10" height="10" viewBox="0 0 24 24" 
                       fill={nextColor}
                       style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
                     >
                       <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
                     </svg>
-                    <span className="text-sm font-bold" style={{ color: nextColor }}>
-                      {next.severity}
-                    </span>
-                    <span className="text-[10px] text-white/30 font-medium">{next.distance}m</span>
-                    {nextBrake.show && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                    )}
+                    <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severity}</span>
                   </div>
                 )
               })}
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Elevation Graph */}
-      <div className="hud-glass rounded-xl mt-2 px-3 py-2">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[9px] font-semibold text-white/30 tracking-wider">ELEVATION</span>
-          <span className="text-[10px] font-medium text-white/50">
-            +{Math.round(Math.sin(simulationProgress * Math.PI * 2) * 80 + 120)}ft ahead
-          </span>
-        </div>
-        
-        <div className="h-10 relative">
-          <svg viewBox="0 0 200 40" className="w-full h-full" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="elevGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor={modeColor} stopOpacity="0.4"/>
-                <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-              </linearGradient>
-              <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-                <stop offset={`${elevationPosition * 5}%`} stopColor={modeColor} stopOpacity="1"/>
-                <stop offset="100%" stopColor={modeColor} stopOpacity="0.5"/>
-              </linearGradient>
-            </defs>
-            
-            <path
-              d={`M 0 40 ${elevationData.map((el, i) => {
-                const x = (i / (elevationData.length - 1)) * 200
-                const y = 40 - ((el - 700) / 300) * 35
-                return `L ${x} ${y}`
-              }).join(' ')} L 200 40 Z`}
-              fill="url(#elevGradient)"
-            />
-            
-            <path
-              d={`M ${elevationData.map((el, i) => {
-                const x = (i / (elevationData.length - 1)) * 200
-                const y = 40 - ((el - 700) / 300) * 35
-                return `${i === 0 ? '' : 'L '}${x} ${y}`
-              }).join(' ')}`}
-              fill="none"
-              stroke="url(#lineGradient)"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-            
-            <circle
-              cx={elevationPosition * 10}
-              cy={40 - ((elevationData[elevationPosition] - 700) / 300) * 35}
-              r="4"
-              fill={modeColor}
-              className="drop-shadow-lg"
-            >
-              <animate attributeName="r" values="3;5;3" dur="1.5s" repeatCount="indefinite"/>
-            </circle>
-            
-            <line
-              x1={elevationPosition * 10}
-              y1="0"
-              x2={elevationPosition * 10}
-              y2="40"
-              stroke={modeColor}
-              strokeWidth="1"
-              strokeDasharray="2,2"
-              opacity="0.5"
-            />
-          </svg>
+        {/* Elevation - Compact */}
+        <div className="hud-glass rounded-xl px-3 py-2 flex-1 max-w-[200px]">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
+            <span className="text-[9px] text-white/40">+{Math.round(Math.sin(simulationProgress * Math.PI * 2) * 80 + 120)}ft</span>
+          </div>
+          <div className="h-6">
+            <svg viewBox="0 0 200 24" className="w-full h-full" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+                  <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+              <path
+                d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 200} ${24 - ((el - 700) / 300) * 20}`).join(' ')} L 200 24 Z`}
+                fill="url(#elevGrad)"
+              />
+              <path
+                d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 200} ${24 - ((el - 700) / 300) * 20}`).join(' ')}`}
+                fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
+              />
+              <circle cx={elevationPosition * 10} cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 20} r="3" fill={modeColor}/>
+            </svg>
+          </div>
         </div>
       </div>
 
