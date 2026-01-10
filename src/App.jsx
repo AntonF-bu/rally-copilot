@@ -12,6 +12,7 @@ import BottomBar from './components/BottomBar'
 import SettingsPanel from './components/SettingsPanel'
 import VoiceIndicator from './components/VoiceIndicator'
 import RouteSelector from './components/RouteSelector'
+import RoutePreview from './components/RoutePreview'
 
 // ================================
 // Rally Co-Pilot App
@@ -29,8 +30,12 @@ export default function App() {
     setLastAnnouncedCurveId,
     getDisplaySpeed,
     showRouteSelector,
+    showRoutePreview,
+    setShowRoutePreview,
+    setShowRouteSelector,
     routeMode,
-    routeData
+    startDrive,
+    clearRouteData
   } = useStore()
 
   // Only use simulation for demo mode
@@ -80,9 +85,32 @@ export default function App() {
     speak
   ])
 
+  // Handle starting navigation from preview
+  const handleStartNavigation = () => {
+    setShowRoutePreview(false)
+    startDrive()
+  }
+
+  // Handle going back from preview to selector
+  const handleBackFromPreview = () => {
+    setShowRoutePreview(false)
+    setShowRouteSelector(true)
+    clearRouteData()
+  }
+
   // Show route selector
   if (showRouteSelector) {
     return <RouteSelector />
+  }
+
+  // Show route preview
+  if (showRoutePreview) {
+    return (
+      <RoutePreview 
+        onStartNavigation={handleStartNavigation}
+        onBack={handleBackFromPreview}
+      />
+    )
   }
 
   // Main driving UI
