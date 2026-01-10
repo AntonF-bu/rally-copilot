@@ -1,35 +1,243 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v2
-// Enhanced callouts: combined sequences, chicanes, tightening/opening
+// Speech Hook - ElevenLabs + Native Fallback
+// Voice ID: puLAe8o1npIDg374vYZp
 // ================================
 
-// Speech synthesis setup
-let synth = null
-let preferredVoice = null
+// Your specified ElevenLabs voice ID
+const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  synth = window.speechSynthesis
+export function useSpeech() {
+  const { settings, mode, setSpeaking } = useStore()
+  const [isReady, setIsReady] = useState(false)
+  const [error, setError] = useState(null)
+  const [useElevenLabs, setUseElevenLabs] = useState(true)
   
-  const loadVoices = () => {
-    const voices = synth.getVoices()
-    // Prefer: Samantha, Daniel, or any English voice
-    preferredVoice = voices.find(v => v.name.includes('Samantha')) ||
-                     voices.find(v => v.name.includes('Daniel')) ||
-                     voices.find(v => v.lang.startsWith('en') && v.localService) ||
-                     voices.find(v => v.lang.startsWith('en')) ||
-                     voices[0]
+  const audioRef = useRef(null)
+  const audioQueueRef = useRef([])
+  const isPlayingRef = useRef(false)
+  const synthRef = useRef(null)
+  const voiceRef = useRef(null)
+  const lastSpokenRef = useRef(null)
+  const lastSpokenTimeRef = useRef(0)
+
+  // Initialize
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    // Create audio element for ElevenLabs
+    audioRef.current = new Audio()
+    audioRef.current.onended = () => {
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+      processQueue()
+    }
+    audioRef.current.onerror = () => {
+      console.log('ElevenLabs audio error, falling back to native')
+      isPlayingRef.current = false
+      setUseElevenLabs(false)
+    }
+
+    // Initialize native speech synthesis as fallback
+    if ('speechSynthesis' in window) {
+      synthRef.current = window.speechSynthesis
+
+      const loadVoices = () => {
+        const voices = synthRef.current.getVoices()
+        if (voices.length === 0) return
+
+        const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava']
+        for (const name of preferred) {
+          const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
+          if (found) {
+            voiceRef.current = found
+            break
+          }
+        }
+        if (!voiceRef.current) {
+          voiceRef.current = voices.find(v => v.lang.startsWith('en')) || voices[0]
+        }
+      }
+
+      loadVoices()
+      synthRef.current.onvoiceschanged = loadVoices
+    }
+
+    setIsReady(true)
+
+    return () => {
+      audioRef.current?.pause()
+      synthRef.current?.cancel()
+    }
+  }, [setSpeaking])
+
+  // Process audio queue
+  const processQueue = useCallback(() => {
+    if (isPlayingRef.current || audioQueueRef.current.length === 0) return
+    
+    const next = audioQueueRef.current.shift()
+    if (next) {
+      playAudio(next.url, next.text)
+    }
+  }, [])
+
+  // Play audio from URL
+  const playAudio = useCallback((url, text) => {
+    if (!audioRef.current) return
+    
+    isPlayingRef.current = true
+    setSpeaking(true, text)
+    audioRef.current.src = url
+    audioRef.current.play().catch(err => {
+      console.error('Audio play error:', err)
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+    })
+  }, [setSpeaking])
+
+  // Speak using ElevenLabs
+  const speakElevenLabs = useCallback(async (text) => {
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text,
+          voiceId: ELEVENLABS_VOICE_ID
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
+
+      const audioBlob = await response.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      
+      // If already playing, queue it
+      if (isPlayingRef.current) {
+        audioQueueRef.current.push({ url: audioUrl, text })
+      } else {
+        playAudio(audioUrl, text)
+      }
+
+      return true
+    } catch (err) {
+      console.error('ElevenLabs error:', err)
+      setError('Premium voice unavailable')
+      return false
+    }
+  }, [playAudio])
+
+  // Speak using native speech synthesis
+  const speakNative = useCallback((text) => {
+    if (!synthRef.current) return false
+
+    try {
+      synthRef.current.cancel()
+
+      const utterance = new SpeechSynthesisUtterance(text)
+      
+      if (voiceRef.current) {
+        utterance.voice = voiceRef.current
+      }
+
+      const modeSettings = {
+        cruise: { rate: 0.95, pitch: 0.95 },
+        fast: { rate: 1.0, pitch: 1.0 },
+        race: { rate: 1.1, pitch: 1.0 }
+      }
+      const { rate, pitch } = modeSettings[mode] || modeSettings.cruise
+      
+      utterance.rate = rate
+      utterance.pitch = pitch
+      utterance.volume = 1.0
+
+      utterance.onstart = () => setSpeaking(true, text)
+      utterance.onend = () => setSpeaking(false, '')
+      utterance.onerror = () => setSpeaking(false, '')
+
+      synthRef.current.speak(utterance)
+      return true
+    } catch (err) {
+      console.error('Native speech error:', err)
+      return false
+    }
+  }, [mode, setSpeaking])
+
+  // Main speak function
+  const speak = useCallback(async (text, priority = 'normal') => {
+    if (!settings.voiceEnabled || !text) return false
+
+    const now = Date.now()
+    const MIN_INTERVAL = 1500 // Minimum 1.5s between same callouts
+    
+    // Don't repeat the same callout too quickly
+    if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < MIN_INTERVAL) {
+      return false
+    }
+
+    // Cancel current speech for high priority
+    if (priority === 'high') {
+      audioRef.current?.pause()
+      audioQueueRef.current = []
+      synthRef.current?.cancel()
+      isPlayingRef.current = false
+    }
+
+    lastSpokenRef.current = text
+    lastSpokenTimeRef.current = now
+
+    // Try ElevenLabs first
+    if (useElevenLabs) {
+      const success = await speakElevenLabs(text)
+      if (success) return true
+      
+      console.log('Falling back to native voice')
+      setUseElevenLabs(false)
+    }
+
+    // Use native speech
+    return speakNative(text)
+  }, [settings.voiceEnabled, useElevenLabs, speakElevenLabs, speakNative])
+
+  // Check if currently speaking
+  const isSpeaking = useCallback(() => {
+    return isPlayingRef.current || (synthRef.current?.speaking ?? false)
+  }, [])
+
+  // Cancel speech
+  const stop = useCallback(() => {
+    audioRef.current?.pause()
+    audioQueueRef.current = []
+    synthRef.current?.cancel()
+    isPlayingRef.current = false
+    setSpeaking(false, '')
+  }, [setSpeaking])
+
+  // Test voice
+  const test = useCallback(() => {
+    speak('Left 3 tightens into right 4', 'high')
+  }, [speak])
+
+  return {
+    speak,
+    stop,
+    isSpeaking,
+    test,
+    isReady,
+    error,
+    useElevenLabs
   }
-  
-  loadVoices()
-  synth.onvoiceschanged = loadVoices
 }
 
-/**
- * Generate callout text for a curve or sequence
- */
+// ================================
+// Generate Callout Text
+// Enhanced for chicanes, modifiers, sequences
+// ================================
+
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
   if (!curve) return ''
 
@@ -40,10 +248,8 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     const dirWord = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
     
     if (curve.chicaneType === 'CHICANE' && curve.curves?.length === 3) {
-      // Triple chicane: "Chicane left 3-4-3"
       parts.push(`Chicane ${dirWord.toLowerCase()} ${curve.severitySequence}`)
     } else {
-      // S-curve: "S-left 3-4" 
       parts.push(`S ${dirWord.toLowerCase()} ${curve.severitySequence}`)
     }
   } else {
@@ -79,124 +285,15 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     const distanceToNext = nextCurve.distanceFromStart - (curve.distanceFromStart + curve.length)
     
     if (distanceToNext < 30) {
-      // Very close - curves are connected
       const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
       parts.push(`into ${nextDir} ${nextCurve.severity}`)
     } else if (distanceToNext < 100) {
-      // Close - quick succession
       const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
       parts.push(`then ${nextDir} ${nextCurve.severity}`)
     }
   }
   
   return parts.join(' ')
-}
-
-/**
- * Generate full callout with distance
- */
-export function generateFullCallout(curve, distance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const callout = generateCallout(curve, mode, speedUnit, nextCurve)
-  
-  // Round distance to nice numbers
-  let distanceText
-  if (distance > 400) {
-    distanceText = `${Math.round(distance / 100) * 100} meters`
-  } else if (distance > 150) {
-    distanceText = `${Math.round(distance / 50) * 50} meters`
-  } else {
-    distanceText = `${Math.round(distance / 25) * 25} meters`
-  }
-  
-  return `In ${distanceText}, ${callout}`
-}
-
-/**
- * Hook for speech synthesis
- */
-export function useSpeech() {
-  const { setSpeaking, settings } = useStore()
-  const lastSpokenRef = useRef(null)
-  const speakingRef = useRef(false)
-  const queueRef = useRef([])
-  
-  const processQueue = useCallback(() => {
-    if (speakingRef.current || queueRef.current.length === 0) return
-    
-    const { text, priority } = queueRef.current.shift()
-    
-    if (!synth || !settings.voiceEnabled) return
-    
-    // Don't repeat the same callout
-    if (text === lastSpokenRef.current) {
-      processQueue()
-      return
-    }
-    
-    // Cancel any ongoing speech for high priority
-    if (priority === 'high') {
-      synth.cancel()
-    }
-    
-    const utterance = new SpeechSynthesisUtterance(text)
-    
-    if (preferredVoice) {
-      utterance.voice = preferredVoice
-    }
-    
-    utterance.rate = 1.1 // Slightly faster for urgency
-    utterance.pitch = 1.0
-    utterance.volume = settings.volume || 1.0
-    
-    utterance.onstart = () => {
-      speakingRef.current = true
-      setSpeaking(true, text)
-    }
-    
-    utterance.onend = () => {
-      speakingRef.current = false
-      setSpeaking(false)
-      lastSpokenRef.current = text
-      // Process next in queue
-      setTimeout(processQueue, 100)
-    }
-    
-    utterance.onerror = () => {
-      speakingRef.current = false
-      setSpeaking(false)
-      setTimeout(processQueue, 100)
-    }
-    
-    synth.speak(utterance)
-  }, [setSpeaking, settings.voiceEnabled, settings.volume])
-  
-  const speak = useCallback((text, priority = 'normal') => {
-    if (!text || !synth || !settings.voiceEnabled) return
-    
-    // High priority goes to front of queue
-    if (priority === 'high') {
-      queueRef.current.unshift({ text, priority })
-    } else {
-      queueRef.current.push({ text, priority })
-    }
-    
-    processQueue()
-  }, [processQueue, settings.voiceEnabled])
-  
-  const stop = useCallback(() => {
-    if (synth) {
-      synth.cancel()
-      queueRef.current = []
-      speakingRef.current = false
-      setSpeaking(false)
-    }
-  }, [setSpeaking])
-  
-  const isSpeaking = useCallback(() => {
-    return speakingRef.current
-  }, [])
-  
-  return { speak, stop, isSpeaking }
 }
 
 export default useSpeech
