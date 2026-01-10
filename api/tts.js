@@ -38,11 +38,11 @@ export default async function handler(request) {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_turbo_v2_5', // Fast, low latency model
+          model_id: 'eleven_multilingual_v2', // More consistent than turbo
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.3,
+            stability: 0.85,        // High stability = consistent voice
+            similarity_boost: 0.80, // Keep it sounding like Adam
+            style: 0.15,            // Low style = less variation
             use_speaker_boost: true
           }
         }),
