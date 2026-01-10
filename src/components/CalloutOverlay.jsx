@@ -3,8 +3,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Racing HUD - v4
-// Fixed curve display state
+// Racing HUD - v5
+// Fixed display and positioning
 // ================================
 
 export default function CalloutOverlay() {
@@ -33,7 +33,7 @@ export default function CalloutOverlay() {
   }
 
   // Generate elevation data
-  const { elevationData, totalElevation, currentElevation } = useMemo(() => {
+  const { elevationData, totalElevation, currentElevation, elevationPosition } = useMemo(() => {
     const coords = routeData?.coordinates || []
     const points = []
     const numPoints = 20
@@ -59,230 +59,186 @@ export default function CalloutOverlay() {
       }
     }
     
-    const elevPosition = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
-    const currentElev = points[elevPosition] || points[0]
+    const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
+    const currentElev = points[pos] || points[0]
     
     return {
       elevationData: points,
       totalElevation: Math.round(maxElev - minElev),
-      currentElevation: Math.round(currentElev)
+      currentElevation: Math.round(currentElev),
+      elevationPosition: pos
     }
   }, [routeData, simulationProgress])
 
-  const elevationPosition = Math.min(Math.floor(simulationProgress * 20), 19)
-
   if (!isRunning) return null
 
-  // Show minimal HUD when no curves yet (but don't say "searching")
-  if (!curve && upcomingCurves.length === 0) {
+  // Minimal HUD when no curves ahead
+  if (!curve) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
-        {/* Empty main HUD - just show we're running */}
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-center gap-3">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             <span className="text-white/50 text-sm">
-              {routeMode === 'demo' ? 'Demo Mode Active' : 'Route Active'}
+              {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
             </span>
             <span className="text-white/30 text-xs">• No curves ahead</span>
           </div>
         </div>
         
-        {/* Elevation still shows */}
-        <div className="absolute top-20 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-            <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
-          </div>
-          <div className="h-8">
-            <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-                  <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-                </linearGradient>
-              </defs>
-              <path
-                d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
-                fill="url(#elevGrad)"
-              />
-              <path
-                d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
-                fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
-              />
-            </svg>
-          </div>
-          <div className="text-[9px] text-white/50 text-center mt-1">{currentElevation}ft</div>
-        </div>
+        {/* Elevation widget */}
+        <ElevationWidget 
+          elevationData={elevationData}
+          totalElevation={totalElevation}
+          currentElevation={currentElevation}
+          elevationPosition={elevationPosition}
+          modeColor={modeColor}
+        />
 
-        <style>{`
-          .hud-glass {
-            background: linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255,255,255,0.06);
-            box-shadow: 0 4px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-          }
-        `}</style>
+        <style>{hudStyles}</style>
       </div>
     )
   }
 
-  const recommendedSpeed = curve ? getRecommendedSpeed(curve) : 0
-  const isLeft = curve?.direction === 'LEFT'
-  const severityColor = curve ? getCurveColor(curve.severity) : modeColor
-  const brakingZone = curve ? getBrakingZone(curve.severity) : { show: false }
+  const recommendedSpeed = getRecommendedSpeed(curve)
+  const isLeft = curve.direction === 'LEFT'
+  const severityColor = getCurveColor(curve.severity)
+  const brakingZone = getBrakingZone(curve.severity)
   
   const maxDistance = 400
-  const progress = curve ? Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100)) : 0
+  const progress = Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100))
   const inBrakingZone = brakingZone.show && progress >= brakingZone.start
-
-  // Get modifier display text
-  const getModifierDisplay = (modifier) => {
-    switch (modifier) {
-      case 'HAIRPIN': return 'HAIRPIN'
-      case 'SHARP': return 'SHARP'
-      case 'LONG': return 'LONG'
-      case 'TIGHTENS': return 'TIGHTENS'
-      case 'OPENS': return 'OPENS'
-      default: return null
-    }
-  }
 
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       
       {/* Main HUD Bar */}
-      {curve && (
-        <div className="hud-glass rounded-2xl overflow-hidden">
-          <div className="px-4 py-3">
-            <div className="flex items-center gap-4">
-              
-              {/* Direction + Severity */}
-              <div className="flex items-center gap-3">
-                {curve.isChicane ? (
-                  // Chicane display
+      <div className="hud-glass rounded-2xl overflow-hidden">
+        <div className="px-4 py-3">
+          <div className="flex items-center gap-4">
+            
+            {/* Direction + Severity */}
+            <div className="flex items-center gap-3">
+              {curve.isChicane ? (
+                <div 
+                  className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
+                  style={{ 
+                    background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+                    border: `1.5px solid ${severityColor}50`,
+                    boxShadow: `0 0 20px ${severityColor}30`
+                  }}
+                >
+                  <span className="text-[10px] font-bold tracking-wider" style={{ color: severityColor }}>
+                    {curve.chicaneType === 'CHICANE' ? 'CHICANE' : 'S-CURVE'}
+                  </span>
+                  <span className="text-lg font-bold" style={{ color: severityColor }}>
+                    {curve.startDirection === 'LEFT' ? '←' : '→'} {curve.severitySequence}
+                  </span>
+                </div>
+              ) : (
+                <>
                   <div 
-                    className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
+                    className="w-12 h-12 rounded-xl flex items-center justify-center"
                     style={{ 
                       background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
                       border: `1.5px solid ${severityColor}50`,
                       boxShadow: `0 0 20px ${severityColor}30`
                     }}
                   >
-                    <span className="text-[10px] font-bold tracking-wider" style={{ color: severityColor }}>
-                      {curve.chicaneType === 'CHICANE' ? 'CHICANE' : 'S-CURVE'}
-                    </span>
-                    <span className="text-lg font-bold" style={{ color: severityColor }}>
-                      {curve.startDirection === 'LEFT' ? '←' : '→'} {curve.severitySequence}
-                    </span>
-                  </div>
-                ) : (
-                  // Regular curve display
-                  <>
-                    <div 
-                      className="w-12 h-12 rounded-xl flex items-center justify-center"
-                      style={{ 
-                        background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
-                        border: `1.5px solid ${severityColor}50`,
-                        boxShadow: `0 0 20px ${severityColor}30`
-                      }}
+                    <svg 
+                      width="28" height="28" viewBox="0 0 24 24" 
+                      fill={severityColor}
+                      style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
                     >
-                      <svg 
-                        width="28" height="28" viewBox="0 0 24 24" 
-                        fill={severityColor}
-                        style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
-                      >
-                        <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                      </svg>
-                    </div>
-                    
-                    <div className="flex flex-col">
-                      <div 
-                        className="text-4xl font-bold tracking-tight leading-none"
-                        style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
-                      >
-                        {curve.severity}
-                      </div>
-                      {curve.modifier && (
-                        <div 
-                          className="text-[10px] font-bold tracking-wider mt-0.5"
-                          style={{ 
-                            color: curve.modifier === 'TIGHTENS' ? '#f97316' : 
-                                   curve.modifier === 'OPENS' ? '#22c55e' : severityColor 
-                          }}
-                        >
-                          {getModifierDisplay(curve.modifier)}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Progress Bar */}
-              <div className="flex-1 px-2">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
-                  <span 
-                    className="text-lg font-bold tracking-tight"
-                    style={{ color: inBrakingZone ? '#ff3366' : 'white' }}
-                  >
-                    {curve.distance}<span className="text-xs text-white/40 ml-1">m</span>
-                  </span>
-                </div>
-                
-                <div className="h-3 rounded-full bg-white/[0.06] overflow-hidden relative">
-                  {brakingZone.show && (
-                    <div 
-                      className="absolute top-0 bottom-0 rounded-r-full"
-                      style={{
-                        left: `${brakingZone.start}%`,
-                        right: 0,
-                        background: `linear-gradient(90deg, #ffd50030 0%, #ff336650 50%, #ff336680 100%)`
-                      }}
-                    />
-                  )}
+                      <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                    </svg>
+                  </div>
                   
+                  <div className="flex flex-col">
+                    <div 
+                      className="text-4xl font-bold tracking-tight leading-none"
+                      style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
+                    >
+                      {curve.severity}
+                    </div>
+                    {curve.modifier && (
+                      <div 
+                        className="text-[10px] font-bold tracking-wider mt-0.5"
+                        style={{ 
+                          color: curve.modifier === 'TIGHTENS' ? '#f97316' : 
+                                 curve.modifier === 'OPENS' ? '#22c55e' : severityColor 
+                        }}
+                      >
+                        {curve.modifier}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Progress Bar */}
+            <div className="flex-1 px-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
+                <span 
+                  className="text-lg font-bold tracking-tight"
+                  style={{ color: inBrakingZone ? '#ff3366' : 'white' }}
+                >
+                  {Math.round(curve.distance)}<span className="text-xs text-white/40 ml-1">m</span>
+                </span>
+              </div>
+              
+              <div className="h-3 rounded-full bg-white/[0.06] overflow-hidden relative">
+                {brakingZone.show && (
                   <div 
-                    className="h-full rounded-full transition-all duration-150"
-                    style={{ 
-                      width: `${progress}%`,
-                      background: inBrakingZone 
-                        ? `linear-gradient(90deg, ${modeColor}, #ffd500, #ff3366)`
-                        : `linear-gradient(90deg, ${modeColor}90, ${modeColor})`,
-                      boxShadow: inBrakingZone ? '0 0 15px #ff336680' : `0 0 10px ${modeColor}50`
+                    className="absolute top-0 bottom-0 rounded-r-full"
+                    style={{
+                      left: `${brakingZone.start}%`,
+                      right: 0,
+                      background: `linear-gradient(90deg, #ffd50030 0%, #ff336650 50%, #ff336680 100%)`
                     }}
                   />
-                  
-                  {inBrakingZone && (
-                    <div className="absolute inset-0 flex items-center justify-end pr-2">
-                      <span className="text-[9px] font-black text-white tracking-wider animate-pulse">BRAKE</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Speed */}
-              <div className="text-right pl-2">
+                )}
+                
                 <div 
-                  className="text-4xl font-bold tracking-tight leading-none"
-                  style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}
-                >
-                  {recommendedSpeed}
-                </div>
-                <div className="text-[10px] font-semibold text-white/40 tracking-wider mt-0.5">
-                  {settings.speedUnit?.toUpperCase() || 'MPH'}
-                </div>
+                  className="h-full rounded-full transition-all duration-150"
+                  style={{ 
+                    width: `${progress}%`,
+                    background: inBrakingZone 
+                      ? `linear-gradient(90deg, ${modeColor}, #ffd500, #ff3366)`
+                      : `linear-gradient(90deg, ${modeColor}90, ${modeColor})`,
+                    boxShadow: inBrakingZone ? '0 0 15px #ff336680' : `0 0 10px ${modeColor}50`
+                  }}
+                />
+                
+                {inBrakingZone && (
+                  <div className="absolute inset-0 flex items-center justify-end pr-2">
+                    <span className="text-[9px] font-black text-white tracking-wider animate-pulse">BRAKE</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Speed */}
+            <div className="text-right pl-2">
+              <div 
+                className="text-4xl font-bold tracking-tight leading-none"
+                style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}
+              >
+                {recommendedSpeed}
+              </div>
+              <div className="text-[10px] font-semibold text-white/40 tracking-wider mt-0.5">
+                {settings.speedUnit?.toUpperCase() || 'MPH'}
               </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Upcoming Curves - Left side */}
       {upcomingCurves.length > 1 && (
-        <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
+        <div className="absolute top-20 left-3 hud-glass rounded-xl px-3 py-2">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
           <div className="flex flex-col gap-1">
             {upcomingCurves.slice(1, 4).map((next) => {
@@ -296,7 +252,7 @@ export default function CalloutOverlay() {
                       {next.chicaneType === 'CHICANE' ? 'CH' : 'S'}{next.startDirection === 'LEFT' ? '←' : '→'}
                     </span>
                     <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severitySequence}</span>
-                    <span className="text-[10px] text-white/30">{next.distance}m</span>
+                    <span className="text-[10px] text-white/30">{Math.round(next.distance)}m</span>
                   </div>
                 )
               }
@@ -319,7 +275,7 @@ export default function CalloutOverlay() {
                       {next.modifier === 'TIGHTENS' ? '⟩' : next.modifier === 'OPENS' ? '⟨' : ''}
                     </span>
                   )}
-                  <span className="text-[10px] text-white/30">{next.distance}m</span>
+                  <span className="text-[10px] text-white/30">{Math.round(next.distance)}m</span>
                 </div>
               )
             })}
@@ -327,43 +283,66 @@ export default function CalloutOverlay() {
         </div>
       )}
 
-      {/* Elevation - Right side */}
-      <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-          <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
-        </div>
-        <div className="h-8">
-          <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="elevGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-                <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-              </linearGradient>
-            </defs>
-            <path
-              d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
-              fill="url(#elevGrad2)"
-            />
-            <path
-              d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
-              fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
-            />
-            <circle cx={(elevationPosition / 19) * 80} cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 18} r="2.5" fill={modeColor}/>
-          </svg>
-        </div>
-        <div className="text-[9px] text-white/50 text-center mt-0.5">{currentElevation}ft</div>
-      </div>
+      {/* Elevation widget */}
+      <ElevationWidget 
+        elevationData={elevationData}
+        totalElevation={totalElevation}
+        currentElevation={currentElevation}
+        elevationPosition={elevationPosition}
+        modeColor={modeColor}
+      />
 
-      <style>{`
-        .hud-glass {
-          background: linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border: 1px solid rgba(255,255,255,0.06);
-          box-shadow: 0 4px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
-        }
-      `}</style>
+      <style>{hudStyles}</style>
     </div>
   )
 }
+
+// Elevation Widget Component
+function ElevationWidget({ elevationData, totalElevation, currentElevation, elevationPosition, modeColor }) {
+  return (
+    <div className="absolute top-20 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
+        <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
+      </div>
+      <div className="h-8">
+        <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="elevGradHud" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+              <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+          <path
+            d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
+            fill="url(#elevGradHud)"
+          />
+          <path
+            d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
+            fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
+          />
+          <circle 
+            cx={(elevationPosition / 19) * 80} 
+            cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 18} 
+            r="2.5" 
+            fill={modeColor}
+          />
+        </svg>
+      </div>
+      <div className="text-[9px] text-white/50 text-center mt-0.5">{currentElevation}ft</div>
+    </div>
+  )
+}
+
+const hudStyles = `
+  .hud-glass {
+    background: linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 4px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+`
