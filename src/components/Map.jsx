@@ -4,9 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v9
-// Mode changes only update colors, not view
-// Recenter button always visible when panned
+// Map Component - v10
+// Fixed recenter button position
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -37,7 +36,7 @@ export default function Map() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Initialize map ONCE - empty dependency array
+  // Initialize map ONCE
   useEffect(() => {
     if (map.current) return
 
@@ -56,7 +55,6 @@ export default function Map() {
     map.current.on('load', () => {
       setMapLoaded(true)
       
-      // 3D terrain
       try {
         map.current.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -97,7 +95,7 @@ export default function Map() {
       map.current?.remove()
       map.current = null
     }
-  }, []) // EMPTY - only run once
+  }, [])
 
   // Add route to map when loaded
   useEffect(() => {
@@ -144,13 +142,12 @@ export default function Map() {
       })
 
       routeAddedRef.current = true
-      console.log('Route added with', routeData.coordinates.length, 'points')
     } catch (e) {
       console.log('Route add error:', e)
     }
   }, [mapLoaded, routeData])
 
-  // Update route color when mode changes - ONLY color, nothing else
+  // Update route color when mode changes
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     
@@ -163,51 +160,30 @@ export default function Map() {
       }
     } catch (e) {}
     
-    // Update marker color too
+    // Update marker color
     if (userMarkerEl.current) {
-      const circles = userMarkerEl.current.querySelectorAll('div')
+      const divs = userMarkerEl.current.querySelectorAll('div')
       const arrow = userMarkerEl.current.querySelector('#heading-arrow')
-      if (circles[0]) circles[0].style.borderColor = modeColor
-      if (circles[2]) {
-        circles[2].style.background = modeColor
-        circles[2].style.boxShadow = `0 2px 15px ${modeColor}80`
+      if (divs[0]) divs[0].style.borderColor = modeColor
+      if (divs[2]) {
+        divs[2].style.background = modeColor
+        divs[2].style.boxShadow = `0 2px 15px ${modeColor}80`
       }
-      if (arrow) {
-        arrow.style.borderBottomColor = modeColor
-      }
+      if (arrow) arrow.style.borderBottomColor = modeColor
     }
   }, [modeColor, mapLoaded])
 
   // Create user marker ONCE
   useEffect(() => {
     if (!map.current || !mapLoaded) return
-    if (userMarker.current) return // Already created
+    if (userMarker.current) return
 
     const el = document.createElement('div')
     el.innerHTML = `
       <div style="position: relative; width: 44px; height: 44px;">
-        <div style="
-          position: absolute; inset: 0;
-          border: 2px solid #00d4ff;
-          border-radius: 50%;
-          animation: pulse 2s ease-out infinite;
-        "></div>
-        <div id="heading-arrow" style="
-          position: absolute; top: -8px; left: 50%;
-          transform: translateX(-50%);
-          width: 0; height: 0;
-          border-left: 10px solid transparent;
-          border-right: 10px solid transparent;
-          border-bottom: 18px solid #00d4ff;
-          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-        "></div>
-        <div style="
-          position: absolute; inset: 10px;
-          background: #00d4ff;
-          border-radius: 50%;
-          border: 3px solid white;
-          box-shadow: 0 2px 15px #00d4ff80;
-        "></div>
+        <div style="position: absolute; inset: 0; border: 2px solid #00d4ff; border-radius: 50%; animation: pulse 2s ease-out infinite;"></div>
+        <div id="heading-arrow" style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 18px solid #00d4ff; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));"></div>
+        <div style="position: absolute; inset: 10px; background: #00d4ff; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 15px #00d4ff80;"></div>
       </div>
     `
     
@@ -232,7 +208,6 @@ export default function Map() {
     if (position) {
       userMarker.current.setLngLat(position)
 
-      // Update heading arrow rotation
       if (userMarkerEl.current) {
         const arrow = userMarkerEl.current.querySelector('#heading-arrow')
         if (arrow) {
@@ -240,7 +215,6 @@ export default function Map() {
         }
       }
 
-      // Follow camera if enabled
       if (isRunning && isFollowingRef.current) {
         map.current.easeTo({
           center: position,
@@ -291,20 +265,9 @@ export default function Map() {
         const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
         
         el.innerHTML = `
-          <div style="
-            display: flex; flex-direction: column; align-items: center;
-            background: ${isActive ? color : 'rgba(0,0,0,0.9)'};
-            padding: 6px 10px; border-radius: 10px;
-            border: 2px solid ${color};
-            box-shadow: 0 4px 15px ${color}50;
-            transform: scale(${isActive ? 1.15 : 1});
-          ">
-            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color}; letter-spacing: 1px;">
-              ${typeLabel}${dirChar}
-            </span>
-            <span style="font-size: 13px; font-weight: 700; color: ${isActive ? 'white' : color};">
-              ${curve.severitySequence}
-            </span>
+          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
+            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color}; letter-spacing: 1px;">${typeLabel}${dirChar}</span>
+            <span style="font-size: 13px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
           </div>
         `
       } else {
@@ -316,21 +279,12 @@ export default function Map() {
         else if (curve.modifier === 'LONG') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">LONG</div>`
         
         el.innerHTML = `
-          <div style="
-            display: flex; flex-direction: column; align-items: center;
-            background: ${isActive ? color : 'rgba(0,0,0,0.9)'};
-            padding: 6px 10px; border-radius: 10px;
-            border: 2px solid ${color};
-            box-shadow: 0 4px 15px ${color}50;
-            transform: scale(${isActive ? 1.15 : 1});
-          ">
+          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
             <div style="display: flex; align-items: center; gap: 4px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="${isActive ? 'white' : color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
                 <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
               </svg>
-              <span style="font-size: 18px; font-weight: 700; color: ${isActive ? 'white' : color};">
-                ${curve.severity}
-              </span>
+              <span style="font-size: 18px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severity}</span>
             </div>
             ${modifierText}
           </div>
@@ -366,14 +320,14 @@ export default function Map() {
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Recenter Button */}
+      {/* Recenter Button - positioned in center-right to avoid overlaps */}
       {showRecenter && (
         <button
           onClick={handleRecenter}
-          className="absolute top-24 right-4 z-30 bg-cyan-500 hover:bg-cyan-400 rounded-full p-3 border-2 border-white shadow-lg transition-all active:scale-95"
+          className="absolute top-1/2 right-4 -translate-y-1/2 z-30 bg-cyan-500 hover:bg-cyan-400 rounded-full p-4 border-2 border-white shadow-lg transition-all active:scale-95"
           style={{ boxShadow: '0 4px 20px rgba(0,212,255,0.5)' }}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
