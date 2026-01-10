@@ -4,8 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v5
-// Fixed route display
+// Map Component - v6
+// Fixed: Route displays when starting navigation
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -15,6 +15,7 @@ export default function Map() {
   const map = useRef(null)
   const userMarker = useRef(null)
   const curveMarkers = useRef([])
+  const routeAdded = useRef(false)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isFollowing, setIsFollowing] = useState(true)
@@ -37,22 +38,24 @@ export default function Map() {
   useEffect(() => {
     if (map.current) return
 
-    // Default center if no route
-    const defaultCenter = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
+    const startCoord = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
+
+    console.log('Initializing map with routeData:', routeData?.coordinates?.length, 'points')
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
       style: settings.mapStyle === 'satellite' 
         ? 'mapbox://styles/mapbox/satellite-streets-v12'
         : 'mapbox://styles/mapbox/dark-v11',
-      center: defaultCenter,
-      zoom: 15,
+      center: startCoord,
+      zoom: 14,
       pitch: 60,
       bearing: 0,
       antialias: true
     })
 
     map.current.on('load', () => {
+      console.log('Map loaded')
       setMapLoaded(true)
       
       // 3D terrain
@@ -74,11 +77,6 @@ export default function Map() {
           'sky-atmosphere-sun-intensity': 15
         }
       })
-
-      // Add route if we have coordinates
-      if (routeData?.coordinates?.length > 0) {
-        addRouteToMap(routeData.coordinates)
-      }
     })
 
     // Detect user interaction to pause following
@@ -90,22 +88,37 @@ export default function Map() {
     return () => {
       map.current?.remove()
       map.current = null
+      routeAdded.current = false
     }
-  }, []) // Only run once on mount
+  }, [])
 
-  // Add route to map helper function
-  const addRouteToMap = useCallback((coordinates) => {
-    if (!map.current) return
+  // Add route when map is loaded and we have route data
+  useEffect(() => {
+    if (!map.current || !mapLoaded) {
+      console.log('Map not ready yet')
+      return
+    }
+    
+    if (!routeData?.coordinates?.length) {
+      console.log('No route coordinates')
+      return
+    }
+
+    console.log('Adding route to map:', routeData.coordinates.length, 'points')
 
     // Remove existing route layers and source
-    if (map.current.getLayer('route-glow')) {
-      map.current.removeLayer('route-glow')
-    }
-    if (map.current.getLayer('route-line')) {
-      map.current.removeLayer('route-line')
-    }
-    if (map.current.getSource('route')) {
-      map.current.removeSource('route')
+    try {
+      if (map.current.getLayer('route-glow')) {
+        map.current.removeLayer('route-glow')
+      }
+      if (map.current.getLayer('route-line')) {
+        map.current.removeLayer('route-line')
+      }
+      if (map.current.getSource('route')) {
+        map.current.removeSource('route')
+      }
+    } catch (e) {
+      console.log('Error removing old route:', e)
     }
 
     // Add route source
@@ -116,7 +129,7 @@ export default function Map() {
         properties: {},
         geometry: {
           type: 'LineString',
-          coordinates: coordinates
+          coordinates: routeData.coordinates
         }
       }
     })
@@ -148,29 +161,24 @@ export default function Map() {
       }
     })
 
-    console.log('Route added to map with', coordinates.length, 'points')
-  }, [modeColor])
+    routeAdded.current = true
+    console.log('Route added successfully!')
 
-  // Update route when routeData changes
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return
-    
-    if (routeData?.coordinates?.length > 0) {
-      addRouteToMap(routeData.coordinates)
-      
-      // Fit to route bounds
+    // Fit to route bounds initially
+    if (routeData.coordinates.length > 1) {
       const bounds = routeData.coordinates.reduce((bounds, coord) => {
         return bounds.extend(coord)
       }, new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
 
       map.current.fitBounds(bounds, {
-        padding: { top: 100, bottom: 200, left: 50, right: 50 },
+        padding: { top: 150, bottom: 250, left: 50, right: 50 },
         duration: 1000
       })
     }
-  }, [routeData, mapLoaded, addRouteToMap])
 
-  // Create user marker
+  }, [mapLoaded, routeData?.coordinates, modeColor])
+
+  // Create/update user marker
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -222,7 +230,6 @@ export default function Map() {
       .setLngLat(startPos)
       .addTo(map.current)
 
-    return () => userMarker.current?.remove()
   }, [mapLoaded, modeColor])
 
   // Update position and camera
@@ -255,17 +262,20 @@ export default function Map() {
 
   // Recenter function
   const handleRecenter = useCallback(() => {
-    if (!map.current || !position) return
+    if (!map.current) return
+    
+    const centerPos = position || routeData?.coordinates?.[0]
+    if (!centerPos) return
     
     setIsFollowing(true)
     map.current.easeTo({
-      center: position,
-      bearing: heading,
+      center: centerPos,
+      bearing: heading || 0,
       pitch: 65,
       zoom: 16,
       duration: 500
     })
-  }, [position, heading])
+  }, [position, heading, routeData])
 
   // Update curve markers
   useEffect(() => {
@@ -296,7 +306,6 @@ export default function Map() {
             border: 2px solid ${color};
             box-shadow: 0 4px 15px ${color}50;
             transform: scale(${isActive ? 1.15 : 1});
-            transition: all 0.2s ease;
           ">
             <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color}; letter-spacing: 1px;">
               ${typeLabel}${dirChar}
@@ -325,7 +334,6 @@ export default function Map() {
             border: 2px solid ${color};
             box-shadow: 0 4px 15px ${color}50;
             transform: scale(${isActive ? 1.15 : 1});
-            transition: all 0.2s ease;
           ">
             <div style="display: flex; align-items: center; gap: 4px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="${isActive ? 'white' : color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
@@ -348,7 +356,7 @@ export default function Map() {
     })
   }, [upcomingCurves, activeCurve, mapLoaded])
 
-  // Update route color based on mode
+  // Update route color when mode changes
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     
@@ -360,11 +368,11 @@ export default function Map() {
         map.current.setPaintProperty('route-glow', 'line-color', modeColor)
       }
     } catch (e) {
-      // Style might be changing, ignore
+      // Layer might not exist yet
     }
-  }, [mode, modeColor, mapLoaded])
+  }, [modeColor, mapLoaded])
 
-  // Keep screen awake when running
+  // Keep screen awake
   useEffect(() => {
     if (!isRunning || settings.keepScreenOn === false) return
     
@@ -374,16 +382,11 @@ export default function Map() {
         if ('wakeLock' in navigator) {
           wakeLock = await navigator.wakeLock.request('screen')
         }
-      } catch (err) {
-        // Wake lock not available
-      }
+      } catch (err) {}
     }
     
     requestWakeLock()
-    
-    return () => {
-      wakeLock?.release()
-    }
+    return () => wakeLock?.release()
   }, [isRunning, settings.keepScreenOn])
 
   return (
@@ -394,14 +397,20 @@ export default function Map() {
       {isRunning && !isFollowing && (
         <button
           onClick={handleRecenter}
-          className="absolute top-24 right-4 z-10 bg-black/70 backdrop-blur-xl rounded-full p-3 border border-white/10 hover:bg-black/90 transition-all"
-          style={{ boxShadow: '0 4px 15px rgba(0,0,0,0.3)' }}
+          className="absolute top-24 right-4 z-10 bg-black/70 backdrop-blur-xl rounded-full p-3 border border-white/10 hover:bg-black/90 transition-all active:scale-95"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
         </button>
+      )}
+
+      {/* Debug info - remove in production */}
+      {mapLoaded && (
+        <div className="absolute bottom-48 left-4 text-[10px] text-white/30 bg-black/50 px-2 py-1 rounded z-10">
+          Route: {routeData?.coordinates?.length || 0} pts | Added: {routeAdded.current ? 'Yes' : 'No'}
+        </div>
       )}
 
       {/* Loading state */}
@@ -411,15 +420,6 @@ export default function Map() {
             <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" />
             <p className="text-gray-400 text-sm">Loading map...</p>
           </div>
-        </div>
-      )}
-
-      {/* No route warning */}
-      {mapLoaded && (!routeData?.coordinates || routeData.coordinates.length === 0) && (
-        <div className="absolute top-20 left-4 right-4 bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-3 backdrop-blur z-30">
-          <p className="text-yellow-400 text-sm">
-            ⚠️ No route data available
-          </p>
         </div>
       )}
 
