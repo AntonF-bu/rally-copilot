@@ -1,13 +1,15 @@
 // ================================
-// Curve Detection Algorithm v4
-// Fixed-interval sampling for consistent curve detection
+// Curve Detection Algorithm v5
+// Full featured: sliding window, merging, S-curves, tightening/opening
 // ================================
 
-const SAMPLE_INTERVAL = 25 // meters between samples
+const SAMPLE_INTERVAL = 20 // meters between samples
+const SLIDING_WINDOW_DISTANCE = 120 // meters for gradual curve detection
+const MIN_CURVE_SEPARATION = 75 // meters - closer curves get merged
+const CHICANE_MAX_DISTANCE = 100 // meters - max distance for S-curve/chicane detection
 
 /**
- * Detect curves from an array of coordinates
- * Uses fixed-interval interpolation for consistent detection
+ * Main entry point - detect all curves with full analysis
  */
 export function detectCurves(coordinates) {
   if (!coordinates || coordinates.length < 3) return []
@@ -19,111 +21,37 @@ export function detectCurves(coordinates) {
   console.log(`Interpolated to ${interpolatedPoints.length} points at ${SAMPLE_INTERVAL}m intervals`)
 
   // Step 2: Calculate heading at each point
-  const headings = []
-  for (let i = 0; i < interpolatedPoints.length - 1; i++) {
-    headings.push(getBearing(interpolatedPoints[i].coord, interpolatedPoints[i + 1].coord))
-  }
+  const headings = calculateHeadings(interpolatedPoints)
 
-  // Step 3: Detect curves from heading changes
-  const curves = []
-  let curveId = 1
+  // Step 3: Detect curves using both immediate and sliding window
+  let curves = detectAllCurves(interpolatedPoints, headings)
+  console.log(`Initial detection: ${curves.length} curves`)
 
-  const CURVE_START_THRESHOLD = 6  // degrees to start detecting
-  const CURVE_CONTINUE_THRESHOLD = 3
-  const MIN_CURVE_ANGLE = 15  // minimum total angle
+  // Step 4: Analyze tightening/opening for each curve
+  curves = analyzeCurveShape(curves, interpolatedPoints, headings)
 
-  let i = 0
-  while (i < headings.length - 1) {
-    const headingChange = getHeadingChange(headings[i], headings[i + 1])
-    
-    if (Math.abs(headingChange) > CURVE_START_THRESHOLD) {
-      let curveStart = i
-      let curveEnd = i + 1
-      let totalHeadingChange = headingChange
-      let direction = Math.sign(headingChange)
-      
-      // Continue while still turning same direction
-      while (curveEnd < headings.length - 1) {
-        const nextChange = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
-        
-        if (Math.sign(nextChange) === direction && Math.abs(nextChange) > CURVE_CONTINUE_THRESHOLD) {
-          totalHeadingChange += nextChange
-          curveEnd++
-        } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
-          // Small change - look ahead
-          let lookAhead = 0
-          for (let j = 1; j <= 3 && curveEnd + j < headings.length; j++) {
-            lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
-          }
-          if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
-            totalHeadingChange += nextChange
-            curveEnd++
-          } else {
-            break
-          }
-        } else {
-          break
-        }
-      }
+  // Step 5: Detect S-curves and chicanes
+  curves = detectChicanes(curves)
 
-      const absAngle = Math.abs(totalHeadingChange)
-      
-      if (absAngle >= MIN_CURVE_ANGLE) {
-        // Calculate curve properties
-        const startDist = interpolatedPoints[curveStart].distance
-        const endDist = interpolatedPoints[Math.min(curveEnd + 1, interpolatedPoints.length - 1)].distance
-        const curveLength = endDist - startDist
-        const radius = estimateRadius(curveLength, absAngle)
-        const severity = getSeverityFromRadius(radius, absAngle)
-        const curveDirection = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
-        
-        // Apex position
-        const apexIndex = Math.floor((curveStart + curveEnd + 1) / 2)
-        const position = interpolatedPoints[Math.min(apexIndex, interpolatedPoints.length - 1)].coord
-        
-        const modifier = getModifier(totalHeadingChange, severity, curveLength)
+  // Step 6: Merge curves that are too close
+  curves = mergeCurves(curves)
 
-        curves.push({
-          id: curveId++,
-          position,
-          direction: curveDirection,
-          severity,
-          modifier,
-          radius: Math.round(radius),
-          totalAngle: Math.round(absAngle),
-          length: Math.round(curveLength),
-          distanceFromStart: Math.round(startDist),
-          ...getSpeedRecommendations(severity)
-        })
-      }
-
-      i = curveEnd + 1
-    } else {
-      i++
-    }
-  }
+  // Step 7: Assign final IDs
+  curves = curves.map((curve, idx) => ({ ...curve, id: idx + 1 }))
 
   // Log results
-  console.log(`Curve detection: Found ${curves.length} curves`)
-  const breakdown = {
-    easy: curves.filter(c => c.severity <= 2).length,
-    medium: curves.filter(c => c.severity === 3 || c.severity === 4).length,
-    hard: curves.filter(c => c.severity >= 5).length
-  }
-  console.log(`Breakdown: ${breakdown.easy} easy, ${breakdown.medium} medium, ${breakdown.hard} hard`)
+  logResults(curves)
   
   return curves
 }
 
 /**
  * Interpolate route to fixed-interval points
- * This ensures consistent sampling regardless of original point density
  */
 function interpolateRoute(coordinates, intervalMeters) {
   const result = []
   let cumulativeDistance = 0
   
-  // Add first point
   result.push({ coord: coordinates[0], distance: 0 })
   
   let nextTargetDistance = intervalMeters
@@ -134,12 +62,10 @@ function interpolateRoute(coordinates, intervalMeters) {
     const segmentLength = getDistance(segmentStart, segmentEnd)
     const segmentEndDistance = cumulativeDistance + segmentLength
     
-    // Add interpolated points within this segment
     while (nextTargetDistance <= segmentEndDistance) {
       const distanceIntoSegment = nextTargetDistance - cumulativeDistance
       const fraction = distanceIntoSegment / segmentLength
       
-      // Linear interpolation
       const interpolatedCoord = [
         segmentStart[0] + (segmentEnd[0] - segmentStart[0]) * fraction,
         segmentStart[1] + (segmentEnd[1] - segmentStart[1]) * fraction
@@ -152,7 +78,6 @@ function interpolateRoute(coordinates, intervalMeters) {
     cumulativeDistance = segmentEndDistance
   }
   
-  // Add last point if not already added
   const lastPoint = coordinates[coordinates.length - 1]
   const lastResultPoint = result[result.length - 1]
   if (getDistance(lastResultPoint.coord, lastPoint) > 1) {
@@ -161,6 +86,462 @@ function interpolateRoute(coordinates, intervalMeters) {
   
   return result
 }
+
+/**
+ * Calculate headings between consecutive points
+ */
+function calculateHeadings(points) {
+  const headings = []
+  for (let i = 0; i < points.length - 1; i++) {
+    headings.push(getBearing(points[i].coord, points[i + 1].coord))
+  }
+  return headings
+}
+
+/**
+ * Detect curves using both immediate changes and sliding window
+ */
+function detectAllCurves(points, headings) {
+  const curves = []
+  let curveId = 1
+  
+  // Track which points are already part of a curve
+  const usedPoints = new Set()
+  
+  // Method 1: Immediate heading change detection (sharp curves)
+  const sharpCurves = detectSharpCurves(points, headings, usedPoints)
+  sharpCurves.forEach(c => {
+    curves.push(c)
+    for (let i = c.startIndex; i <= c.endIndex; i++) usedPoints.add(i)
+  })
+  
+  // Method 2: Sliding window detection (gradual curves)
+  const gradualCurves = detectGradualCurves(points, headings, usedPoints)
+  gradualCurves.forEach(c => curves.push(c))
+  
+  // Sort by distance from start
+  curves.sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+  
+  return curves
+}
+
+/**
+ * Detect sharp curves (immediate heading changes)
+ */
+function detectSharpCurves(points, headings, usedPoints) {
+  const curves = []
+  
+  const CURVE_START_THRESHOLD = 5
+  const CURVE_CONTINUE_THRESHOLD = 2
+  const MIN_CURVE_ANGLE = 12
+
+  let i = 0
+  while (i < headings.length - 1) {
+    if (usedPoints.has(i)) { i++; continue }
+    
+    const headingChange = getHeadingChange(headings[i], headings[i + 1])
+    
+    if (Math.abs(headingChange) > CURVE_START_THRESHOLD) {
+      let curveStart = i
+      let curveEnd = i + 1
+      let totalHeadingChange = headingChange
+      let direction = Math.sign(headingChange)
+      
+      // Track heading changes at different points for tightening analysis
+      const segmentChanges = [{ index: i, change: headingChange }]
+      
+      while (curveEnd < headings.length - 1) {
+        const nextChange = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
+        
+        if (Math.sign(nextChange) === direction && Math.abs(nextChange) > CURVE_CONTINUE_THRESHOLD) {
+          totalHeadingChange += nextChange
+          segmentChanges.push({ index: curveEnd, change: nextChange })
+          curveEnd++
+        } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
+          let lookAhead = 0
+          for (let j = 1; j <= 3 && curveEnd + j < headings.length; j++) {
+            lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
+          }
+          if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
+            totalHeadingChange += nextChange
+            segmentChanges.push({ index: curveEnd, change: nextChange })
+            curveEnd++
+          } else {
+            break
+          }
+        } else {
+          break
+        }
+      }
+
+      const absAngle = Math.abs(totalHeadingChange)
+      
+      if (absAngle >= MIN_CURVE_ANGLE) {
+        const curve = createCurveObject(points, curveStart, curveEnd, totalHeadingChange, segmentChanges)
+        curve.detectionMethod = 'sharp'
+        curves.push(curve)
+      }
+
+      i = curveEnd + 1
+    } else {
+      i++
+    }
+  }
+  
+  return curves
+}
+
+/**
+ * Detect gradual curves using sliding window
+ */
+function detectGradualCurves(points, headings, usedPoints) {
+  const curves = []
+  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL)
+  const MIN_GRADUAL_ANGLE = 25 // Higher threshold for gradual curves
+  
+  let i = 0
+  while (i < headings.length - windowSize) {
+    // Skip if this area already has a curve
+    let hasUsedPoint = false
+    for (let j = i; j < i + windowSize && !hasUsedPoint; j++) {
+      if (usedPoints.has(j)) hasUsedPoint = true
+    }
+    if (hasUsedPoint) { i += Math.floor(windowSize / 2); continue }
+    
+    // Calculate total heading change over window
+    let windowHeadingChange = 0
+    for (let j = i; j < i + windowSize - 1; j++) {
+      windowHeadingChange += getHeadingChange(headings[j], headings[j + 1])
+    }
+    
+    const absChange = Math.abs(windowHeadingChange)
+    
+    if (absChange >= MIN_GRADUAL_ANGLE) {
+      // Found a gradual curve - expand to find full extent
+      let curveStart = i
+      let curveEnd = i + windowSize - 1
+      let totalChange = windowHeadingChange
+      const direction = Math.sign(windowHeadingChange)
+      
+      // Expand backwards
+      while (curveStart > 0 && !usedPoints.has(curveStart - 1)) {
+        const change = getHeadingChange(headings[curveStart - 1], headings[curveStart])
+        if (Math.sign(change) === direction && Math.abs(change) > 1) {
+          totalChange += change
+          curveStart--
+        } else {
+          break
+        }
+      }
+      
+      // Expand forwards
+      while (curveEnd < headings.length - 1 && !usedPoints.has(curveEnd + 1)) {
+        const change = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
+        if (Math.sign(change) === direction && Math.abs(change) > 1) {
+          totalChange += change
+          curveEnd++
+        } else {
+          break
+        }
+      }
+      
+      const segmentChanges = []
+      for (let j = curveStart; j <= curveEnd; j++) {
+        if (j < headings.length - 1) {
+          segmentChanges.push({ index: j, change: getHeadingChange(headings[j], headings[j + 1]) })
+        }
+      }
+      
+      const curve = createCurveObject(points, curveStart, curveEnd, totalChange, segmentChanges)
+      curve.detectionMethod = 'gradual'
+      curves.push(curve)
+      
+      // Mark points as used
+      for (let j = curveStart; j <= curveEnd; j++) usedPoints.add(j)
+      
+      i = curveEnd + 1
+    } else {
+      i++
+    }
+  }
+  
+  return curves
+}
+
+/**
+ * Create a curve object with all properties
+ */
+function createCurveObject(points, startIndex, endIndex, totalHeadingChange, segmentChanges) {
+  const startDist = points[startIndex].distance
+  const endDist = points[Math.min(endIndex + 1, points.length - 1)].distance
+  const curveLength = endDist - startDist
+  const absAngle = Math.abs(totalHeadingChange)
+  const radius = estimateRadius(curveLength, absAngle)
+  const severity = getSeverityFromRadius(radius, absAngle)
+  const direction = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
+  
+  // Apex position (middle of curve)
+  const apexIndex = Math.floor((startIndex + endIndex + 1) / 2)
+  const position = points[Math.min(apexIndex, points.length - 1)].coord
+  
+  // Entry and exit positions for direction accuracy
+  const entryPosition = points[startIndex].coord
+  const exitPosition = points[Math.min(endIndex + 1, points.length - 1)].coord
+  
+  return {
+    id: 0, // Will be assigned later
+    position,
+    entryPosition,
+    exitPosition,
+    direction,
+    severity,
+    modifier: null, // Will be set by shape analysis
+    radius: Math.round(radius),
+    totalAngle: Math.round(absAngle),
+    length: Math.round(curveLength),
+    distanceFromStart: Math.round(startDist),
+    startIndex,
+    endIndex,
+    segmentChanges,
+    ...getSpeedRecommendations(severity)
+  }
+}
+
+/**
+ * Analyze curve shape - detect tightening/opening
+ */
+function analyzeCurveShape(curves, points, headings) {
+  return curves.map(curve => {
+    const { segmentChanges, severity, totalAngle, length } = curve
+    
+    if (!segmentChanges || segmentChanges.length < 3) {
+      curve.modifier = getBasicModifier(totalAngle, severity, length)
+      return curve
+    }
+    
+    // Divide curve into thirds and compare heading change rates
+    const third = Math.floor(segmentChanges.length / 3)
+    if (third < 1) {
+      curve.modifier = getBasicModifier(totalAngle, severity, length)
+      return curve
+    }
+    
+    const firstThird = segmentChanges.slice(0, third)
+    const lastThird = segmentChanges.slice(-third)
+    
+    const firstThirdAvg = firstThird.reduce((sum, s) => sum + Math.abs(s.change), 0) / firstThird.length
+    const lastThirdAvg = lastThird.reduce((sum, s) => sum + Math.abs(s.change), 0) / lastThird.length
+    
+    const ratio = lastThirdAvg / firstThirdAvg
+    
+    // Determine shape
+    if (ratio > 1.5 && lastThirdAvg > 3) {
+      curve.modifier = 'TIGHTENS'
+      curve.shape = 'tightening'
+    } else if (ratio < 0.65 && firstThirdAvg > 3) {
+      curve.modifier = 'OPENS'
+      curve.shape = 'opening'
+    } else {
+      curve.modifier = getBasicModifier(totalAngle, severity, length)
+      curve.shape = 'constant'
+    }
+    
+    return curve
+  })
+}
+
+/**
+ * Detect S-curves and chicanes (opposite direction curves in quick succession)
+ */
+function detectChicanes(curves) {
+  if (curves.length < 2) return curves
+  
+  const result = []
+  let i = 0
+  
+  while (i < curves.length) {
+    const current = curves[i]
+    const next = curves[i + 1]
+    
+    if (next) {
+      const distanceBetween = next.distanceFromStart - (current.distanceFromStart + current.length)
+      const oppositeDirection = current.direction !== next.direction
+      
+      if (oppositeDirection && distanceBetween < CHICANE_MAX_DISTANCE && distanceBetween >= 0) {
+        // Check for triple chicane (S-curve with third element)
+        const third = curves[i + 2]
+        let isTripleChicane = false
+        
+        if (third) {
+          const distToThird = third.distanceFromStart - (next.distanceFromStart + next.length)
+          const thirdOpposite = next.direction !== third.direction
+          
+          if (thirdOpposite && distToThird < CHICANE_MAX_DISTANCE && distToThird >= 0) {
+            isTripleChicane = true
+          }
+        }
+        
+        if (isTripleChicane) {
+          // Create triple chicane
+          const chicane = createChicane([current, next, third])
+          result.push(chicane)
+          i += 3
+        } else {
+          // Create double chicane/S-curve
+          const chicane = createChicane([current, next])
+          result.push(chicane)
+          i += 2
+        }
+      } else {
+        result.push(current)
+        i++
+      }
+    } else {
+      result.push(current)
+      i++
+    }
+  }
+  
+  return result
+}
+
+/**
+ * Create a chicane/S-curve from multiple curves
+ */
+function createChicane(curves) {
+  const first = curves[0]
+  const last = curves[curves.length - 1]
+  
+  // Use highest severity among the curves
+  const maxSeverity = Math.max(...curves.map(c => c.severity))
+  
+  // Chicane type based on first curve direction
+  const type = curves.length === 3 ? 'CHICANE' : 'S-CURVE'
+  const directionLabel = first.direction === 'LEFT' ? 'L' : 'R'
+  
+  // Build severity sequence (e.g., "3-4" or "3-4-3")
+  const severitySequence = curves.map(c => c.severity).join('-')
+  
+  return {
+    id: 0,
+    position: first.position, // Announce at entry
+    entryPosition: first.entryPosition,
+    exitPosition: last.exitPosition,
+    direction: first.direction, // First turn direction
+    severity: maxSeverity,
+    modifier: type,
+    isChicane: true,
+    chicaneType: type,
+    startDirection: first.direction,
+    severitySequence,
+    curves: curves, // Keep reference to original curves
+    radius: Math.min(...curves.map(c => c.radius)),
+    totalAngle: curves.reduce((sum, c) => sum + c.totalAngle, 0),
+    length: (last.distanceFromStart + last.length) - first.distanceFromStart,
+    distanceFromStart: first.distanceFromStart,
+    ...getSpeedRecommendations(maxSeverity)
+  }
+}
+
+/**
+ * Merge curves that are too close together
+ */
+function mergeCurves(curves) {
+  if (curves.length < 2) return curves
+  
+  const result = []
+  let i = 0
+  
+  while (i < curves.length) {
+    const current = curves[i]
+    
+    // Skip chicanes - they're already merged
+    if (current.isChicane) {
+      result.push(current)
+      i++
+      continue
+    }
+    
+    const next = curves[i + 1]
+    
+    if (next && !next.isChicane) {
+      const distanceBetween = next.distanceFromStart - (current.distanceFromStart + current.length)
+      const sameDirection = current.direction === next.direction
+      
+      // Merge same-direction curves that are very close
+      if (sameDirection && distanceBetween < MIN_CURVE_SEPARATION && distanceBetween >= 0) {
+        const merged = mergeTwoCurves(current, next)
+        
+        // Check if we should merge more
+        let j = i + 2
+        while (j < curves.length) {
+          const another = curves[j]
+          if (another.isChicane) break
+          
+          const distToAnother = another.distanceFromStart - (merged.distanceFromStart + merged.length)
+          if (another.direction === merged.direction && distToAnother < MIN_CURVE_SEPARATION && distToAnother >= 0) {
+            Object.assign(merged, mergeTwoCurves(merged, another))
+            j++
+          } else {
+            break
+          }
+        }
+        
+        result.push(merged)
+        i = j
+      } else {
+        result.push(current)
+        i++
+      }
+    } else {
+      result.push(current)
+      i++
+    }
+  }
+  
+  return result
+}
+
+/**
+ * Merge two curves into one
+ */
+function mergeTwoCurves(a, b) {
+  const combinedAngle = a.totalAngle + b.totalAngle
+  const combinedLength = (b.distanceFromStart + b.length) - a.distanceFromStart
+  const radius = estimateRadius(combinedLength, combinedAngle)
+  const severity = Math.max(a.severity, b.severity, getSeverityFromRadius(radius, combinedAngle))
+  
+  return {
+    ...a,
+    severity,
+    totalAngle: Math.round(combinedAngle),
+    length: Math.round(combinedLength),
+    radius: Math.round(radius),
+    exitPosition: b.exitPosition,
+    endIndex: b.endIndex,
+    modifier: combinedAngle > 150 ? 'LONG' : (severity >= 5 ? 'SHARP' : a.modifier),
+    isMerged: true,
+    ...getSpeedRecommendations(severity)
+  }
+}
+
+/**
+ * Get basic modifier without shape analysis
+ */
+function getBasicModifier(totalAngle, severity, length) {
+  const absAngle = Math.abs(totalAngle)
+  
+  if (absAngle > 150) return 'HAIRPIN'
+  if (absAngle > 120 || severity >= 5) return 'SHARP'
+  if (length > 120 && severity >= 4) return 'LONG'
+  if (length > 150) return 'LONG'
+  
+  return null
+}
+
+// ================================
+// Helper Functions
+// ================================
 
 function getBearing(from, to) {
   const dLon = (to[0] - from[0]) * Math.PI / 180
@@ -196,23 +577,11 @@ function getSeverityFromRadius(radius, totalAngle) {
   else if (radius > 20) severity = 5
   else severity = 6
 
-  // Boost for high angles
   if (totalAngle > 150) severity = Math.max(severity, 5)
   else if (totalAngle > 120) severity = Math.max(severity, 4)
   else if (totalAngle > 90) severity = Math.min(6, Math.max(severity, severity + 1))
   
   return Math.min(6, severity)
-}
-
-function getModifier(totalAngle, severity, length) {
-  const absAngle = Math.abs(totalAngle)
-  
-  if (absAngle > 150) return 'HAIRPIN'
-  if (absAngle > 120 || severity >= 5) return 'SHARP'
-  if (length > 120 && severity >= 4) return 'LONG'
-  if (length > 150) return 'LONG'
-  
-  return null
 }
 
 function getSpeedRecommendations(severity) {
@@ -245,6 +614,27 @@ function getDistance(pos1, pos2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 
   return R * c
+}
+
+function logResults(curves) {
+  console.log(`Final curve count: ${curves.length}`)
+  
+  const chicanes = curves.filter(c => c.isChicane)
+  const merged = curves.filter(c => c.isMerged)
+  const tightening = curves.filter(c => c.modifier === 'TIGHTENS')
+  const opening = curves.filter(c => c.modifier === 'OPENS')
+  
+  console.log(`  - Chicanes/S-curves: ${chicanes.length}`)
+  console.log(`  - Merged curves: ${merged.length}`)
+  console.log(`  - Tightening: ${tightening.length}`)
+  console.log(`  - Opening: ${opening.length}`)
+  
+  const breakdown = {
+    easy: curves.filter(c => c.severity <= 2).length,
+    medium: curves.filter(c => c.severity === 3 || c.severity === 4).length,
+    hard: curves.filter(c => c.severity >= 5).length
+  }
+  console.log(`Severity: ${breakdown.easy} easy, ${breakdown.medium} medium, ${breakdown.hard} hard`)
 }
 
 /**
