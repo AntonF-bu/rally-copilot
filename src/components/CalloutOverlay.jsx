@@ -148,59 +148,56 @@ export default function CalloutOverlay() {
         </div>
       )}
 
-      {/* Compact boxes row */}
-      <div className="flex gap-2 mt-2">
-        
-        {/* Upcoming Curves - Compact */}
-        {upcomingCurves.length > 1 && (
-          <div className="hud-glass rounded-xl px-3 py-2">
-            <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
-            <div className="flex items-center gap-2">
-              {upcomingCurves.slice(1, 4).map((next) => {
-                const nextColor = getCurveColor(next.severity)
-                const nextIsLeft = next.direction === 'LEFT'
-                return (
-                  <div key={next.id} className="flex items-center gap-1">
-                    <svg 
-                      width="10" height="10" viewBox="0 0 24 24" 
-                      fill={nextColor}
-                      style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
-                    >
-                      <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                    </svg>
-                    <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severity}</span>
-                  </div>
-                )
-              })}
-            </div>
+      {/* Upcoming Curves - Left side */}
+      {upcomingCurves.length > 1 && (
+        <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
+          <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
+          <div className="flex flex-col gap-1">
+            {upcomingCurves.slice(1, 4).map((next) => {
+              const nextColor = getCurveColor(next.severity)
+              const nextIsLeft = next.direction === 'LEFT'
+              return (
+                <div key={next.id} className="flex items-center gap-2">
+                  <svg 
+                    width="10" height="10" viewBox="0 0 24 24" 
+                    fill={nextColor}
+                    style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
+                  >
+                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                  </svg>
+                  <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severity}</span>
+                  <span className="text-[10px] text-white/30">{next.distance}m</span>
+                </div>
+              )
+            })}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Elevation - Compact */}
-        <div className="hud-glass rounded-xl px-3 py-2 flex-1 max-w-[200px]">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-            <span className="text-[9px] text-white/40">+{Math.round(Math.sin(simulationProgress * Math.PI * 2) * 80 + 120)}ft</span>
-          </div>
-          <div className="h-6">
-            <svg viewBox="0 0 200 24" className="w-full h-full" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-                  <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-                </linearGradient>
-              </defs>
-              <path
-                d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 200} ${24 - ((el - 700) / 300) * 20}`).join(' ')} L 200 24 Z`}
-                fill="url(#elevGrad)"
-              />
-              <path
-                d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 200} ${24 - ((el - 700) / 300) * 20}`).join(' ')}`}
-                fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
-              />
-              <circle cx={elevationPosition * 10} cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 20} r="3" fill={modeColor}/>
-            </svg>
-          </div>
+      {/* Elevation - Right side, fixed size */}
+      <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
+          <span className="text-[8px] text-white/40">+{Math.round(Math.sin(simulationProgress * Math.PI * 2) * 80 + 120)}ft</span>
+        </div>
+        <div className="h-8">
+          <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+                <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+              </linearGradient>
+            </defs>
+            <path
+              d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
+              fill="url(#elevGrad)"
+            />
+            <path
+              d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
+              fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
+            />
+            <circle cx={(elevationPosition / 19) * 80} cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 18} r="2.5" fill={modeColor}/>
+          </svg>
         </div>
       </div>
 
