@@ -2,23 +2,19 @@ import useStore from '../store'
 
 // ================================
 // Bottom Bar - Navigation Controls
-// Fixed speaker button, added GPS indicator
+// v2: Fixed stop button, better GPS status
 // ================================
 
-export default function BottomBar() {
+export default function BottomBar({ onStop }) {
   const {
-    isRunning,
     mode,
     setMode,
-    stopDrive,
     toggleSettings,
     settings,
     updateSettings,
     gpsAccuracy,
     simulationProgress,
     routeData,
-    setShowRouteSelector,
-    clearRouteData,
     routeMode
   } = useStore()
 
@@ -28,18 +24,9 @@ export default function BottomBar() {
     { id: 'race', label: 'RACE', color: '#ff3366' },
   ]
 
-  const currentModeColor = modes.find(m => m.id === mode)?.color || '#00d4ff'
-
   // Toggle voice on/off
   const handleToggleVoice = () => {
     updateSettings({ voiceEnabled: !settings.voiceEnabled })
-  }
-
-  // End navigation and return to route selector
-  const handleEndNavigation = () => {
-    stopDrive()
-    clearRouteData()
-    setShowRouteSelector(true)
   }
 
   // Calculate route progress
@@ -54,11 +41,12 @@ export default function BottomBar() {
 
   // GPS accuracy indicator
   const getGpsStatus = () => {
-    if (routeMode === 'demo') return { color: '#ffd500', label: 'DEMO' }
-    if (!gpsAccuracy) return { color: '#ff3366', label: 'NO GPS' }
-    if (gpsAccuracy <= 10) return { color: '#22c55e', label: 'GPS' }
-    if (gpsAccuracy <= 30) return { color: '#ffd500', label: 'GPS' }
-    return { color: '#ff3366', label: 'WEAK' }
+    if (routeMode === 'demo') return { color: '#ffd500', label: 'DEMO', accuracy: null }
+    if (routeMode === 'lookahead') return { color: '#00d4ff', label: 'LIVE', accuracy: gpsAccuracy }
+    if (!gpsAccuracy) return { color: '#22c55e', label: 'GPS', accuracy: null }
+    if (gpsAccuracy <= 10) return { color: '#22c55e', label: 'GPS', accuracy: gpsAccuracy }
+    if (gpsAccuracy <= 30) return { color: '#ffd500', label: 'GPS', accuracy: gpsAccuracy }
+    return { color: '#ff3366', label: 'WEAK', accuracy: gpsAccuracy }
   }
 
   const gpsStatus = getGpsStatus()
@@ -92,8 +80,8 @@ export default function BottomBar() {
         <div className="flex items-center gap-2">
           {/* Back Button */}
           <button
-            onClick={handleEndNavigation}
-            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors"
+            onClick={onStop}
+            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
@@ -102,8 +90,8 @@ export default function BottomBar() {
 
           {/* Stop Button */}
           <button
-            onClick={stopDrive}
-            className="flex-1 h-12 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 bg-red-500/90 hover:bg-red-500"
+            onClick={onStop}
+            className="flex-1 h-12 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 bg-red-500/90 hover:bg-red-500 active:scale-[0.98]"
           >
             <span className="w-3 h-3 bg-white rounded-sm" />
             STOP
@@ -112,7 +100,7 @@ export default function BottomBar() {
           {/* Voice Toggle Button */}
           <button
             onClick={handleToggleVoice}
-            className={`w-12 h-12 rounded-xl backdrop-blur-xl border flex items-center justify-center transition-all ${
+            className={`w-12 h-12 rounded-xl backdrop-blur-xl border flex items-center justify-center transition-all active:scale-95 ${
               settings.voiceEnabled 
                 ? 'bg-cyan-500/20 border-cyan-500/50' 
                 : 'bg-black/60 border-white/10'
@@ -136,7 +124,7 @@ export default function BottomBar() {
           {/* Settings Button */}
           <button
             onClick={toggleSettings}
-            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors"
+            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
@@ -149,7 +137,7 @@ export default function BottomBar() {
       {/* Status Bar */}
       <div className="mx-3 mb-3">
         <div className="flex items-center justify-between px-3 py-2 bg-black/40 backdrop-blur rounded-xl">
-          {/* GPS Status */}
+          {/* GPS/Mode Status */}
           <div className="flex items-center gap-2">
             <div 
               className="w-2 h-2 rounded-full animate-pulse"
@@ -158,8 +146,8 @@ export default function BottomBar() {
             <span className="text-[10px] font-semibold tracking-wider" style={{ color: gpsStatus.color }}>
               {gpsStatus.label}
             </span>
-            {gpsAccuracy && routeMode !== 'demo' && (
-              <span className="text-[10px] text-white/30">±{Math.round(gpsAccuracy)}m</span>
+            {gpsStatus.accuracy && (
+              <span className="text-[10px] text-white/30">±{Math.round(gpsStatus.accuracy)}m</span>
             )}
           </div>
 
@@ -172,7 +160,7 @@ export default function BottomBar() {
           {/* Route Progress */}
           {progress && (
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-white/30">{progress.remaining} mi left</span>
+              <span className="text-[10px] text-white/30">{progress.remaining} mi</span>
               <span className="text-[10px] font-semibold text-cyan-400">{progress.percent}%</span>
             </div>
           )}
