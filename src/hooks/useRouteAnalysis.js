@@ -194,17 +194,46 @@ export function useRouteAnalysis() {
 
       let waypoints = []
 
+      // Case 1: Both coordinates available
       if (parsed.coordinates && parsed.coordinates.length >= 2) {
         waypoints = parsed.coordinates
-      } else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
+      }
+      // Case 2: Only one coordinate, need current position as origin
+      else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
         if (currentPosition) {
           waypoints = [currentPosition, parsed.coordinates[0]]
         } else {
           console.error('Need current position for route origin')
           return false
         }
-      } else if (parsed.needsGeocoding) {
-        console.log('Geocoding places...')
+      }
+      // Case 3: Origin coords + destination needs geocoding
+      else if (parsed.originCoordinates && parsed.destination) {
+        console.log('Geocoding destination:', parsed.destination)
+        const destResults = await geocodeAddress(parsed.destination)
+        if (destResults?.length) {
+          waypoints = [parsed.originCoordinates, destResults[0].coordinates]
+          destinationRef.current = {
+            name: destResults[0].name,
+            coordinates: destResults[0].coordinates
+          }
+        }
+      }
+      // Case 4: Destination coords + origin needs geocoding
+      else if (parsed.destinationCoordinates && parsed.origin) {
+        console.log('Geocoding origin:', parsed.origin)
+        const originResults = await geocodeAddress(parsed.origin)
+        if (originResults?.length) {
+          waypoints = [originResults[0].coordinates, parsed.destinationCoordinates]
+          destinationRef.current = {
+            name: 'Destination',
+            coordinates: parsed.destinationCoordinates
+          }
+        }
+      }
+      // Case 5: Both need geocoding
+      else if (parsed.needsGeocoding) {
+        console.log('Geocoding both origin and destination...')
         
         if (parsed.origin && parsed.destination) {
           const originResults = await geocodeAddress(parsed.origin)
@@ -218,6 +247,7 @@ export function useRouteAnalysis() {
             }
           }
         } else if (parsed.destination) {
+          // Only destination, use current position
           const destResults = await geocodeAddress(parsed.destination)
           if (destResults?.length && currentPosition) {
             waypoints = [currentPosition, destResults[0].coordinates]
@@ -236,7 +266,7 @@ export function useRouteAnalysis() {
         return false
       }
 
-      // Store final destination for rerouting
+      // Store final destination for rerouting if not already set
       if (!destinationRef.current) {
         destinationRef.current = {
           name: 'Destination',
