@@ -10,10 +10,12 @@ const useStore = create((set, get) => ({
   // ================================
   routeMode: null, // 'destination' | 'lookahead' | 'imported' | 'demo'
   showRouteSelector: true,
+  showRoutePreview: false,
   routeData: null,
   
   setRouteMode: (mode) => set({ routeMode: mode }),
   setShowRouteSelector: (show) => set({ showRouteSelector: show }),
+  setShowRoutePreview: (show) => set({ showRoutePreview: show }),
   setRouteData: (data) => set({ routeData: data }),
 
   // ================================
@@ -124,6 +126,7 @@ const useStore = create((set, get) => ({
   // ================================
   resetToRouteSelector: () => set({
     showRouteSelector: true,
+    showRoutePreview: false,
     isRunning: false,
     routeMode: null,
     routeData: null,
