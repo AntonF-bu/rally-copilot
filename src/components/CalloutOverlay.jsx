@@ -1,13 +1,23 @@
 import { useMemo } from 'react'
 import useStore from '../store'
-import { getCurveColor, MOHAWK_TRAIL } from '../data/routes'
+import { getCurveColor } from '../data/routes'
 
 // ================================
 // Racing HUD - Compact Design
 // ================================
 
 export default function CalloutOverlay() {
-  const { isRunning, activeCurve, upcomingCurves, mode, settings, getRecommendedSpeed, simulationProgress } = useStore()
+  const { 
+    isRunning, 
+    activeCurve, 
+    upcomingCurves, 
+    mode, 
+    settings, 
+    getRecommendedSpeed, 
+    simulationProgress,
+    routeData,
+    routeMode
+  } = useStore()
 
   const curve = activeCurve || upcomingCurves[0]
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
@@ -21,20 +31,81 @@ export default function CalloutOverlay() {
     return { show: true, start: 40 }
   }
 
+  // Generate elevation data from route or use placeholder
   const elevationData = useMemo(() => {
-    const coords = MOHAWK_TRAIL.coordinates
+    const coords = routeData?.coordinates || []
     const points = []
-    for (let i = 0; i < 20; i++) {
-      const idx = Math.floor((i / 20) * coords.length)
-      const coord = coords[Math.min(idx, coords.length - 1)]
-      points.push(800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100)
+    const numPoints = 20
+    
+    if (coords.length > 0) {
+      for (let i = 0; i < numPoints; i++) {
+        const idx = Math.floor((i / numPoints) * coords.length)
+        const coord = coords[Math.min(idx, coords.length - 1)]
+        points.push(800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100)
+      }
+    } else {
+      // Placeholder data
+      for (let i = 0; i < numPoints; i++) {
+        points.push(800 + Math.sin(i * 0.5) * 100)
+      }
     }
     return points
-  }, [])
+  }, [routeData])
 
-  const elevationPosition = Math.floor(simulationProgress * 20)
+  const elevationPosition = Math.min(Math.floor(simulationProgress * 20), 19)
 
   if (!isRunning) return null
+
+  // If no curves detected yet, show waiting state
+  if (!curve && upcomingCurves.length === 0) {
+    return (
+      <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        <div className="hud-glass rounded-2xl px-4 py-3">
+          <div className="flex items-center justify-center gap-3">
+            <div className="w-5 h-5 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+            <span className="text-white/50 text-sm">
+              {routeMode === 'lookahead' ? 'Analyzing road ahead...' : 'Detecting curves...'}
+            </span>
+          </div>
+        </div>
+        
+        {/* Elevation still shows */}
+        <div className="absolute top-20 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
+          </div>
+          <div className="h-8">
+            <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+                  <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+              <path
+                d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
+                fill="url(#elevGrad)"
+              />
+              <path
+                d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
+                fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <style>{`
+          .hud-glass {
+            background: linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+          }
+        `}</style>
+      </div>
+    )
+  }
 
   const recommendedSpeed = curve ? getRecommendedSpeed(curve) : 0
   const isLeft = curve?.direction === 'LEFT'
@@ -183,14 +254,14 @@ export default function CalloutOverlay() {
         <div className="h-8">
           <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
             <defs>
-              <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <linearGradient id="elevGrad2" x1="0%" y1="0%" x2="0%" y2="100%">
                 <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
                 <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
               </linearGradient>
             </defs>
             <path
               d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
-              fill="url(#elevGrad)"
+              fill="url(#elevGrad2)"
             />
             <path
               d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
