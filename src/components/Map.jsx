@@ -4,8 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v4
-// Supports dark/satellite styles
+// Map Component - v5
+// Fixed route display
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -33,25 +33,19 @@ export default function Map() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Map style based on settings
-  const getMapStyle = () => {
-    if (settings.mapStyle === 'satellite') {
-      return 'mapbox://styles/mapbox/satellite-streets-v12'
-    }
-    return 'mapbox://styles/mapbox/dark-v11'
-  }
-
   // Initialize map
   useEffect(() => {
     if (map.current) return
-    if (!routeData?.coordinates?.length) return
 
-    const startCoord = routeData.coordinates[0]
+    // Default center if no route
+    const defaultCenter = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: getMapStyle(),
-      center: startCoord,
+      style: settings.mapStyle === 'satellite' 
+        ? 'mapbox://styles/mapbox/satellite-streets-v12'
+        : 'mapbox://styles/mapbox/dark-v11',
+      center: defaultCenter,
       zoom: 15,
       pitch: 60,
       bearing: 0,
@@ -81,45 +75,10 @@ export default function Map() {
         }
       })
 
-      // Route source
-      map.current.addSource('route', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: routeData.coordinates
-          }
-        }
-      })
-
-      // Route glow
-      map.current.addLayer({
-        id: 'route-glow',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': modeColor,
-          'line-width': 14,
-          'line-blur': 10,
-          'line-opacity': 0.4
-        }
-      })
-
-      // Route line
-      map.current.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': modeColor,
-          'line-width': 5,
-          'line-opacity': 0.9
-        }
-      })
+      // Add route if we have coordinates
+      if (routeData?.coordinates?.length > 0) {
+        addRouteToMap(routeData.coordinates)
+      }
     })
 
     // Detect user interaction to pause following
@@ -132,17 +91,93 @@ export default function Map() {
       map.current?.remove()
       map.current = null
     }
-  }, [routeData])
+  }, []) // Only run once on mount
 
-  // Update map style when setting changes
+  // Add route to map helper function
+  const addRouteToMap = useCallback((coordinates) => {
+    if (!map.current) return
+
+    // Remove existing route layers and source
+    if (map.current.getLayer('route-glow')) {
+      map.current.removeLayer('route-glow')
+    }
+    if (map.current.getLayer('route-line')) {
+      map.current.removeLayer('route-line')
+    }
+    if (map.current.getSource('route')) {
+      map.current.removeSource('route')
+    }
+
+    // Add route source
+    map.current.addSource('route', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: coordinates
+        }
+      }
+    })
+
+    // Route glow
+    map.current.addLayer({
+      id: 'route-glow',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': modeColor,
+        'line-width': 14,
+        'line-blur': 10,
+        'line-opacity': 0.4
+      }
+    })
+
+    // Route line
+    map.current.addLayer({
+      id: 'route-line',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': modeColor,
+        'line-width': 5,
+        'line-opacity': 0.9
+      }
+    })
+
+    console.log('Route added to map with', coordinates.length, 'points')
+  }, [modeColor])
+
+  // Update route when routeData changes
   useEffect(() => {
     if (!map.current || !mapLoaded) return
-    map.current.setStyle(getMapStyle())
-  }, [settings.mapStyle, mapLoaded])
+    
+    if (routeData?.coordinates?.length > 0) {
+      addRouteToMap(routeData.coordinates)
+      
+      // Fit to route bounds
+      const bounds = routeData.coordinates.reduce((bounds, coord) => {
+        return bounds.extend(coord)
+      }, new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+
+      map.current.fitBounds(bounds, {
+        padding: { top: 100, bottom: 200, left: 50, right: 50 },
+        duration: 1000
+      })
+    }
+  }, [routeData, mapLoaded, addRouteToMap])
 
   // Create user marker
   useEffect(() => {
     if (!map.current || !mapLoaded) return
+
+    // Remove existing marker
+    if (userMarker.current) {
+      userMarker.current.remove()
+    }
 
     const el = document.createElement('div')
     el.innerHTML = `
@@ -177,7 +212,7 @@ export default function Map() {
       </div>
     `
 
-    const startPos = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
+    const startPos = position || routeData?.coordinates?.[0] || [-71.0589, 42.3601]
     
     userMarker.current = new mapboxgl.Marker({
       element: el,
@@ -188,31 +223,33 @@ export default function Map() {
       .addTo(map.current)
 
     return () => userMarker.current?.remove()
-  }, [mapLoaded, modeColor, routeData])
+  }, [mapLoaded, modeColor])
 
   // Update position and camera
   useEffect(() => {
-    if (!map.current || !mapLoaded || !position || !userMarker.current) return
+    if (!map.current || !mapLoaded || !userMarker.current) return
+    
+    if (position) {
+      userMarker.current.setLngLat(position)
 
-    userMarker.current.setLngLat(position)
+      // Rotate heading arrow
+      const el = userMarker.current.getElement()
+      const arrow = el?.querySelector('#heading-arrow')
+      if (arrow) {
+        arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
+      }
 
-    // Rotate heading arrow
-    const el = userMarker.current.getElement()
-    const arrow = el.querySelector('#heading-arrow')
-    if (arrow) {
-      arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
-    }
-
-    // Only follow if enabled and running
-    if (isRunning && isFollowing) {
-      map.current.easeTo({
-        center: position,
-        bearing: heading,
-        pitch: 65,
-        zoom: 16,
-        duration: 100,
-        easing: t => t
-      })
+      // Only follow if enabled and running
+      if (isRunning && isFollowing) {
+        map.current.easeTo({
+          center: position,
+          bearing: heading,
+          pitch: 65,
+          zoom: 16,
+          duration: 100,
+          easing: t => t
+        })
+      }
     }
   }, [position, heading, isRunning, isFollowing, mapLoaded])
 
@@ -234,6 +271,7 @@ export default function Map() {
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
+    // Remove existing markers
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
 
@@ -243,7 +281,6 @@ export default function Map() {
       const color = getCurveColor(curve.severity)
       const isLeft = curve.direction === 'LEFT'
       
-      // Different display for chicanes
       if (curve.isChicane) {
         const dirChar = curve.startDirection === 'LEFT' ? '←' : '→'
         const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
@@ -270,13 +307,12 @@ export default function Map() {
           </div>
         `
       } else {
-        // Regular curve marker
         let modifierText = ''
         if (curve.modifier === 'TIGHTENS') modifierText = '<div style="font-size: 9px; color: #f97316; font-weight: 700;">TIGHTENS</div>'
         else if (curve.modifier === 'OPENS') modifierText = '<div style="font-size: 9px; color: #22c55e; font-weight: 700;">OPENS</div>'
-        else if (curve.modifier === 'SHARP') modifierText = '<div style="font-size: 9px; color: ' + color + '; font-weight: 700;">SHARP</div>'
-        else if (curve.modifier === 'HAIRPIN') modifierText = '<div style="font-size: 9px; color: ' + color + '; font-weight: 700;">HAIRPIN</div>'
-        else if (curve.modifier === 'LONG') modifierText = '<div style="font-size: 9px; color: ' + color + '; font-weight: 700;">LONG</div>'
+        else if (curve.modifier === 'SHARP') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">SHARP</div>`
+        else if (curve.modifier === 'HAIRPIN') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">HAIRPIN</div>`
+        else if (curve.modifier === 'LONG') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">LONG</div>`
         
         el.innerHTML = `
           <div style="
@@ -330,7 +366,7 @@ export default function Map() {
 
   // Keep screen awake when running
   useEffect(() => {
-    if (!isRunning || !settings.keepScreenOn) return
+    if (!isRunning || settings.keepScreenOn === false) return
     
     let wakeLock = null
     const requestWakeLock = async () => {
@@ -378,11 +414,11 @@ export default function Map() {
         </div>
       )}
 
-      {/* Token warning */}
-      {mapLoaded && !mapboxgl.accessToken && (
+      {/* No route warning */}
+      {mapLoaded && (!routeData?.coordinates || routeData.coordinates.length === 0) && (
         <div className="absolute top-20 left-4 right-4 bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-3 backdrop-blur z-30">
           <p className="text-yellow-400 text-sm">
-            ⚠️ Add Mapbox token in Vercel → Settings → Environment Variables
+            ⚠️ No route data available
           </p>
         </div>
       )}
