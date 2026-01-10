@@ -1,33 +1,36 @@
 // ================================
-// Curve Detection Algorithm v3
-// VERY sensitive - catches all meaningful turns
+// Curve Detection Algorithm v4
+// Fixed-interval sampling for consistent curve detection
 // ================================
+
+const SAMPLE_INTERVAL = 25 // meters between samples
 
 /**
  * Detect curves from an array of coordinates
+ * Uses fixed-interval interpolation for consistent detection
  */
 export function detectCurves(coordinates) {
   if (!coordinates || coordinates.length < 3) return []
 
+  console.log(`Original route has ${coordinates.length} points`)
+
+  // Step 1: Interpolate to fixed intervals
+  const interpolatedPoints = interpolateRoute(coordinates, SAMPLE_INTERVAL)
+  console.log(`Interpolated to ${interpolatedPoints.length} points at ${SAMPLE_INTERVAL}m intervals`)
+
+  // Step 2: Calculate heading at each point
+  const headings = []
+  for (let i = 0; i < interpolatedPoints.length - 1; i++) {
+    headings.push(getBearing(interpolatedPoints[i].coord, interpolatedPoints[i + 1].coord))
+  }
+
+  // Step 3: Detect curves from heading changes
   const curves = []
   let curveId = 1
 
-  // Calculate heading at each point
-  const headings = []
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    headings.push(getBearing(coordinates[i], coordinates[i + 1]))
-  }
-
-  // Calculate cumulative distance at each point
-  const distances = [0]
-  for (let i = 1; i < coordinates.length; i++) {
-    distances.push(distances[i - 1] + getDistance(coordinates[i - 1], coordinates[i]))
-  }
-
-  // VERY LOW THRESHOLDS to catch more curves
-  const CURVE_START_THRESHOLD = 5  // Start detecting at just 5 degrees
+  const CURVE_START_THRESHOLD = 6  // degrees to start detecting
   const CURVE_CONTINUE_THRESHOLD = 3
-  const MIN_CURVE_ANGLE = 12  // Minimum total angle to be considered a curve
+  const MIN_CURVE_ANGLE = 15  // minimum total angle
 
   let i = 0
   while (i < headings.length - 1) {
@@ -39,23 +42,19 @@ export function detectCurves(coordinates) {
       let totalHeadingChange = headingChange
       let direction = Math.sign(headingChange)
       
-      // Keep going while still turning
+      // Continue while still turning same direction
       while (curveEnd < headings.length - 1) {
         const nextChange = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
         
-        // Same direction and significant
         if (Math.sign(nextChange) === direction && Math.abs(nextChange) > CURVE_CONTINUE_THRESHOLD) {
           totalHeadingChange += nextChange
           curveEnd++
-        } 
-        // Small change - might be mid-curve wobble
-        else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
-          // Look ahead to see if curve continues
+        } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
+          // Small change - look ahead
           let lookAhead = 0
           for (let j = 1; j <= 3 && curveEnd + j < headings.length; j++) {
             lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
           }
-          
           if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
             totalHeadingChange += nextChange
             curveEnd++
@@ -67,22 +66,23 @@ export function detectCurves(coordinates) {
         }
       }
 
-      // Calculate curve properties
-      const curveCoords = coordinates.slice(curveStart, curveEnd + 2)
-      const curveLength = calculatePathLength(curveCoords)
       const absAngle = Math.abs(totalHeadingChange)
-      const radius = estimateRadius(curveLength, absAngle)
-      const severity = getSeverityFromRadius(radius, absAngle)
-      const curveDirection = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
       
-      // Get the apex (middle) of the curve
-      const apexIndex = Math.floor((curveStart + curveEnd + 1) / 2)
-      const position = coordinates[Math.min(apexIndex, coordinates.length - 1)]
-      const distanceFromStart = distances[curveStart]
-      const modifier = getModifier(totalHeadingChange, severity, curveLength)
-
-      // Include if meaningful angle
       if (absAngle >= MIN_CURVE_ANGLE) {
+        // Calculate curve properties
+        const startDist = interpolatedPoints[curveStart].distance
+        const endDist = interpolatedPoints[Math.min(curveEnd + 1, interpolatedPoints.length - 1)].distance
+        const curveLength = endDist - startDist
+        const radius = estimateRadius(curveLength, absAngle)
+        const severity = getSeverityFromRadius(radius, absAngle)
+        const curveDirection = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
+        
+        // Apex position
+        const apexIndex = Math.floor((curveStart + curveEnd + 1) / 2)
+        const position = interpolatedPoints[Math.min(apexIndex, interpolatedPoints.length - 1)].coord
+        
+        const modifier = getModifier(totalHeadingChange, severity, curveLength)
+
         curves.push({
           id: curveId++,
           position,
@@ -92,8 +92,8 @@ export function detectCurves(coordinates) {
           radius: Math.round(radius),
           totalAngle: Math.round(absAngle),
           length: Math.round(curveLength),
-          distanceFromStart: Math.round(distanceFromStart),
-          ...getSpeedRecommendations(severity, radius)
+          distanceFromStart: Math.round(startDist),
+          ...getSpeedRecommendations(severity)
         })
       }
 
@@ -103,9 +103,8 @@ export function detectCurves(coordinates) {
     }
   }
 
-  console.log(`Curve detection: Found ${curves.length} curves from ${coordinates.length} points`)
-  
-  // Log breakdown
+  // Log results
+  console.log(`Curve detection: Found ${curves.length} curves`)
   const breakdown = {
     easy: curves.filter(c => c.severity <= 2).length,
     medium: curves.filter(c => c.severity === 3 || c.severity === 4).length,
@@ -114,6 +113,53 @@ export function detectCurves(coordinates) {
   console.log(`Breakdown: ${breakdown.easy} easy, ${breakdown.medium} medium, ${breakdown.hard} hard`)
   
   return curves
+}
+
+/**
+ * Interpolate route to fixed-interval points
+ * This ensures consistent sampling regardless of original point density
+ */
+function interpolateRoute(coordinates, intervalMeters) {
+  const result = []
+  let cumulativeDistance = 0
+  
+  // Add first point
+  result.push({ coord: coordinates[0], distance: 0 })
+  
+  let nextTargetDistance = intervalMeters
+  
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const segmentStart = coordinates[i]
+    const segmentEnd = coordinates[i + 1]
+    const segmentLength = getDistance(segmentStart, segmentEnd)
+    const segmentEndDistance = cumulativeDistance + segmentLength
+    
+    // Add interpolated points within this segment
+    while (nextTargetDistance <= segmentEndDistance) {
+      const distanceIntoSegment = nextTargetDistance - cumulativeDistance
+      const fraction = distanceIntoSegment / segmentLength
+      
+      // Linear interpolation
+      const interpolatedCoord = [
+        segmentStart[0] + (segmentEnd[0] - segmentStart[0]) * fraction,
+        segmentStart[1] + (segmentEnd[1] - segmentStart[1]) * fraction
+      ]
+      
+      result.push({ coord: interpolatedCoord, distance: nextTargetDistance })
+      nextTargetDistance += intervalMeters
+    }
+    
+    cumulativeDistance = segmentEndDistance
+  }
+  
+  // Add last point if not already added
+  const lastPoint = coordinates[coordinates.length - 1]
+  const lastResultPoint = result[result.length - 1]
+  if (getDistance(lastResultPoint.coord, lastPoint) > 1) {
+    result.push({ coord: lastPoint, distance: cumulativeDistance })
+  }
+  
+  return result
 }
 
 function getBearing(from, to) {
@@ -135,31 +181,19 @@ function getHeadingChange(heading1, heading2) {
   return diff
 }
 
-function calculatePathLength(coordinates) {
-  let length = 0
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    length += getDistance(coordinates[i], coordinates[i + 1])
-  }
-  return length
-}
-
 function estimateRadius(arcLength, angleDegrees) {
   if (angleDegrees === 0) return Infinity
   const angleRadians = angleDegrees * Math.PI / 180
   return arcLength / angleRadians
 }
 
-/**
- * Severity based on BOTH radius AND angle
- */
 function getSeverityFromRadius(radius, totalAngle) {
-  // Primary: radius-based
   let severity
-  if (radius > 250) severity = 1
-  else if (radius > 150) severity = 2
-  else if (radius > 80) severity = 3
-  else if (radius > 45) severity = 4
-  else if (radius > 25) severity = 5
+  if (radius > 200) severity = 1
+  else if (radius > 120) severity = 2
+  else if (radius > 70) severity = 3
+  else if (radius > 40) severity = 4
+  else if (radius > 20) severity = 5
   else severity = 6
 
   // Boost for high angles
@@ -181,7 +215,7 @@ function getModifier(totalAngle, severity, length) {
   return null
 }
 
-function getSpeedRecommendations(severity, radius) {
+function getSpeedRecommendations(severity) {
   const baseSpeeds = {
     1: { cruise: 65, fast: 75, race: 85 },
     2: { cruise: 55, fast: 65, race: 75 },
