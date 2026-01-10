@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import useStore from './store'
 import { useSimulation } from './hooks/useSimulation'
+import { useGeolocation } from './hooks/useGeolocation'
+import { useRouteAnalysis } from './hooks/useRouteAnalysis'
 import { useSpeech, generateCallout } from './hooks/useSpeech'
 
 // Components
@@ -27,32 +29,15 @@ export default function App() {
     setLastAnnouncedCurveId,
     getDisplaySpeed,
     showRouteSelector,
-    setShowRouteSelector,
     routeMode
   } = useStore()
 
-  // Initialize simulation (only for demo mode)
-  useSimulation()
+  // Initialize hooks based on mode
+  useSimulation() // For demo mode
+  useGeolocation() // For real GPS modes
+  useRouteAnalysis() // For route processing
 
   const currentSpeed = getDisplaySpeed()
-
-  // Handle route selection
-  const handleStartRoute = (routeConfig) => {
-    console.log('Starting route:', routeConfig)
-    setShowRouteSelector(false)
-    
-    // TODO: Initialize appropriate mode
-    // For now, all modes start the demo
-    if (routeConfig.type === 'demo') {
-      // Demo mode - use simulation
-    } else if (routeConfig.type === 'lookahead') {
-      // TODO: Start real GPS + look-ahead analysis
-    } else if (routeConfig.type === 'destination') {
-      // TODO: Geocode destination, get route, analyze
-    } else if (routeConfig.type === 'import') {
-      // TODO: Parse Google Maps URL, get route
-    }
-  }
 
   // Callout Logic
   useEffect(() => {
@@ -91,7 +76,7 @@ export default function App() {
 
   // Show route selector
   if (showRouteSelector) {
-    return <RouteSelector onStartRoute={handleStartRoute} />
+    return <RouteSelector />
   }
 
   // Main driving UI
