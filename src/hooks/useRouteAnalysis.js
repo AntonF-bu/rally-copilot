@@ -1,10 +1,11 @@
 import { useEffect, useCallback, useRef } from 'react'
 import useStore from '../store'
 import { detectCurves, getUpcomingCurves } from '../utils/curveDetection'
-import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWithWaypoints } from '../services/routeService'
+import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWithWaypoints, expandShortUrl } from '../services/routeService'
 
 // ================================
 // Route Analysis Hook
+// With rerouting support
 // ================================
 
 export function useRouteAnalysis() {
@@ -22,6 +23,9 @@ export function useRouteAnalysis() {
   const allCurvesRef = useRef([])
   const lastFetchPositionRef = useRef(null)
   const isFetchingRef = useRef(false)
+  const destinationRef = useRef(null)
+  const lastRerouteTimeRef = useRef(0)
+  const offRouteCountRef = useRef(0)
 
   // Process route and detect curves
   const processRoute = useCallback((coordinates) => {
@@ -36,6 +40,70 @@ export function useRouteAnalysis() {
     
     return curves
   }, [])
+
+  // Calculate distance from point to nearest point on route
+  const getDistanceFromRoute = useCallback((position, routeCoords) => {
+    if (!position || !routeCoords || routeCoords.length < 2) return Infinity
+
+    let minDistance = Infinity
+    
+    for (let i = 0; i < routeCoords.length; i++) {
+      const dist = getDistance(position, routeCoords[i])
+      if (dist < minDistance) {
+        minDistance = dist
+      }
+    }
+    
+    return minDistance
+  }, [])
+
+  // Reroute from current position to destination
+  const reroute = useCallback(async () => {
+    const currentPosition = useStore.getState().position
+    const destination = destinationRef.current
+    
+    if (!currentPosition || !destination) {
+      console.log('Cannot reroute: missing position or destination')
+      return false
+    }
+
+    // Throttle rerouting (max once per 10 seconds)
+    const now = Date.now()
+    if (now - lastRerouteTimeRef.current < 10000) {
+      console.log('Reroute throttled')
+      return false
+    }
+    lastRerouteTimeRef.current = now
+
+    console.log('🔄 Rerouting from', currentPosition, 'to', destination)
+
+    try {
+      const route = await getRoute(currentPosition, destination.coordinates)
+      if (!route) {
+        console.error('Reroute failed: could not get new route')
+        return false
+      }
+
+      console.log('✅ Reroute successful with', route.coordinates.length, 'points')
+
+      const curves = processRoute(route.coordinates)
+      
+      setRouteData({
+        coordinates: route.coordinates,
+        curves,
+        destination: destination.name,
+        distance: route.distance,
+        duration: route.duration,
+        rerouted: true
+      })
+
+      offRouteCountRef.current = 0
+      return true
+    } catch (error) {
+      console.error('Reroute error:', error)
+      return false
+    }
+  }, [processRoute, setRouteData])
 
   // Initialize route for destination mode
   const initDestinationRoute = useCallback(async (destinationQuery) => {
@@ -58,6 +126,12 @@ export function useRouteAnalysis() {
 
       const destCoords = results[0].coordinates
       console.log('Destination coordinates:', destCoords)
+
+      // Store destination for rerouting
+      destinationRef.current = {
+        name: results[0].name,
+        coordinates: destCoords
+      }
 
       // Get route
       const route = await getRoute(currentPosition, destCoords)
@@ -92,8 +166,24 @@ export function useRouteAnalysis() {
     const currentPosition = useStore.getState().position
 
     try {
+      console.log('Processing Google Maps URL...')
+      
+      // Check if it's a short URL that needs expanding
+      let fullUrl = url
+      if (url.includes('goo.gl') || url.includes('maps.app.goo.gl')) {
+        console.log('Short URL detected, expanding...')
+        const expanded = await expandShortUrl(url)
+        if (expanded) {
+          fullUrl = expanded
+          console.log('Expanded URL:', fullUrl)
+        } else {
+          console.error('Could not expand short URL')
+          return { error: 'SHORT_URL', message: 'Please paste the full URL (open the short link in your browser first, then copy the full URL from the address bar)' }
+        }
+      }
+
       console.log('Parsing Google Maps URL...')
-      const parsed = parseGoogleMapsUrl(url)
+      const parsed = parseGoogleMapsUrl(fullUrl)
       
       if (!parsed) {
         console.error('Could not parse Google Maps URL')
@@ -105,10 +195,8 @@ export function useRouteAnalysis() {
       let waypoints = []
 
       if (parsed.coordinates && parsed.coordinates.length >= 2) {
-        // Have full coordinates
         waypoints = parsed.coordinates
       } else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
-        // Only have destination, use current position as origin
         if (currentPosition) {
           waypoints = [currentPosition, parsed.coordinates[0]]
         } else {
@@ -116,7 +204,6 @@ export function useRouteAnalysis() {
           return false
         }
       } else if (parsed.needsGeocoding) {
-        // Need to geocode place names
         console.log('Geocoding places...')
         
         if (parsed.origin && parsed.destination) {
@@ -125,12 +212,19 @@ export function useRouteAnalysis() {
           
           if (originResults?.length && destResults?.length) {
             waypoints = [originResults[0].coordinates, destResults[0].coordinates]
+            destinationRef.current = {
+              name: destResults[0].name,
+              coordinates: destResults[0].coordinates
+            }
           }
         } else if (parsed.destination) {
-          // Only destination, use current position
           const destResults = await geocodeAddress(parsed.destination)
           if (destResults?.length && currentPosition) {
             waypoints = [currentPosition, destResults[0].coordinates]
+            destinationRef.current = {
+              name: destResults[0].name,
+              coordinates: destResults[0].coordinates
+            }
           }
         }
       }
@@ -142,7 +236,14 @@ export function useRouteAnalysis() {
         return false
       }
 
-      // Get route
+      // Store final destination for rerouting
+      if (!destinationRef.current) {
+        destinationRef.current = {
+          name: 'Destination',
+          coordinates: waypoints[waypoints.length - 1]
+        }
+      }
+
       console.log('Getting route from Mapbox...')
       const route = await getRouteWithWaypoints(waypoints)
       if (!route) {
@@ -152,7 +253,6 @@ export function useRouteAnalysis() {
 
       console.log('Route received with', route.coordinates.length, 'points')
 
-      // Process curves
       const curves = processRoute(route.coordinates)
       
       setRouteData({
@@ -205,6 +305,28 @@ export function useRouteAnalysis() {
     }
   }, [processRoute, setRouteData])
 
+  // Check if off route and trigger reroute
+  useEffect(() => {
+    if (!isRunning || !position || routeMode === 'demo' || routeMode === 'lookahead') return
+    if (!routeData?.coordinates || routeData.coordinates.length < 2) return
+
+    const distanceFromRoute = getDistanceFromRoute(position, routeData.coordinates)
+    
+    // If more than 50 meters from route
+    if (distanceFromRoute > 50) {
+      offRouteCountRef.current++
+      console.log(`Off route: ${Math.round(distanceFromRoute)}m (count: ${offRouteCountRef.current})`)
+      
+      // If consistently off route for 3+ checks, reroute
+      if (offRouteCountRef.current >= 3) {
+        console.log('🚨 Off route detected, initiating reroute...')
+        reroute()
+      }
+    } else {
+      offRouteCountRef.current = 0
+    }
+  }, [position, isRunning, routeMode, routeData, getDistanceFromRoute, reroute])
+
   // Update upcoming curves based on position (for non-demo modes)
   useEffect(() => {
     if (!isRunning || !position || routeMode === 'demo') return
@@ -247,7 +369,8 @@ export function useRouteAnalysis() {
     initDestinationRoute,
     initImportedRoute,
     fetchRoadAhead,
-    processRoute
+    processRoute,
+    reroute
   }
 }
 
