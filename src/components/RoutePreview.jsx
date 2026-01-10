@@ -5,7 +5,7 @@ import { getCurveColor } from '../data/routes'
 
 // ================================
 // Route Preview Screen
-// Updated: Shows ALL curves on map
+// Shows ALL curves on map
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
@@ -20,7 +20,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Calculate route stats
   const routeStats = {
     distance: routeData?.distance ? (routeData.distance / 1609.34).toFixed(1) : 0,
     duration: routeData?.duration ? Math.round(routeData.duration / 60) : 0,
@@ -85,35 +84,50 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
         duration: 1000
       })
 
-      // Start marker (green)
+      // Start marker
       const startEl = document.createElement('div')
       startEl.innerHTML = `<div style="width: 24px; height: 24px; background: #22c55e; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 10px rgba(34,197,94,0.5);"></div>`
       new mapboxgl.Marker({ element: startEl }).setLngLat(routeData.coordinates[0]).addTo(map.current)
 
-      // End marker (red)
+      // End marker
       const endEl = document.createElement('div')
       endEl.innerHTML = `<div style="width: 24px; height: 24px; background: #ef4444; border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 10px rgba(239,68,68,0.5);"></div>`
       new mapboxgl.Marker({ element: endEl }).setLngLat(routeData.coordinates[routeData.coordinates.length - 1]).addTo(map.current)
 
-      // ALL curve markers (not just sharp ones)
-      if (routeData.curves) {
-        routeData.curves.forEach(curve => {
+      // *** ALL CURVE MARKERS ***
+      console.log('Adding curve markers:', routeData.curves?.length || 0)
+      
+      if (routeData.curves && routeData.curves.length > 0) {
+        routeData.curves.forEach((curve, index) => {
           const el = document.createElement('div')
           const color = getCurveColor(curve.severity)
           const isLeft = curve.direction === 'LEFT'
           
-          // Size based on severity - larger for sharper curves
-          const size = curve.severity >= 5 ? 14 : curve.severity >= 3 ? 12 : 10
-          const padding = curve.severity >= 5 ? '5px 9px' : curve.severity >= 3 ? '4px 7px' : '3px 6px'
-          const fontSize = curve.severity >= 5 ? '13px' : curve.severity >= 3 ? '11px' : '10px'
+          console.log(`Curve ${index + 1}: severity ${curve.severity}, position:`, curve.position)
           
           el.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 2px; background: rgba(10,10,15,0.9); padding: ${padding}; border-radius: 8px; border: 1px solid ${color}50; opacity: ${curve.severity >= 3 ? 1 : 0.7};">
-              <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg>
-              <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: ${fontSize}; color: ${color}">${curve.severity}</span>
+            <div style="
+              display: flex; 
+              align-items: center; 
+              gap: 2px; 
+              background: rgba(10,10,15,0.95); 
+              padding: 4px 8px; 
+              border-radius: 8px; 
+              border: 1.5px solid ${color}; 
+              box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            ">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
+                <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+              </svg>
+              <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 12px; color: ${color}">
+                ${curve.severity}
+              </span>
             </div>
           `
-          new mapboxgl.Marker({ element: el }).setLngLat(curve.position).addTo(map.current)
+          
+          new mapboxgl.Marker({ element: el })
+            .setLngLat(curve.position)
+            .addTo(map.current)
         })
       }
     })
@@ -133,12 +147,10 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <div ref={mapContainer} className="absolute inset-0" />
 
-      {/* Back Button */}
       <button onClick={onBack} className="absolute top-4 left-4 z-20 hud-glass w-12 h-12 rounded-xl flex items-center justify-center safe-top">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
       </button>
 
-      {/* Route Info Panel */}
       <div className="absolute bottom-0 left-0 right-0 z-20 safe-bottom">
         <div className="hud-glass rounded-t-3xl p-4 pb-6">
           
@@ -170,9 +182,9 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
           <div className="flex items-center gap-2 mb-5">
             <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden flex">
-              {severityBreakdown.easy > 0 && <div className="h-full bg-green-500" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100}%` }}/>}
-              {severityBreakdown.medium > 0 && <div className="h-full bg-yellow-500" style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100}%` }}/>}
-              {severityBreakdown.hard > 0 && <div className="h-full bg-red-500" style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100}%` }}/>}
+              {severityBreakdown.easy > 0 && <div className="h-full bg-green-500" style={{ width: `${(severityBreakdown.easy / Math.max(1, routeStats.curves)) * 100}%` }}/>}
+              {severityBreakdown.medium > 0 && <div className="h-full bg-yellow-500" style={{ width: `${(severityBreakdown.medium / Math.max(1, routeStats.curves)) * 100}%` }}/>}
+              {severityBreakdown.hard > 0 && <div className="h-full bg-red-500" style={{ width: `${(severityBreakdown.hard / Math.max(1, routeStats.curves)) * 100}%` }}/>}
             </div>
             <div className="flex items-center gap-3 text-[10px]">
               <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span><span className="text-white/40">{severityBreakdown.easy}</span></span>
