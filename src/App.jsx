@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import useStore from './store'
 import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
@@ -16,11 +16,11 @@ import RoutePreview from './components/RoutePreview'
 
 // ================================
 // Rally Co-Pilot App
-// Updated: Route Preview Flow
+// v3: Improved callout sequencing
 // ================================
 
 export default function App() {
-  const { speak } = useSpeech()
+  const { speak, isSpeaking } = useSpeech()
   
   const {
     isRunning,
@@ -39,6 +39,10 @@ export default function App() {
     clearRouteData
   } = useStore()
 
+  // Track announced curves to prevent cut-offs
+  const announcedCurvesRef = useRef(new Set())
+  const lastCalloutTimeRef = useRef(0)
+  
   // Only use simulation for demo mode
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode)
@@ -47,35 +51,108 @@ export default function App() {
 
   const currentSpeed = getDisplaySpeed()
 
-  // Callout Logic
+  // Reset announced curves when route changes
+  useEffect(() => {
+    announcedCurvesRef.current = new Set()
+  }, [routeMode])
+
+  // Improved Callout Logic
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
 
-    const nextCurve = upcomingCurves[0]
-    if (!nextCurve || nextCurve.id === lastAnnouncedCurveId) {
+    const now = Date.now()
+    const MIN_CALLOUT_INTERVAL = 2500 // Minimum 2.5 seconds between callouts
+    
+    // Don't interrupt ongoing speech too quickly
+    if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
       return
     }
 
+    const nextCurve = upcomingCurves[0]
+    if (!nextCurve) return
+    
+    // Skip if already announced this curve
+    if (announcedCurvesRef.current.has(nextCurve.id)) {
+      // Check if there's a second curve to announce
+      const secondCurve = upcomingCurves[1]
+      if (secondCurve && !announcedCurvesRef.current.has(secondCurve.id)) {
+        // Announce second curve if it's getting close
+        const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
+        const timeBasedDistance = speedMps * settings.calloutTiming
+        const announceDistance = Math.max(200, timeBasedDistance)
+        
+        if (secondCurve.distance <= announceDistance) {
+          const callout = generateCallout(secondCurve, mode, settings.speedUnit)
+          speak(callout, 'high')
+          announcedCurvesRef.current.add(secondCurve.id)
+          setLastAnnouncedCurveId(secondCurve.id)
+          lastCalloutTimeRef.current = now
+          
+          if (settings.hapticFeedback && 'vibrate' in navigator) {
+            navigator.vibrate([50])
+          }
+        }
+      }
+      return
+    }
+
+    // Calculate announce distance based on speed
     const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
     const timeBasedDistance = speedMps * settings.calloutTiming
     const announceDistance = Math.max(250, timeBasedDistance)
 
     if (nextCurve.distance <= announceDistance) {
-      const callout = generateCallout(nextCurve, mode, settings.speedUnit)
+      // Check for close following curve to include in callout
+      const secondCurve = upcomingCurves[1]
+      let includeSecond = null
+      
+      if (secondCurve && !secondCurve.isChicane) {
+        const distanceToSecond = secondCurve.distanceFromStart - (nextCurve.distanceFromStart + nextCurve.length)
+        // Include second curve if it's within 100m
+        if (distanceToSecond < 100 && distanceToSecond >= 0) {
+          includeSecond = secondCurve
+        }
+      }
+      
+      const callout = generateCallout(nextCurve, mode, settings.speedUnit, includeSecond)
       speak(callout, 'high')
+      
+      announcedCurvesRef.current.add(nextCurve.id)
+      if (includeSecond) {
+        announcedCurvesRef.current.add(includeSecond.id)
+      }
+      
       setLastAnnouncedCurveId(nextCurve.id)
+      lastCalloutTimeRef.current = now
 
       if (settings.hapticFeedback && 'vibrate' in navigator) {
-        navigator.vibrate([50])
+        const pattern = nextCurve.severity >= 5 ? [100, 50, 100] : [50]
+        navigator.vibrate(pattern)
       }
     }
-  }, [isRunning, upcomingCurves, currentSpeed, mode, settings, lastAnnouncedCurveId, setLastAnnouncedCurveId, speak])
+  }, [isRunning, upcomingCurves, currentSpeed, mode, settings, setLastAnnouncedCurveId, speak])
+
+  // Clear announced curves when passed
+  useEffect(() => {
+    if (!isRunning || upcomingCurves.length === 0) return
+    
+    // Get IDs of upcoming curves
+    const upcomingIds = new Set(upcomingCurves.map(c => c.id))
+    
+    // Remove passed curves from announced set
+    announcedCurvesRef.current.forEach(id => {
+      if (!upcomingIds.has(id)) {
+        announcedCurvesRef.current.delete(id)
+      }
+    })
+  }, [isRunning, upcomingCurves])
 
   // Handle starting navigation from preview
   const handleStartNavigation = () => {
     setShowRoutePreview(false)
+    announcedCurvesRef.current = new Set()
     startDrive()
   }
 
@@ -91,7 +168,7 @@ export default function App() {
     return <RouteSelector />
   }
 
-  // SCREEN 2: Route Preview (NEW)
+  // SCREEN 2: Route Preview
   if (showRoutePreview) {
     return (
       <RoutePreview 
