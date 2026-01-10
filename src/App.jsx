@@ -16,18 +16,17 @@ import RoutePreview from './components/RoutePreview'
 
 // ================================
 // Rally Co-Pilot App
-// v3: Improved callout sequencing
+// v4: Fixed stop button, proper state management
 // ================================
 
 export default function App() {
-  const { speak, isSpeaking } = useSpeech()
+  const { speak } = useSpeech()
   
   const {
     isRunning,
     mode,
     settings,
     upcomingCurves,
-    lastAnnouncedCurveId,
     setLastAnnouncedCurveId,
     getDisplaySpeed,
     showRouteSelector,
@@ -36,6 +35,7 @@ export default function App() {
     setShowRouteSelector,
     routeMode,
     startDrive,
+    stopDrive,
     clearRouteData
   } = useStore()
 
@@ -43,10 +43,10 @@ export default function App() {
   const announcedCurvesRef = useRef(new Set())
   const lastCalloutTimeRef = useRef(0)
   
-  // Only use simulation for demo mode
+  // Use simulation for demo mode, geolocation for real driving
   const isDemoMode = routeMode === 'demo'
-  useSimulation(isDemoMode)
-  useGeolocation()
+  useSimulation(isDemoMode && isRunning)
+  useGeolocation(!isDemoMode && isRunning)
   useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
@@ -56,16 +56,15 @@ export default function App() {
     announcedCurvesRef.current = new Set()
   }, [routeMode])
 
-  // Improved Callout Logic
+  // Callout Logic
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
 
     const now = Date.now()
-    const MIN_CALLOUT_INTERVAL = 2500 // Minimum 2.5 seconds between callouts
+    const MIN_CALLOUT_INTERVAL = 2500
     
-    // Don't interrupt ongoing speech too quickly
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
       return
     }
@@ -73,14 +72,11 @@ export default function App() {
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
     
-    // Skip if already announced this curve
     if (announcedCurvesRef.current.has(nextCurve.id)) {
-      // Check if there's a second curve to announce
       const secondCurve = upcomingCurves[1]
       if (secondCurve && !announcedCurvesRef.current.has(secondCurve.id)) {
-        // Announce second curve if it's getting close
         const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
-        const timeBasedDistance = speedMps * settings.calloutTiming
+        const timeBasedDistance = speedMps * (settings.calloutTiming || 6)
         const announceDistance = Math.max(200, timeBasedDistance)
         
         if (secondCurve.distance <= announceDistance) {
@@ -98,19 +94,16 @@ export default function App() {
       return
     }
 
-    // Calculate announce distance based on speed
     const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
-    const timeBasedDistance = speedMps * settings.calloutTiming
+    const timeBasedDistance = speedMps * (settings.calloutTiming || 6)
     const announceDistance = Math.max(250, timeBasedDistance)
 
     if (nextCurve.distance <= announceDistance) {
-      // Check for close following curve to include in callout
       const secondCurve = upcomingCurves[1]
       let includeSecond = null
       
       if (secondCurve && !secondCurve.isChicane) {
         const distanceToSecond = secondCurve.distanceFromStart - (nextCurve.distanceFromStart + nextCurve.length)
-        // Include second curve if it's within 100m
         if (distanceToSecond < 100 && distanceToSecond >= 0) {
           includeSecond = secondCurve
         }
@@ -138,10 +131,8 @@ export default function App() {
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
-    // Get IDs of upcoming curves
     const upcomingIds = new Set(upcomingCurves.map(c => c.id))
     
-    // Remove passed curves from announced set
     announcedCurvesRef.current.forEach(id => {
       if (!upcomingIds.has(id)) {
         announcedCurvesRef.current.delete(id)
@@ -161,6 +152,14 @@ export default function App() {
     setShowRoutePreview(false)
     setShowRouteSelector(true)
     clearRouteData()
+  }
+
+  // Handle stop - returns to route selector
+  const handleStop = () => {
+    stopDrive()
+    clearRouteData()
+    setShowRouteSelector(true)
+    announcedCurvesRef.current = new Set()
   }
 
   // SCREEN 1: Route Selector
@@ -184,7 +183,7 @@ export default function App() {
       <Map />
       <CalloutOverlay />
       <VoiceIndicator />
-      <BottomBar />
+      <BottomBar onStop={handleStop} />
       <SettingsPanel />
     </div>
   )
