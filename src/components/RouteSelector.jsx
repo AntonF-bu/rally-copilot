@@ -11,6 +11,7 @@ export default function RouteSelector() {
   const { 
     setRouteMode, 
     setShowRouteSelector, 
+    setShowRoutePreview,
     startDrive,
     position,
     setPosition,
@@ -63,7 +64,7 @@ export default function RouteSelector() {
     return () => clearTimeout(timeout)
   }, [destination])
 
-  // Handle destination selection
+  // Handle destination selection - go to preview
   const handleSelectDestination = async (dest) => {
     setError(null)
     setIsLoading(true)
@@ -75,16 +76,14 @@ export default function RouteSelector() {
     }
 
     try {
-      // Clear any previous route data first
       clearRouteData()
-      
       setRouteMode('destination')
       const success = await initDestinationRoute(dest.name)
       
       if (success) {
         setShowDestination(false)
         setShowRouteSelector(false)
-        startDrive()
+        setShowRoutePreview(true) // Go to preview instead of starting
       } else {
         setError('Could not find route. Try a different destination.')
       }
@@ -96,22 +95,20 @@ export default function RouteSelector() {
     }
   }
 
-  // Handle look-ahead mode
+  // Handle look-ahead mode - starts immediately (no preview needed)
   const handleLookAhead = () => {
     if (!hasLocation) {
       setError('Cannot get your current location. Please enable location services.')
       return
     }
     
-    // Clear any previous route data first
     clearRouteData()
-    
     setRouteMode('lookahead')
     setShowRouteSelector(false)
     startDrive()
   }
 
-  // Handle import
+  // Handle import - go to preview
   const handleImport = async () => {
     if (!importUrl.trim()) return
     
@@ -119,16 +116,14 @@ export default function RouteSelector() {
     setIsLoading(true)
 
     try {
-      // Clear any previous route data first
       clearRouteData()
-      
       setRouteMode('imported')
       const result = await initImportedRoute(importUrl)
       
       if (result === true) {
         setShowImport(false)
         setShowRouteSelector(false)
-        startDrive()
+        setShowRoutePreview(true) // Go to preview instead of starting
       } else if (result && result.error === 'SHORT_URL') {
         setError(result.message)
       } else {
@@ -142,11 +137,9 @@ export default function RouteSelector() {
     }
   }
 
-  // Handle demo mode
+  // Handle demo mode - starts immediately (no preview needed)
   const handleDemo = () => {
-    // Clear any previous route data first
     clearRouteData()
-    
     setRouteMode('demo')
     setShowRouteSelector(false)
     startDrive()
