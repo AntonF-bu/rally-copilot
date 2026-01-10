@@ -1,11 +1,11 @@
 import useStore from '../store'
 
 // ================================
-// Bottom Bar - v3
-// Stop → Preview, Back → Menu
+// Bottom Bar - v4
+// Uses store actions directly
 // ================================
 
-export default function BottomBar({ onStop, onBack }) {
+export default function BottomBar() {
   const {
     mode,
     setMode,
@@ -15,7 +15,11 @@ export default function BottomBar({ onStop, onBack }) {
     gpsAccuracy,
     simulationProgress,
     routeData,
-    routeMode
+    routeMode,
+    // Actions for navigation
+    stopDrive,
+    setShowRoutePreview,
+    setShowRouteSelector
   } = useStore()
 
   const modes = [
@@ -27,6 +31,20 @@ export default function BottomBar({ onStop, onBack }) {
   // Toggle voice on/off
   const handleToggleVoice = () => {
     updateSettings({ voiceEnabled: !settings.voiceEnabled })
+  }
+
+  // STOP - go to preview
+  const handleStop = () => {
+    console.log('STOP pressed - going to preview')
+    stopDrive()
+    setShowRoutePreview(true)
+  }
+
+  // BACK - go to menu
+  const handleBack = () => {
+    console.log('BACK pressed - going to menu')
+    stopDrive()
+    setShowRouteSelector(true)
   }
 
   // Calculate route progress
@@ -60,7 +78,7 @@ export default function BottomBar({ onStop, onBack }) {
             <button
               key={m.id}
               onClick={() => setMode(m.id)}
-              className={`px-5 py-2 rounded-full text-xs font-bold tracking-wider transition-all ${
+              className={`px-5 py-2 rounded-full text-xs font-bold tracking-wider transition-colors ${
                 mode === m.id 
                   ? 'text-black' 
                   : 'text-white/40 hover:text-white/60'
@@ -80,9 +98,8 @@ export default function BottomBar({ onStop, onBack }) {
         <div className="flex items-center gap-2">
           {/* Back Button - Goes to MENU */}
           <button
-            onClick={onBack}
+            onClick={handleBack}
             className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
-            title="Back to menu"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
@@ -91,9 +108,8 @@ export default function BottomBar({ onStop, onBack }) {
 
           {/* Stop Button - Goes to PREVIEW */}
           <button
-            onClick={onStop}
+            onClick={handleStop}
             className="flex-1 h-12 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 bg-red-500/90 hover:bg-red-500 active:scale-[0.98]"
-            title="Stop navigation"
           >
             <span className="w-3 h-3 bg-white rounded-sm" />
             STOP
@@ -107,7 +123,6 @@ export default function BottomBar({ onStop, onBack }) {
                 ? 'bg-cyan-500/20 border-cyan-500/50' 
                 : 'bg-black/60 border-white/10'
             }`}
-            title={settings.voiceEnabled ? 'Mute voice' : 'Unmute voice'}
           >
             {settings.voiceEnabled ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
@@ -128,7 +143,6 @@ export default function BottomBar({ onStop, onBack }) {
           <button
             onClick={toggleSettings}
             className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
-            title="Settings"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
