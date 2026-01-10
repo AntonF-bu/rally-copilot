@@ -16,6 +16,7 @@ import RoutePreview from './components/RoutePreview'
 
 // ================================
 // Rally Co-Pilot App
+// Updated: Route Preview Flow
 // ================================
 
 export default function App() {
@@ -41,11 +42,7 @@ export default function App() {
   // Only use simulation for demo mode
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode)
-  
-  // Use real GPS for other modes
   useGeolocation()
-  
-  // Route analysis for all modes
   useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
@@ -74,16 +71,7 @@ export default function App() {
         navigator.vibrate([50])
       }
     }
-  }, [
-    isRunning,
-    upcomingCurves,
-    currentSpeed,
-    mode,
-    settings,
-    lastAnnouncedCurveId,
-    setLastAnnouncedCurveId,
-    speak
-  ])
+  }, [isRunning, upcomingCurves, currentSpeed, mode, settings, lastAnnouncedCurveId, setLastAnnouncedCurveId, speak])
 
   // Handle starting navigation from preview
   const handleStartNavigation = () => {
@@ -98,12 +86,12 @@ export default function App() {
     clearRouteData()
   }
 
-  // Show route selector
+  // SCREEN 1: Route Selector
   if (showRouteSelector) {
     return <RouteSelector />
   }
 
-  // Show route preview
+  // SCREEN 2: Route Preview (NEW)
   if (showRoutePreview) {
     return (
       <RoutePreview 
@@ -113,7 +101,7 @@ export default function App() {
     )
   }
 
-  // Main driving UI
+  // SCREEN 3: Main Driving UI
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] overflow-hidden">
       <Map />
