@@ -32,25 +32,43 @@ export default function CalloutOverlay() {
   }
 
   // Generate elevation data from route or use placeholder
-  const elevationData = useMemo(() => {
+  const { elevationData, totalElevation, currentElevation } = useMemo(() => {
     const coords = routeData?.coordinates || []
     const points = []
     const numPoints = 20
+    
+    let minElev = Infinity
+    let maxElev = -Infinity
     
     if (coords.length > 0) {
       for (let i = 0; i < numPoints; i++) {
         const idx = Math.floor((i / numPoints) * coords.length)
         const coord = coords[Math.min(idx, coords.length - 1)]
-        points.push(800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100)
+        // Simulated elevation based on coordinates
+        const elev = 800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100
+        points.push(elev)
+        minElev = Math.min(minElev, elev)
+        maxElev = Math.max(maxElev, elev)
       }
     } else {
       // Placeholder data
       for (let i = 0; i < numPoints; i++) {
-        points.push(800 + Math.sin(i * 0.5) * 100)
+        const elev = 800 + Math.sin(i * 0.5) * 100
+        points.push(elev)
+        minElev = Math.min(minElev, elev)
+        maxElev = Math.max(maxElev, elev)
       }
     }
-    return points
-  }, [routeData])
+    
+    const elevPosition = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
+    const currentElev = points[elevPosition] || points[0]
+    
+    return {
+      elevationData: points,
+      totalElevation: Math.round(maxElev - minElev),
+      currentElevation: Math.round(currentElev)
+    }
+  }, [routeData, simulationProgress])
 
   const elevationPosition = Math.min(Math.floor(simulationProgress * 20), 19)
 
@@ -73,6 +91,7 @@ export default function CalloutOverlay() {
         <div className="absolute top-20 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
+            <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
           </div>
           <div className="h-8">
             <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
@@ -92,6 +111,7 @@ export default function CalloutOverlay() {
               />
             </svg>
           </div>
+          <div className="text-[9px] text-white/50 text-center mt-1">{currentElevation}ft</div>
         </div>
 
         <style>{`
@@ -249,7 +269,7 @@ export default function CalloutOverlay() {
       <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
         <div className="flex items-center justify-between mb-1">
           <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-          <span className="text-[8px] text-white/40">+{Math.round(Math.sin(simulationProgress * Math.PI * 2) * 80 + 120)}ft</span>
+          <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
         </div>
         <div className="h-8">
           <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
@@ -270,6 +290,7 @@ export default function CalloutOverlay() {
             <circle cx={(elevationPosition / 19) * 80} cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 18} r="2.5" fill={modeColor}/>
           </svg>
         </div>
+        <div className="text-[9px] text-white/50 text-center mt-0.5">{currentElevation}ft</div>
       </div>
 
       <style>{`
