@@ -20,7 +20,7 @@ export async function geocodeAddress(query) {
     if (data.features && data.features.length > 0) {
       return data.features.map(f => ({
         name: f.place_name,
-        coordinates: f.center, // [lng, lat]
+        coordinates: f.center,
       }))
     }
     return []
@@ -47,8 +47,8 @@ export async function getRoute(start, end) {
       const route = data.routes[0]
       return {
         coordinates: route.geometry.coordinates,
-        distance: route.distance, // meters
-        duration: route.duration, // seconds
+        distance: route.distance,
+        duration: route.duration,
       }
     }
     return null
@@ -87,8 +87,31 @@ export async function getRouteWithWaypoints(waypoints) {
 }
 
 /**
+ * Expand a shortened Google Maps URL via our API endpoint
+ */
+export async function expandShortUrl(shortUrl) {
+  try {
+    const response = await fetch('/api/expand-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: shortUrl })
+    })
+    
+    if (!response.ok) {
+      console.error('Failed to expand URL:', response.status)
+      return null
+    }
+    
+    const data = await response.json()
+    return data.expandedUrl
+  } catch (error) {
+    console.error('Error expanding URL:', error)
+    return null
+  }
+}
+
+/**
  * Parse Google Maps URL and extract waypoints
- * Supports multiple URL formats
  */
 export function parseGoogleMapsUrl(url) {
   if (!url) return null
@@ -97,19 +120,14 @@ export function parseGoogleMapsUrl(url) {
     console.log('Parsing Google Maps URL:', url)
     
     const waypoints = []
-
-    // Decode URL if needed
     const decodedUrl = decodeURIComponent(url)
 
-    // Format 1: Standard directions URL with /dir/
-    // https://www.google.com/maps/dir/origin/destination/
-    // https://www.google.com/maps/dir/42.3601,-71.0589/42.3501,-71.0789/
+    // Format 1: /dir/ with coordinates or place names
     const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@]+)/)
     if (dirMatch) {
       const origin = dirMatch[1]
       const dest = dirMatch[2]
       
-      // Check if they're coordinates
       const originCoords = parseCoordinateString(origin)
       const destCoords = parseCoordinateString(dest)
       
@@ -117,7 +135,6 @@ export function parseGoogleMapsUrl(url) {
         return { coordinates: [originCoords, destCoords] }
       }
       
-      // They're place names, need geocoding
       return {
         needsGeocoding: true,
         origin: origin.replace(/\+/g, ' '),
@@ -125,8 +142,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 2: URL with @lat,lng in the path
-    // https://www.google.com/maps/@42.3601,-71.0589,15z
+    // Format 2: @lat,lng in path
     const atMatches = decodedUrl.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/g)
     if (atMatches) {
       for (const match of atMatches) {
@@ -139,8 +155,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 3: URL with !3d and !4d markers (common in shared links)
-    // ...!3d42.3601!4d-71.0589...
+    // Format 3: !3d and !4d markers
     const dMatches = decodedUrl.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/g)
     if (dMatches) {
       for (const match of dMatches) {
@@ -155,8 +170,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 4: Place URL
-    // https://www.google.com/maps/place/Boston,+MA/
+    // Format 4: /place/ URL
     const placeMatch = decodedUrl.match(/\/place\/([^/@]+)/)
     if (placeMatch && waypoints.length === 0) {
       return {
@@ -165,8 +179,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 5: Query parameter
-    // https://www.google.com/maps?q=42.3601,-71.0589
+    // Format 5: ?q= parameter
     const qMatch = decodedUrl.match(/[?&]q=([^&]+)/)
     if (qMatch) {
       const qValue = qMatch[1]
@@ -181,8 +194,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 6: Destination parameter
-    // https://www.google.com/maps/dir/?api=1&destination=lat,lng
+    // Format 6: destination= parameter
     const destParam = decodedUrl.match(/destination=([^&]+)/)
     if (destParam) {
       const destValue = destParam[1]
@@ -197,13 +209,13 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 7: Origin parameter
+    // Format 7: origin= parameter
     const originParam = decodedUrl.match(/origin=([^&]+)/)
     if (originParam) {
       const originValue = originParam[1]
       const coords = parseCoordinateString(originValue)
       if (coords) {
-        waypoints.unshift(coords) // Add to beginning
+        waypoints.unshift(coords)
       }
     }
 
@@ -214,14 +226,12 @@ export function parseGoogleMapsUrl(url) {
     }
 
     if (waypoints.length === 1) {
-      // Only have destination, will use current location as origin
       return { 
         coordinates: waypoints,
         needsOrigin: true
       }
     }
 
-    // If we couldn't parse anything useful
     console.warn('Could not parse coordinates from URL')
     return null
 
@@ -231,28 +241,21 @@ export function parseGoogleMapsUrl(url) {
   }
 }
 
-/**
- * Parse a string that might contain coordinates
- */
 function parseCoordinateString(str) {
   if (!str) return null
   
-  // Try "lat,lng" format
   const parts = str.split(',')
   if (parts.length >= 2) {
     const lat = parseFloat(parts[0])
     const lng = parseFloat(parts[1])
     if (isValidCoordinate(lat, lng)) {
-      return [lng, lat] // Return as [lng, lat] for Mapbox
+      return [lng, lat]
     }
   }
   
   return null
 }
 
-/**
- * Check if coordinates are valid
- */
 function isValidCoordinate(lat, lng) {
   return !isNaN(lat) && !isNaN(lng) && 
          lat >= -90 && lat <= 90 && 
@@ -266,10 +269,7 @@ export async function getRoadAhead(position, heading, distance = 2000) {
   if (!position || !MAPBOX_TOKEN) return null
 
   try {
-    // Calculate a point ahead in the direction of travel
     const aheadPoint = getPointAtDistance(position, heading, distance)
-    
-    // Get route from current position to point ahead
     const route = await getRoute(position, aheadPoint)
     return route
   } catch (error) {
@@ -278,11 +278,8 @@ export async function getRoadAhead(position, heading, distance = 2000) {
   }
 }
 
-/**
- * Calculate a point at a given distance and bearing from start
- */
 function getPointAtDistance(start, bearingDeg, distanceM) {
-  const R = 6371e3 // Earth radius in meters
+  const R = 6371e3
   const bearing = (bearingDeg || 0) * Math.PI / 180
   const lat1 = start[1] * Math.PI / 180
   const lon1 = start[0] * Math.PI / 180
@@ -305,5 +302,6 @@ export default {
   getRoute,
   getRouteWithWaypoints,
   parseGoogleMapsUrl,
+  expandShortUrl,
   getRoadAhead
 }
