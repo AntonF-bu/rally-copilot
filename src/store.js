@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 // ================================
-// Rally Co-Pilot Store - v4
-// Complete state management
+// Rally Co-Pilot Store - v5
+// Fixed navigation state management
 // ================================
 
 const useStore = create(
@@ -16,11 +16,15 @@ const useStore = create(
       speed: 0,
       gpsAccuracy: null,
       
+      // ========== Screen State ==========
+      // These control which screen is shown
+      showRouteSelector: true,
+      showRoutePreview: false,
+      // Note: Main driving UI shows when both are false AND isRunning is true
+      
       // ========== Route State ==========
       routeData: null,
       routeMode: null, // 'destination', 'lookahead', 'import', 'demo'
-      showRouteSelector: true,
-      showRoutePreview: false,
       
       // ========== Curve State ==========
       activeCurve: null,
@@ -40,39 +44,99 @@ const useStore = create(
       settings: {
         voiceEnabled: true,
         volume: 1.0,
-        calloutTiming: 6, // seconds ahead
+        calloutTiming: 6,
         speedUnit: 'mph',
         mapStyle: 'dark',
         keepScreenOn: true,
         hapticFeedback: false,
       },
       
-      // ========== Actions ==========
+      // ========== Screen Navigation Actions ==========
       
-      // Navigation
-      startDrive: () => set({ 
-        isRunning: true,
-        showRouteSelector: false,
-        showRoutePreview: false,
-        simulationProgress: 0,
-        lastAnnouncedCurveId: null
-      }),
+      // Go to route selector (main menu)
+      goToMenu: () => {
+        console.log('goToMenu called')
+        set({ 
+          showRouteSelector: true, 
+          showRoutePreview: false,
+          isRunning: false,
+          simulationProgress: 0,
+          activeCurve: null,
+          upcomingCurves: [],
+          lastAnnouncedCurveId: null
+        })
+      },
       
-      stopDrive: () => set({ 
-        isRunning: false,
-        activeCurve: null,
-        upcomingCurves: [],
-        simulationProgress: 0,
-        lastAnnouncedCurveId: null
-      }),
+      // Go to route preview
+      goToPreview: () => {
+        console.log('goToPreview called')
+        set({ 
+          showRouteSelector: false, 
+          showRoutePreview: true,
+          isRunning: false,
+          simulationProgress: 0,
+          activeCurve: null,
+          upcomingCurves: [],
+          lastAnnouncedCurveId: null
+        })
+      },
       
-      // Position updates
+      // Start navigation (go to driving view)
+      goToDriving: () => {
+        console.log('goToDriving called')
+        set({ 
+          showRouteSelector: false, 
+          showRoutePreview: false,
+          isRunning: true,
+          simulationProgress: 0,
+          lastAnnouncedCurveId: null
+        })
+      },
+      
+      // Legacy setters (for compatibility)
+      setShowRouteSelector: (show) => {
+        console.log('setShowRouteSelector:', show)
+        if (show) {
+          get().goToMenu()
+        } else {
+          set({ showRouteSelector: false })
+        }
+      },
+      
+      setShowRoutePreview: (show) => {
+        console.log('setShowRoutePreview:', show)
+        if (show) {
+          get().goToPreview()
+        } else {
+          set({ showRoutePreview: false })
+        }
+      },
+      
+      // ========== Drive Actions ==========
+      
+      startDrive: () => {
+        console.log('startDrive called')
+        get().goToDriving()
+      },
+      
+      stopDrive: () => {
+        console.log('stopDrive called')
+        set({ 
+          isRunning: false,
+          simulationProgress: 0,
+          activeCurve: null,
+          upcomingCurves: [],
+          lastAnnouncedCurveId: null
+        })
+      },
+      
+      // ========== Position Actions ==========
       setPosition: (position) => set({ position }),
       setHeading: (heading) => set({ heading }),
       setSpeed: (speed) => set({ speed }),
       setGpsAccuracy: (gpsAccuracy) => set({ gpsAccuracy }),
       
-      // Route management
+      // ========== Route Actions ==========
       setRouteData: (routeData) => set({ routeData }),
       setRouteMode: (routeMode) => set({ routeMode }),
       clearRouteData: () => set({ 
@@ -82,33 +146,28 @@ const useStore = create(
         activeCurve: null
       }),
       
-      // Screen navigation
-      setShowRouteSelector: (show) => set({ showRouteSelector: show }),
-      setShowRoutePreview: (show) => set({ showRoutePreview: show }),
-      
-      // Curve management
+      // ========== Curve Actions ==========
       setActiveCurve: (curve) => set({ activeCurve: curve }),
       setUpcomingCurves: (curves) => set({ upcomingCurves: curves }),
       setLastAnnouncedCurveId: (id) => set({ lastAnnouncedCurveId: id }),
       
-      // Simulation
+      // ========== Simulation Actions ==========
       setSimulationProgress: (progress) => set({ simulationProgress: progress }),
       
-      // UI
-      setMode: (mode) => set({ mode }),
+      // ========== UI Actions ==========
+      setMode: (mode) => {
+        console.log('setMode:', mode)
+        set({ mode })
+      },
       toggleSettings: () => set((state) => ({ showSettings: !state.showSettings })),
-      setSpeaking: (isSpeaking, text = '') => set({ 
-        isSpeaking, 
-        currentCallout: text 
-      }),
+      setSpeaking: (isSpeaking, text = '') => set({ isSpeaking, currentCallout: text }),
       
-      // Settings
+      // ========== Settings Actions ==========
       updateSettings: (updates) => set((state) => ({
         settings: { ...state.settings, ...updates }
       })),
       
       // ========== Computed Values ==========
-      
       getDisplaySpeed: () => {
         const { speed, settings } = get()
         if (settings.speedUnit === 'kmh') {
@@ -124,7 +183,6 @@ const useStore = create(
         const speedKey = `speed${mode.charAt(0).toUpperCase() + mode.slice(1)}`
         let speed = curve[speedKey] || curve.speedCruise || 45
         
-        // Convert to kmh if needed
         if (settings.speedUnit === 'kmh') {
           speed = Math.round(speed * 1.609)
         }
