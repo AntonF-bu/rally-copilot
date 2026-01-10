@@ -9,16 +9,13 @@ import CalloutOverlay from './components/CalloutOverlay'
 import BottomBar from './components/BottomBar'
 import SettingsPanel from './components/SettingsPanel'
 import VoiceIndicator from './components/VoiceIndicator'
+import RouteSelector from './components/RouteSelector'
 
 // ================================
 // Rally Co-Pilot App
-// Map-focused minimal UI
 // ================================
 
 export default function App() {
-  // Initialize simulation
-  useSimulation()
-  
   const { speak } = useSpeech()
   
   const {
@@ -28,16 +25,36 @@ export default function App() {
     upcomingCurves,
     lastAnnouncedCurveId,
     setLastAnnouncedCurveId,
-    getDisplaySpeed
+    getDisplaySpeed,
+    showRouteSelector,
+    setShowRouteSelector,
+    routeMode
   } = useStore()
+
+  // Initialize simulation (only for demo mode)
+  useSimulation()
 
   const currentSpeed = getDisplaySpeed()
 
-  // ================================
-  // Callout Logic - Distance-based triggering
-  // Triggers 200-400m before curve
-  // ================================
-  
+  // Handle route selection
+  const handleStartRoute = (routeConfig) => {
+    console.log('Starting route:', routeConfig)
+    setShowRouteSelector(false)
+    
+    // TODO: Initialize appropriate mode
+    // For now, all modes start the demo
+    if (routeConfig.type === 'demo') {
+      // Demo mode - use simulation
+    } else if (routeConfig.type === 'lookahead') {
+      // TODO: Start real GPS + look-ahead analysis
+    } else if (routeConfig.type === 'destination') {
+      // TODO: Geocode destination, get route, analyze
+    } else if (routeConfig.type === 'import') {
+      // TODO: Parse Google Maps URL, get route
+    }
+  }
+
+  // Callout Logic
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
@@ -48,22 +65,15 @@ export default function App() {
       return
     }
 
-    // Fixed announce distance: 250m minimum, or 6 seconds at current speed
-    const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10) // min 10 m/s
+    const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
     const timeBasedDistance = speedMps * settings.calloutTiming
     const announceDistance = Math.max(250, timeBasedDistance)
 
-    // Debug log
-    console.log(`Curve ${nextCurve.id}: dist=${nextCurve.distance}m, trigger=${Math.round(announceDistance)}m`)
-
-    // Trigger when within announce distance
     if (nextCurve.distance <= announceDistance) {
-      console.log(`🎤 Announcing curve ${nextCurve.id}`)
       const callout = generateCallout(nextCurve, mode, settings.speedUnit)
       speak(callout, 'high')
       setLastAnnouncedCurveId(nextCurve.id)
 
-      // Haptic feedback
       if (settings.hapticFeedback && 'vibrate' in navigator) {
         navigator.vibrate([50])
       }
@@ -79,25 +89,18 @@ export default function App() {
     speak
   ])
 
-  // ================================
-  // Render - Map-focused layout
-  // ================================
+  // Show route selector
+  if (showRouteSelector) {
+    return <RouteSelector onStartRoute={handleStartRoute} />
+  }
 
+  // Main driving UI
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] overflow-hidden">
-      {/* Full-screen Map (base layer) */}
       <Map />
-      
-      {/* Callout Overlay (top) */}
       <CalloutOverlay />
-      
-      {/* Voice Indicator (middle) */}
       <VoiceIndicator />
-      
-      {/* Bottom Controls (minimal) */}
       <BottomBar />
-      
-      {/* Settings Modal */}
       <SettingsPanel />
     </div>
   )
