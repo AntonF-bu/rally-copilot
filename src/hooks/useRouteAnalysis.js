@@ -5,7 +5,6 @@ import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWit
 
 // ================================
 // Route Analysis Hook
-// Manages route fetching and curve detection
 // ================================
 
 export function useRouteAnalysis() {
@@ -29,35 +28,40 @@ export function useRouteAnalysis() {
     if (!coordinates || coordinates.length < 3) return []
     
     const curves = detectCurves(coordinates)
-    console.log(`Detected ${curves.length} curves`)
+    console.log(`Detected ${curves.length} curves from ${coordinates.length} points`)
     allCurvesRef.current = curves
     
     return curves
   }, [])
 
   // Initialize route for destination mode
-  const initDestinationRoute = useCallback(async (destination) => {
-    if (!position) {
+  const initDestinationRoute = useCallback(async (destinationQuery) => {
+    const currentPosition = useStore.getState().position
+    
+    if (!currentPosition) {
       console.warn('No current position for destination route')
       return false
     }
 
     try {
       // Geocode destination
-      const results = await geocodeAddress(destination)
+      const results = await geocodeAddress(destinationQuery)
       if (!results || results.length === 0) {
         console.error('Could not find destination')
         return false
       }
 
       const destCoords = results[0].coordinates
+      console.log('Destination:', results[0].name, destCoords)
 
       // Get route
-      const route = await getRoute(position, destCoords)
+      const route = await getRoute(currentPosition, destCoords)
       if (!route) {
         console.error('Could not get route')
         return false
       }
+
+      console.log('Route received:', route.coordinates.length, 'points')
 
       // Process curves
       const curves = processRoute(route.coordinates)
@@ -75,7 +79,7 @@ export function useRouteAnalysis() {
       console.error('Error initializing destination route:', error)
       return false
     }
-  }, [position, processRoute, setRouteData])
+  }, [processRoute, setRouteData])
 
   // Initialize route from Google Maps import
   const initImportedRoute = useCallback(async (url) => {
@@ -92,7 +96,6 @@ export function useRouteAnalysis() {
       if (parsed.coordinates) {
         waypoints = parsed.coordinates
       } else if (parsed.needsGeocoding) {
-        // Need to geocode origin/destination
         if (parsed.origin && parsed.destination) {
           const originResults = await geocodeAddress(parsed.origin)
           const destResults = await geocodeAddress(parsed.destination)
@@ -108,14 +111,12 @@ export function useRouteAnalysis() {
         return false
       }
 
-      // Get route
       const route = await getRouteWithWaypoints(waypoints)
       if (!route) {
         console.error('Could not get route')
         return false
       }
 
-      // Process curves
       const curves = processRoute(route.coordinates)
       
       setRouteData({
@@ -133,20 +134,22 @@ export function useRouteAnalysis() {
     }
   }, [processRoute, setRouteData])
 
-  // Look-ahead mode: fetch road ahead periodically
+  // Look-ahead mode: fetch road ahead
   const fetchRoadAhead = useCallback(async () => {
-    if (!position || !heading || isFetchingRef.current) return
+    const currentPosition = useStore.getState().position
+    const currentHeading = useStore.getState().heading
+    
+    if (!currentPosition || isFetchingRef.current) return
 
-    // Check if we've moved enough to warrant a new fetch (500m)
     if (lastFetchPositionRef.current) {
-      const dist = getDistance(lastFetchPositionRef.current, position)
+      const dist = getDistance(lastFetchPositionRef.current, currentPosition)
       if (dist < 500) return
     }
 
     isFetchingRef.current = true
 
     try {
-      const route = await getRoadAhead(position, heading, 2000)
+      const route = await getRoadAhead(currentPosition, currentHeading || 0, 2000)
       if (route) {
         const curves = processRoute(route.coordinates)
         setRouteData({
@@ -154,14 +157,14 @@ export function useRouteAnalysis() {
           curves,
           lookahead: true
         })
-        lastFetchPositionRef.current = position
+        lastFetchPositionRef.current = currentPosition
       }
     } catch (error) {
       console.error('Look-ahead fetch error:', error)
     } finally {
       isFetchingRef.current = false
     }
-  }, [position, heading, processRoute, setRouteData])
+  }, [processRoute, setRouteData])
 
   // Update upcoming curves based on position
   useEffect(() => {
@@ -170,13 +173,12 @@ export function useRouteAnalysis() {
     const upcoming = getUpcomingCurves(
       allCurvesRef.current,
       position,
-      heading,
+      heading || 0,
       1000
     )
 
     setUpcomingCurves(upcoming)
 
-    // Set active curve if close enough
     if (upcoming.length > 0 && upcoming[0].distance < 300) {
       setActiveCurve(upcoming[0])
     } else {
@@ -184,16 +186,12 @@ export function useRouteAnalysis() {
     }
   }, [position, heading, isRunning, setUpcomingCurves, setActiveCurve])
 
-  // Look-ahead mode: periodically fetch road ahead
+  // Look-ahead mode: periodically fetch
   useEffect(() => {
     if (routeMode !== 'lookahead' || !isRunning) return
 
-    // Initial fetch
     fetchRoadAhead()
-
-    // Periodic fetch every 10 seconds
     const interval = setInterval(fetchRoadAhead, 10000)
-
     return () => clearInterval(interval)
   }, [routeMode, isRunning, fetchRoadAhead])
 
