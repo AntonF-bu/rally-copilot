@@ -1,7 +1,5 @@
-// ================================
-// API Endpoint: Expand Short URLs
-// Follows redirects to get the full Google Maps URL
-// ================================
+// /api/expand-url.js
+// Expands short URLs like maps.app.goo.gl to full URLs
 
 export const config = {
   runtime: 'edge',
@@ -25,9 +23,25 @@ export default async function handler(req) {
       })
     }
 
-    console.log('Expanding URL:', url)
+    // Check if it's a short URL that needs expanding
+    const shortUrlPatterns = [
+      'maps.app.goo.gl',
+      'goo.gl',
+      'bit.ly',
+      't.co'
+    ]
 
-    // Follow redirects to get final URL
+    const needsExpanding = shortUrlPatterns.some(pattern => url.includes(pattern))
+
+    if (!needsExpanding) {
+      // Already a full URL, return as-is
+      return new Response(JSON.stringify({ expandedUrl: url }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
+    // Follow redirects to get the final URL
     const response = await fetch(url, {
       method: 'HEAD',
       redirect: 'follow',
@@ -35,17 +49,15 @@ export default async function handler(req) {
 
     const expandedUrl = response.url
 
-    console.log('Expanded URL:', expandedUrl)
+    console.log('Expanded URL:', url, '->', expandedUrl)
 
     return new Response(JSON.stringify({ expandedUrl }), {
       status: 200,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { 'Content-Type': 'application/json' },
     })
+
   } catch (error) {
-    console.error('Error expanding URL:', error)
+    console.error('URL expansion error:', error)
     return new Response(JSON.stringify({ error: 'Failed to expand URL' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
