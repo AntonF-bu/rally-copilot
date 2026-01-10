@@ -15,8 +15,8 @@ import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
 
 // ================================
-// Rally Co-Pilot App - v6
-// Simplified - BottomBar handles navigation
+// Rally Co-Pilot App - v7
+// Uses goToMenu, goToPreview, goToDriving
 // ================================
 
 export default function App() {
@@ -31,10 +31,10 @@ export default function App() {
     getDisplaySpeed,
     showRouteSelector,
     showRoutePreview,
-    setShowRoutePreview,
-    setShowRouteSelector,
     routeMode,
-    startDrive,
+    goToMenu,
+    goToPreview,
+    goToDriving,
     clearRouteData
   } = useStore()
 
@@ -139,17 +139,18 @@ export default function App() {
 
   // Handle starting navigation from preview
   const handleStartNavigation = () => {
-    setShowRoutePreview(false)
     announcedCurvesRef.current = new Set()
-    startDrive()
+    goToDriving()
   }
 
   // Handle going back from preview to selector
   const handleBackFromPreview = () => {
-    setShowRoutePreview(false)
-    setShowRouteSelector(true)
     clearRouteData()
+    goToMenu()
   }
+
+  // Debug log
+  console.log('App render - showRouteSelector:', showRouteSelector, 'showRoutePreview:', showRoutePreview, 'isRunning:', isRunning)
 
   // SCREEN 1: Route Selector
   if (showRouteSelector) {
@@ -166,7 +167,7 @@ export default function App() {
     )
   }
 
-  // SCREEN 3: Main Driving UI
+  // SCREEN 3: Main Driving UI (default when both are false)
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] overflow-hidden">
       <Map />
