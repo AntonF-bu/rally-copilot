@@ -1,208 +1,123 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import useStore from '../store'
-import { MOHAWK_TRAIL, getDistance, getBearing } from '../data/routes'
+import { MOHAWK_TRAIL } from '../data/routes'
+import { detectCurves, getUpcomingCurves } from '../utils/curveDetection'
 
 // ================================
-// Simulation Hook - Demo Mode
+// Simulation Hook (Demo Mode Only)
 // ================================
 
-export function useSimulation() {
+export function useSimulation(enabled = true) {
   const {
     isRunning,
-    useSimulation,
-    simulationProgress,
-    mode,
+    routeMode,
     setPosition,
     setHeading,
     setSpeed,
     setSimulationProgress,
     setUpcomingCurves,
-    setActiveCurve,
+    setActiveCurve
   } = useStore()
 
-  const intervalRef = useRef(null)
-  const route = MOHAWK_TRAIL
+  const animationRef = useRef(null)
+  const progressRef = useRef(0)
+  const curvesRef = useRef([])
 
-  // Interpolate position along route
-  const getPositionAtProgress = useCallback((progress) => {
-    const coords = route.coordinates
-    const totalSegments = coords.length - 1
-    const segmentFloat = progress * totalSegments
-    const segmentIndex = Math.floor(segmentFloat)
-    const segmentProgress = segmentFloat - segmentIndex
+  // Only run for demo mode
+  const shouldRun = enabled && routeMode === 'demo'
 
-    if (segmentIndex >= totalSegments) {
-      return coords[coords.length - 1]
-    }
+  // Detect curves from demo route on mount
+  useEffect(() => {
+    if (!shouldRun) return
+    
+    const curves = detectCurves(MOHAWK_TRAIL.coordinates)
+    curvesRef.current = curves
+    console.log(`Demo mode: Detected ${curves.length} curves`)
+  }, [shouldRun])
 
-    const start = coords[segmentIndex]
-    const end = coords[segmentIndex + 1]
-
-    return [
-      start[0] + (end[0] - start[0]) * segmentProgress,
-      start[1] + (end[1] - start[1]) * segmentProgress
-    ]
-  }, [route])
-
-  // Get heading at position
-  const getHeadingAtProgress = useCallback((progress) => {
-    const coords = route.coordinates
-    const totalSegments = coords.length - 1
-    const segmentIndex = Math.min(
-      Math.floor(progress * totalSegments),
-      totalSegments - 1
-    )
-
-    const start = coords[segmentIndex]
-    const end = coords[segmentIndex + 1]
-
-    return getBearing(start, end)
-  }, [route])
-
-  // Calculate upcoming curves from current position
-  // Uses ROUTE DISTANCE (along the road), not straight-line distance
-  const calculateUpcomingCurves = useCallback((currentPos, currentProgress) => {
-    const curves = route.curves
-    const upcoming = []
-    const coords = route.coordinates
-
-    // Calculate total route length
-    let totalRouteLength = 0
-    const segmentLengths = []
-    for (let i = 0; i < coords.length - 1; i++) {
-      const segLen = getDistance(coords[i], coords[i + 1])
-      segmentLengths.push(segLen)
-      totalRouteLength += segLen
-    }
-
-    // Current distance along route
-    const currentRouteDistance = currentProgress * totalRouteLength
-
-    // For each curve, calculate its distance along the route
-    for (const curve of curves) {
-      // Find which segment the curve is on
-      let minDist = Infinity
-      let curveSegmentIndex = 0
-      
-      for (let i = 0; i < coords.length; i++) {
-        const dist = getDistance(coords[i], curve.position)
-        if (dist < minDist) {
-          minDist = dist
-          curveSegmentIndex = i
-        }
+  useEffect(() => {
+    if (!isRunning || !shouldRun) {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
       }
-
-      // Calculate curve's distance along route
-      let curveRouteDistance = 0
-      for (let i = 0; i < curveSegmentIndex; i++) {
-        curveRouteDistance += segmentLengths[i]
-      }
-
-      // Distance from current position to curve (along route)
-      const distanceToCurve = curveRouteDistance - currentRouteDistance
-
-      // Only include curves that are ahead (positive distance)
-      if (distanceToCurve > 0 && distanceToCurve < 1500) {
-        upcoming.push({
-          ...curve,
-          distance: Math.round(distanceToCurve),
-          routeProgress: curveRouteDistance / totalRouteLength
-        })
-      }
-    }
-
-    // Sort by distance along route
-    return upcoming
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 5)
-  }, [route])
-
-  // Run simulation tick
-  const tick = useCallback(() => {
-    if (!isRunning || !useSimulation) return
-
-    // Advance progress
-    const newProgress = simulationProgress + 0.0015
-
-    if (newProgress >= 1) {
-      // Loop back to start
-      setSimulationProgress(0)
       return
     }
 
-    setSimulationProgress(newProgress)
+    const route = MOHAWK_TRAIL
+    const coordinates = route.coordinates
+    const totalPoints = coordinates.length
 
-    // Update position
-    const position = getPositionAtProgress(newProgress)
-    setPosition(position)
+    // Simulation speeds (points per frame at 60fps)
+    const speeds = { cruise: 0.15, fast: 0.25, race: 0.35 }
 
-    // Update heading
-    const heading = getHeadingAtProgress(newProgress)
-    setHeading(heading)
+    const animate = () => {
+      const { mode } = useStore.getState()
+      const speed = speeds[mode] || speeds.cruise
 
-    // Simulate speed with variation
-    const baseSpeeds = { cruise: 42, fast: 52, race: 62 }
-    const baseSpeed = baseSpeeds[mode] || 42
-    const variation = Math.sin(Date.now() / 1500) * 8 + (Math.random() - 0.5) * 4
-    setSpeed(Math.max(15, baseSpeed + variation))
-
-    // Update upcoming curves (pass progress to know which are ahead)
-    const upcoming = calculateUpcomingCurves(position, newProgress)
-    setUpcomingCurves(upcoming)
-
-    // Set active curve if close enough
-    if (upcoming.length > 0 && upcoming[0].distance < 300) {
-      setActiveCurve(upcoming[0])
-    } else {
-      setActiveCurve(null)
-    }
-
-  }, [
-    isRunning,
-    useSimulation,
-    simulationProgress,
-    mode,
-    getPositionAtProgress,
-    getHeadingAtProgress,
-    calculateUpcomingCurves,
-    setSimulationProgress,
-    setPosition,
-    setHeading,
-    setSpeed,
-    setUpcomingCurves,
-    setActiveCurve
-  ])
-
-  // Start/stop simulation
-  useEffect(() => {
-    if (isRunning && useSimulation) {
-      intervalRef.current = setInterval(tick, 100)
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
+      progressRef.current += speed / 60
+      if (progressRef.current >= totalPoints - 1) {
+        progressRef.current = 0
       }
+
+      const index = Math.floor(progressRef.current)
+      const nextIndex = Math.min(index + 1, totalPoints - 1)
+      const fraction = progressRef.current - index
+
+      // Interpolate position
+      const currentPos = coordinates[index]
+      const nextPos = coordinates[nextIndex]
+      const position = [
+        currentPos[0] + (nextPos[0] - currentPos[0]) * fraction,
+        currentPos[1] + (nextPos[1] - currentPos[1]) * fraction
+      ]
+
+      // Calculate heading
+      const heading = getBearing(currentPos, nextPos)
+
+      // Simulated speed based on mode
+      const simSpeed = mode === 'race' ? 65 : mode === 'fast' ? 50 : 35
+
+      setPosition(position)
+      setHeading(heading)
+      setSpeed(simSpeed + Math.sin(progressRef.current * 0.5) * 10)
+      setSimulationProgress(progressRef.current / totalPoints)
+
+      // Update upcoming curves
+      const upcoming = getUpcomingCurves(curvesRef.current, position, heading, 1000)
+      setUpcomingCurves(upcoming)
+
+      if (upcoming.length > 0 && upcoming[0].distance < 300) {
+        setActiveCurve(upcoming[0])
+      } else {
+        setActiveCurve(null)
+      }
+
+      animationRef.current = requestAnimationFrame(animate)
     }
+
+    animationRef.current = requestAnimationFrame(animate)
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isRunning, useSimulation, tick])
+  }, [isRunning, shouldRun, setPosition, setHeading, setSpeed, setSimulationProgress, setUpcomingCurves, setActiveCurve])
 
-  // Initialize position when simulation starts
-  useEffect(() => {
-    if (isRunning && useSimulation && simulationProgress === 0) {
-      const initialPos = getPositionAtProgress(0)
-      setPosition(initialPos)
-      setHeading(getHeadingAtProgress(0))
-    }
-  }, [isRunning, useSimulation, simulationProgress, getPositionAtProgress, getHeadingAtProgress, setPosition, setHeading])
+  return null
+}
 
-  return {
-    route
-  }
+// Helper: Calculate bearing between two points
+function getBearing(from, to) {
+  const dLon = (to[0] - from[0]) * Math.PI / 180
+  const lat1 = from[1] * Math.PI / 180
+  const lat2 = to[1] * Math.PI / 180
+
+  const y = Math.sin(dLon) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+
+  let bearing = Math.atan2(y, x) * 180 / Math.PI
+  return (bearing + 360) % 360
 }
 
 export default useSimulation
