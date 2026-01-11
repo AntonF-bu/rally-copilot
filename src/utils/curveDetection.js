@@ -1,10 +1,11 @@
 // ================================
-// Curve Detection Algorithm v5
+// Curve Detection Algorithm v5.1
 // Full featured: sliding window, merging, S-curves, tightening/opening
+// Improved: lower thresholds, better "already passed" detection
 // ================================
 
-const SAMPLE_INTERVAL = 20 // meters between samples
-const SLIDING_WINDOW_DISTANCE = 120 // meters for gradual curve detection
+const SAMPLE_INTERVAL = 15 // meters between samples (was 20)
+const SLIDING_WINDOW_DISTANCE = 100 // meters for gradual curve detection (was 120)
 const MIN_CURVE_SEPARATION = 75 // meters - closer curves get merged
 const CHICANE_MAX_DISTANCE = 100 // meters - max distance for S-curve/chicane detection
 
@@ -131,9 +132,10 @@ function detectAllCurves(points, headings) {
 function detectSharpCurves(points, headings, usedPoints) {
   const curves = []
   
-  const CURVE_START_THRESHOLD = 5
-  const CURVE_CONTINUE_THRESHOLD = 2
-  const MIN_CURVE_ANGLE = 12
+  // Lowered thresholds for better detection
+  const CURVE_START_THRESHOLD = 4  // was 5
+  const CURVE_CONTINUE_THRESHOLD = 1.5  // was 2
+  const MIN_CURVE_ANGLE = 10  // was 12
 
   let i = 0
   while (i < headings.length - 1) {
@@ -159,7 +161,7 @@ function detectSharpCurves(points, headings, usedPoints) {
           curveEnd++
         } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
           let lookAhead = 0
-          for (let j = 1; j <= 3 && curveEnd + j < headings.length; j++) {
+          for (let j = 1; j <= 4 && curveEnd + j < headings.length; j++) {  // Look ahead 4 instead of 3
             lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
           }
           if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
@@ -197,7 +199,7 @@ function detectSharpCurves(points, headings, usedPoints) {
 function detectGradualCurves(points, headings, usedPoints) {
   const curves = []
   const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL)
-  const MIN_GRADUAL_ANGLE = 25 // Higher threshold for gradual curves
+  const MIN_GRADUAL_ANGLE = 20 // was 25 - lower for gentle sweeping curves
   
   let i = 0
   while (i < headings.length - windowSize) {
@@ -226,7 +228,7 @@ function detectGradualCurves(points, headings, usedPoints) {
       // Expand backwards
       while (curveStart > 0 && !usedPoints.has(curveStart - 1)) {
         const change = getHeadingChange(headings[curveStart - 1], headings[curveStart])
-        if (Math.sign(change) === direction && Math.abs(change) > 1) {
+        if (Math.sign(change) === direction && Math.abs(change) > 0.5) {  // was 1
           totalChange += change
           curveStart--
         } else {
@@ -237,7 +239,7 @@ function detectGradualCurves(points, headings, usedPoints) {
       // Expand forwards
       while (curveEnd < headings.length - 1 && !usedPoints.has(curveEnd + 1)) {
         const change = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
-        if (Math.sign(change) === direction && Math.abs(change) > 1) {
+        if (Math.sign(change) === direction && Math.abs(change) > 0.5) {  // was 1
           totalChange += change
           curveEnd++
         } else {
@@ -533,8 +535,8 @@ function getBasicModifier(totalAngle, severity, length) {
   
   if (absAngle > 150) return 'HAIRPIN'
   if (absAngle > 120 || severity >= 5) return 'SHARP'
-  if (length > 120 && severity >= 4) return 'LONG'
-  if (length > 150) return 'LONG'
+  if (length > 100 && severity >= 3) return 'LONG'  // was length > 120 && severity >= 4
+  if (length > 120) return 'LONG'  // was 150
   
   return null
 }
@@ -570,11 +572,12 @@ function estimateRadius(arcLength, angleDegrees) {
 
 function getSeverityFromRadius(radius, totalAngle) {
   let severity
-  if (radius > 200) severity = 1
-  else if (radius > 120) severity = 2
-  else if (radius > 70) severity = 3
-  else if (radius > 40) severity = 4
-  else if (radius > 20) severity = 5
+  // Adjusted thresholds for better gradual curve detection
+  if (radius > 250) severity = 1  // was 200
+  else if (radius > 150) severity = 2  // was 120
+  else if (radius > 90) severity = 3  // was 70
+  else if (radius > 50) severity = 4  // was 40
+  else if (radius > 25) severity = 5  // was 20
   else severity = 6
 
   if (totalAngle > 150) severity = Math.max(severity, 5)
@@ -639,6 +642,7 @@ function logResults(curves) {
 
 /**
  * Filter curves to only those ahead of current position
+ * Improved: better angle calculation and distance filtering
  */
 export function getUpcomingCurves(curves, currentPosition, heading, maxDistance = 1000) {
   if (!curves || !currentPosition) return []
@@ -648,14 +652,31 @@ export function getUpcomingCurves(curves, currentPosition, heading, maxDistance 
       const distance = getDistance(currentPosition, curve.position)
       const bearingToCurve = getBearing(currentPosition, curve.position)
       
-      let angleDiff = Math.abs(bearingToCurve - heading)
-      if (angleDiff > 180) angleDiff = 360 - angleDiff
+      // Calculate angle difference properly (-180 to 180)
+      let angleDiff = bearingToCurve - heading
+      while (angleDiff > 180) angleDiff -= 360
+      while (angleDiff < -180) angleDiff += 360
       
-      const isAhead = angleDiff < 90
+      const absAngleDiff = Math.abs(angleDiff)
       
-      return { ...curve, distance: Math.round(distance), isAhead }
+      // Curve is "ahead" if within 100° of heading (wider cone for turns)
+      // But stricter (70°) when very close to avoid announcing passed curves
+      const isAhead = distance < 30 
+        ? absAngleDiff < 70 
+        : absAngleDiff < 100
+      
+      // Filter out curves we're basically on top of unless directly ahead
+      const tooClose = distance < 20 && absAngleDiff > 50
+      
+      return { 
+        ...curve, 
+        distance: Math.round(distance), 
+        isAhead: isAhead && !tooClose,
+        bearingToCurve: Math.round(bearingToCurve),
+        angleDiff: Math.round(absAngleDiff)
+      }
     })
-    .filter(curve => curve.isAhead && curve.distance < maxDistance && curve.distance > 10)
+    .filter(curve => curve.isAhead && curve.distance < maxDistance && curve.distance > 15)
     .sort((a, b) => a.distance - b.distance)
     .slice(0, 5)
 }
