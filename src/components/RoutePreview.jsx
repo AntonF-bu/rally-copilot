@@ -6,7 +6,7 @@ import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
-import { addCensusSleeveAsCollection, removeCensusSleeve, getCensusLegendItems } from '../services/censusSleeveLayer'
+import { addCensusSleeveAsCollection, removeCensusSleeve, toggleSleeveVisibility, getCensusLegendItems } from '../services/censusSleeveLayer'
 
 // ================================
 // Route Preview - v13
@@ -203,34 +203,32 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // NEW: Add census sleeve when map loads after character analysis
   useEffect(() => {
-    if (mapLoaded && routeCharacter.censusTracts?.length > 0 && mapRef.current) {
-      console.log('🗺️ Adding census sleeve with', routeCharacter.censusTracts.length, 'tracts')
+    if (mapLoaded && mapRef.current && routeData?.coordinates?.length > 0) {
+      // Need either census tracts or route segments to render sleeve
+      const hasData = routeCharacter.censusTracts?.length > 0 || routeCharacter.segments?.length > 0
       
-      // Remove old sleeve first
-      removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)
-      
-      // Add new sleeve
-      sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
-        mapRef.current,
-        routeCharacter.censusTracts,
-        'census-sleeve'
-      )
-      
-      console.log('🗺️ Sleeve layers added:', sleeveLayerIdsRef.current)
+      if (hasData) {
+        console.log('🗺️ Adding census sleeve...')
+        
+        // Remove old sleeve first
+        removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)
+        
+        // Add new sleeve - pass tracts, segments, and coordinates
+        sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
+          mapRef.current,
+          routeCharacter.censusTracts || [],
+          routeCharacter.segments || [],
+          routeData.coordinates
+        )
+      }
     }
-  }, [mapLoaded, routeCharacter.censusTracts])
+  }, [mapLoaded, routeCharacter.censusTracts, routeCharacter.segments, routeData?.coordinates])
 
   // NEW: Toggle sleeve visibility
-  const toggleSleeveVisibility = useCallback(() => {
-    if (!mapRef.current) return
+  const handleToggleSleeve = useCallback(() => {
     const newVisibility = !showSleeve
     setShowSleeve(newVisibility)
-    
-    sleeveLayerIdsRef.current.forEach(id => {
-      if (mapRef.current.getLayer(id)) {
-        mapRef.current.setLayoutProperty(id, 'visibility', newVisibility ? 'visible' : 'none')
-      }
-    })
+    toggleSleeveVisibility(mapRef.current, newVisibility)
   }, [showSleeve])
 
   const fetchDemoRoute = async () => {
@@ -495,7 +493,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             </button>
             {/* NEW: Sleeve toggle button */}
             <button 
-              onClick={toggleSleeveVisibility} 
+              onClick={handleToggleSleeve} 
               className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showSleeve ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-black/70 border border-white/10'}`}
               title="Toggle density layer"
             >
