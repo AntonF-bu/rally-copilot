@@ -7,8 +7,8 @@ import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 
 // ================================
-// Route Preview - Mission Briefing
-// v9: Real elevation, fly controls, compact UI
+// Route Preview - v10
+// Stats at top, compact elevation, proper fly controls
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -34,7 +34,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [selectedCurve, setSelectedCurve] = useState(null)
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
-  const [showElevationExpanded, setShowElevationExpanded] = useState(false)
   
   // Fly-through state
   const [isFlying, setIsFlying] = useState(false)
@@ -60,14 +59,9 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const modeColor = modeColors[mode] || modeColors.cruise
   
   const isRouteFavorite = routeData?.name ? isFavorite(routeData.name) : false
-  
-  const handleToggleFavorite = () => {
-    if (routeData) toggleFavorite(routeData)
-  }
+  const handleToggleFavorite = () => { if (routeData) toggleFavorite(routeData) }
 
-  const mapContainerRef = useCallback((node) => {
-    if (node !== null) setMapContainer(node)
-  }, [])
+  const mapContainerRef = useCallback((node) => { if (node) setMapContainer(node) }, [])
 
   // Route stats
   const routeStats = useMemo(() => {
@@ -87,7 +81,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     hard: routeData?.curves?.filter(c => c.severity >= 5).length || 0
   }), [routeData])
 
-  // Calculate difficulty rating
   const difficultyRating = useMemo(() => {
     if (!routeData?.curves?.length) return { label: 'Unknown', color: '#666' }
     const avgSeverity = routeData.curves.reduce((sum, c) => sum + c.severity, 0) / routeData.curves.length
@@ -99,7 +92,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     return { label: 'Expert', color: '#ff3366' }
   }, [routeData, severityBreakdown])
 
-  // Elevation gain from data
   const elevationGain = useMemo(() => {
     if (!elevationData.length) return 0
     let gain = 0
@@ -110,7 +102,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     return Math.round(settings.units === 'metric' ? gain : gain * 3.28084)
   }, [elevationData, settings.units])
 
-  // Fetch real elevation data from Mapbox Tilequery API
+  // Fetch elevation
   const fetchElevationData = useCallback(async (coordinates) => {
     if (!coordinates?.length || coordinates.length < 2 || elevationFetchedRef.current) return
     elevationFetchedRef.current = true
@@ -120,10 +112,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       const numSamples = Math.min(40, coordinates.length)
       const step = Math.max(1, Math.floor(coordinates.length / numSamples))
       const samplePoints = []
-      
-      for (let i = 0; i < coordinates.length; i += step) {
-        samplePoints.push(coordinates[i])
-      }
+      for (let i = 0; i < coordinates.length; i += step) samplePoints.push(coordinates[i])
       if (samplePoints[samplePoints.length - 1] !== coordinates[coordinates.length - 1]) {
         samplePoints.push(coordinates[coordinates.length - 1])
       }
@@ -131,39 +120,27 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       const elevations = await Promise.all(
         samplePoints.map(async (coord, idx) => {
           try {
-            const response = await fetch(
-              `https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${coord[0]},${coord[1]}.json?layers=contour&access_token=${mapboxgl.accessToken}`
-            )
+            const response = await fetch(`https://api.mapbox.com/v4/mapbox.mapbox-terrain-v2/tilequery/${coord[0]},${coord[1]}.json?layers=contour&access_token=${mapboxgl.accessToken}`)
             const data = await response.json()
             let elevation = 0
             if (data.features?.length > 0) {
               const contours = data.features.filter(f => f.properties?.ele !== undefined)
-              if (contours.length > 0) {
-                elevation = Math.max(...contours.map(f => f.properties.ele))
-              }
+              if (contours.length > 0) elevation = Math.max(...contours.map(f => f.properties.ele))
             }
             return { coord, elevation, distance: (idx / (samplePoints.length - 1)) * (routeData?.distance || 15000) }
-          } catch {
-            return { coord, elevation: 0, distance: (idx / (samplePoints.length - 1)) * (routeData?.distance || 15000) }
-          }
+          } catch { return { coord, elevation: 0, distance: (idx / (samplePoints.length - 1)) * (routeData?.distance || 15000) } }
         })
       )
       
-      // Smooth data
       const smoothed = elevations.map((point, i) => {
         if (i === 0 || i === elevations.length - 1) return point
         return { ...point, elevation: (elevations[i-1].elevation + point.elevation + elevations[i+1].elevation) / 3 }
       })
-      
       setElevationData(smoothed)
-    } catch (err) {
-      console.error('Elevation fetch error:', err)
-    } finally {
-      setIsLoadingElevation(false)
-    }
+    } catch (err) { console.error('Elevation error:', err) } 
+    finally { setIsLoadingElevation(false) }
   }, [routeData?.distance])
 
-  // Fetch demo route
   useEffect(() => {
     if (routeMode === 'demo' && !routeData?.coordinates && !fetchedRef.current) {
       fetchedRef.current = true
@@ -171,7 +148,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
   }, [routeMode])
 
-  // Fetch elevation when route loads
   useEffect(() => {
     if (routeData?.coordinates?.length > 0 && !elevationFetchedRef.current) {
       fetchElevationData(routeData.coordinates)
@@ -185,17 +161,11 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       if (route?.coordinates?.length > 10) {
         const curves = detectCurves(route.coordinates)
         setRouteData({ name: "Boston to Weston Demo", coordinates: route.coordinates, curves, distance: route.distance, duration: route.duration })
-      } else {
-        setLoadError('Could not load demo route')
-      }
-    } catch (err) {
-      setLoadError('Failed to fetch route')
-    } finally {
-      setIsLoadingRoute(false)
-    }
+      } else { setLoadError('Could not load demo route') }
+    } catch { setLoadError('Failed to fetch route') } 
+    finally { setIsLoadingRoute(false) }
   }
 
-  // Reverse route
   const handleReverseRoute = () => {
     if (!routeData?.coordinates) return
     const reversed = {
@@ -213,7 +183,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
-  // Fly through with controls
+  // Fly animation
   const startFlyAnimation = useCallback(() => {
     if (!mapRef.current || !routeData?.coordinates) return
     const coords = routeData.coordinates
@@ -227,10 +197,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
     
     const animate = () => {
-      if (flyIndexRef.current >= coords.length - 1) {
-        stopFlyThrough()
-        return
-      }
+      if (flyIndexRef.current >= coords.length - 1) { stopFlyThrough(); return }
       const current = coords[flyIndexRef.current]
       const next = coords[Math.min(flyIndexRef.current + 5, coords.length - 1)]
       mapRef.current?.easeTo({ center: current, bearing: getBearing(current, next), pitch: 60, zoom: 15, duration: 80 / flySpeed })
@@ -245,20 +212,14 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     setIsFlying(true)
     setIsPaused(false)
     flyIndexRef.current = 0
-    
     mapRef.current.easeTo({ center: routeData.coordinates[0], pitch: 60, zoom: 14, duration: 800 })
     setTimeout(() => startFlyAnimation(), 800)
   }
 
   const toggleFlyPause = () => {
     if (!isFlying) return
-    if (isPaused) {
-      setIsPaused(false)
-      startFlyAnimation()
-    } else {
-      setIsPaused(true)
-      if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
-    }
+    if (isPaused) { setIsPaused(false); startFlyAnimation() } 
+    else { setIsPaused(true); if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current) }
   }
 
   const stopFlyThrough = () => {
@@ -268,11 +229,10 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     flyIndexRef.current = 0
     if (mapRef.current && routeData?.coordinates) {
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-      mapRef.current.fitBounds(bounds, { padding: { top: 60, bottom: 220, left: 40, right: 40 }, duration: 1000, pitch: 0 })
+      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000, pitch: 0 })
     }
   }
 
-  // Update fly speed while running
   useEffect(() => {
     if (isFlying && !isPaused) {
       if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
@@ -301,10 +261,8 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const handleDownload = async () => {
     if (isDownloading || !routeData?.curves?.length) return
     setIsDownloading(true)
-    try {
-      const result = await preloadRouteAudio(routeData.curves)
-      if (result.success) setDownloadComplete(true)
-    } catch {} finally { setIsDownloading(false) }
+    try { const result = await preloadRouteAudio(routeData.curves); if (result.success) setDownloadComplete(true) } 
+    catch {} finally { setIsDownloading(false) }
   }
 
   const handleStart = async () => { await initAudio(); onStartNavigation() }
@@ -346,17 +304,14 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     markersRef.current = []
     if (!map || !coords?.length) return
     
-    // Start
     const startEl = document.createElement('div')
     startEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="width:18px;height:18px;background:#22c55e;border:2px solid white;border-radius:50%;"></div><div style="font-size:8px;color:white;background:#000a;padding:1px 4px;border-radius:3px;margin-top:2px;">START</div></div>`
     markersRef.current.push(new mapboxgl.Marker({ element: startEl }).setLngLat(coords[0]).addTo(map))
     
-    // End
     const endEl = document.createElement('div')
     endEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="width:18px;height:18px;background:#ef4444;border:2px solid white;border-radius:50%;"></div><div style="font-size:8px;color:white;background:#000a;padding:1px 4px;border-radius:3px;margin-top:2px;">FINISH</div></div>`
     markersRef.current.push(new mapboxgl.Marker({ element: endEl }).setLngLat(coords[coords.length - 1]).addTo(map))
     
-    // Curves
     curves?.forEach(curve => {
       if (!curve.position) return
       const color = getCurveColor(curve.severity)
@@ -382,7 +337,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     addMarkers(mapRef.current, data.curves, data.coordinates)
   }, [routeData, addRoute, addMarkers])
 
-  // Init map
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
     mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
@@ -391,7 +345,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       addRoute(mapRef.current, routeData.coordinates, routeData.curves)
       addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-      mapRef.current.fitBounds(bounds, { padding: { top: 60, bottom: 220, left: 40, right: 40 }, duration: 1000 })
+      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { markersRef.current.forEach(m => m.remove()); if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current); mapRef.current?.remove(); mapRef.current = null }
@@ -404,111 +358,144 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   }
 
   if (isLoadingRoute) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center"><div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>
-  if (loadError) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center"><p className="text-red-400">{loadError}</p><button onClick={onBack} className="ml-4 px-4 py-2 bg-white/10 rounded">Back</button></div>
+  if (loadError) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4"><p className="text-red-400">{loadError}</p><button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button></div>
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
 
-      {/* Top HUD */}
-      <div className="absolute top-0 left-0 right-0 z-20 p-2 pt-10 flex items-start justify-between">
-        <div className="flex items-center gap-1.5">
-          <button onClick={onBack} className="w-8 h-8 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
-          </button>
-          <button onClick={handleStyleChange} className="w-8 h-8 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">{mapStyle === 'dark' ? <><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></> : <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>}</svg>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <button onClick={() => setShowElevationExpanded(!showElevationExpanded)} className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
-            <span className="text-[9px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
-          </button>
-          <div className="px-2 py-1 rounded-full border flex items-center gap-1" style={{ background: `${difficultyRating.color}20`, borderColor: `${difficultyRating.color}50` }}>
-            <svg width="9" height="9" viewBox="0 0 24 24" fill={difficultyRating.color}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-            <span className="text-[9px] font-bold" style={{ color: difficultyRating.color }}>{difficultyRating.label}</span>
-          </div>
-          {routeMode !== 'demo' && (
-            <button onClick={handleToggleFavorite} className={`w-8 h-8 rounded-full border flex items-center justify-center ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      {/* TOP BAR - Stats + Severity */}
+      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent">
+        {/* Navigation row */}
+        <div className="flex items-center justify-between p-2 pt-10">
+          <div className="flex items-center gap-1.5">
+            <button onClick={onBack} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Elevation Panel */}
-      {showElevationExpanded && elevationData.length > 0 && (
-        <div className="absolute top-24 left-2 right-2 z-30 bg-black/90 rounded-xl p-2 border border-white/10">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-white/70">Elevation Profile</span>
-            <button onClick={() => setShowElevationExpanded(false)} className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            <button onClick={handleStyleChange} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">{mapStyle === 'dark' ? <><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></> : <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>}</svg>
             </button>
           </div>
-          <ElevationChart data={elevationData} curves={routeData?.curves} color={modeColor} settings={settings} distance={routeData?.distance} />
-        </div>
-      )}
 
-      {/* Fly Controls */}
-      {isFlying && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 bg-black/90 rounded-full px-2 py-1 border border-white/10">
-          <button onClick={toggleFlyPause} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center">
-            {isPaused ? <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21"/></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>}
-          </button>
-          {[0.5, 1, 2].map(s => (
-            <button key={s} onClick={() => setFlySpeed(s)} className={`px-2 py-0.5 rounded text-[9px] font-bold ${flySpeed === s ? 'bg-cyan-500 text-black' : 'text-white/60'}`}>{s}x</button>
-          ))}
-          <button onClick={stopFlyThrough} className="w-7 h-7 rounded-full bg-red-500/20 flex items-center justify-center">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="#f87171"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Elevation mini */}
+            <div className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
+              <span className="text-[10px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
+            </div>
+            {/* Difficulty */}
+            <div className="px-2 py-1 rounded-full border flex items-center gap-1" style={{ background: `${difficultyRating.color}20`, borderColor: `${difficultyRating.color}50` }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill={difficultyRating.color}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              <span className="text-[10px] font-bold" style={{ color: difficultyRating.color }}>{difficultyRating.label}</span>
+            </div>
+            {/* Favorite */}
+            {routeMode !== 'demo' && (
+              <button onClick={handleToggleFavorite} className={`w-9 h-9 rounded-full border flex items-center justify-center ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+              </button>
+            )}
+          </div>
         </div>
-      )}
 
-      {/* Bottom Panel */}
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-4 pb-3 px-2">
-        {/* Stats */}
-        <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-1.5 text-[10px] text-white/60 mb-1.5 hover:text-white/80">
-          <span className="text-white font-semibold">{routeStats.distance}</span><span>{routeStats.distanceUnit}</span>
+        {/* Stats row - tappable to open curve list */}
+        <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-3 px-3 py-1.5 hover:bg-white/5">
+          <span className="text-white font-bold text-lg">{routeStats.distance}</span>
+          <span className="text-white/50 text-sm">{routeStats.distanceUnit}</span>
           <span className="text-white/30">•</span>
-          <span className="text-white font-semibold">{routeStats.duration}</span><span>min</span>
+          <span className="text-white font-bold text-lg">{routeStats.duration}</span>
+          <span className="text-white/50 text-sm">min</span>
           <span className="text-white/30">•</span>
-          <span className="text-white font-semibold">{routeStats.curves}</span><span>curves</span>
+          <span className="text-white font-bold text-lg">{routeStats.curves}</span>
+          <span className="text-white/50 text-sm">curves</span>
           <span className="text-white/30">•</span>
-          <span className="text-red-400 font-semibold">{routeStats.sharpCurves}</span><span>sharp</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+          <span className="text-red-400 font-bold text-lg">{routeStats.sharpCurves}</span>
+          <span className="text-white/50 text-sm">sharp</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="ml-1 opacity-40"><path d="M6 9l6 6 6-6"/></svg>
         </button>
 
         {/* Severity bar */}
-        <div className="h-1 rounded-full overflow-hidden bg-white/10 mb-1.5 mx-1">
+        <div className="h-1 mx-3 mb-2 rounded-full overflow-hidden bg-white/10">
           <div className="h-full flex">
             <div style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100}%`, background: '#22c55e' }} />
             <div style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100}%`, background: '#ffd500' }} />
             <div style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100}%`, background: '#ff3366' }} />
           </div>
         </div>
+      </div>
 
+      {/* ELEVATION - Right side mini widget */}
+      {elevationData.length > 0 && (
+        <div className="absolute right-2 z-20" style={{ top: '180px' }}>
+          <div className="bg-black/80 rounded-lg p-1.5 border border-white/10 w-24">
+            <div className="text-[8px] text-white/50 mb-0.5">ELEVATION</div>
+            <MiniElevation data={elevationData} color={modeColor} />
+          </div>
+        </div>
+      )}
+
+      {/* FLY CONTROLS - Center when flying */}
+      {isFlying && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-30" style={{ top: '200px' }}>
+          <div className="flex items-center gap-2 bg-black/90 rounded-full px-3 py-2 border border-white/20 shadow-lg">
+            <button onClick={toggleFlyPause} className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20">
+              {isPaused ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              )}
+            </button>
+            
+            <div className="flex items-center gap-1 border-l border-white/20 pl-2">
+              {[0.5, 1, 2].map(s => (
+                <button 
+                  key={s} 
+                  onClick={() => setFlySpeed(s)} 
+                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all ${flySpeed === s ? 'bg-cyan-500 text-black' : 'text-white/60 hover:text-white'}`}
+                >
+                  {s}x
+                </button>
+              ))}
+            </div>
+            
+            <button onClick={stopFlyThrough} className="w-9 h-9 rounded-full bg-red-500/30 flex items-center justify-center hover:bg-red-500/50 border-l border-white/20 ml-1">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="#f87171"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM BAR - Compact */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
         {/* Mode + Actions */}
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="flex bg-black/50 rounded-full p-0.5 border border-white/10">
-            {[{ id: 'cruise', l: 'C', c: '#00d4ff' }, { id: 'fast', l: 'F', c: '#ffd500' }, { id: 'race', l: 'R', c: '#ff3366' }].map(m => (
-              <button key={m.id} onClick={() => setMode(m.id)} className="w-6 h-6 rounded-full text-[9px] font-bold flex items-center justify-center transition-all" style={{ background: mode === m.id ? m.c : 'transparent', color: mode === m.id ? (m.id === 'fast' ? '#000' : '#fff') : '#fff6' }}>{m.l}</button>
+        <div className="flex items-center justify-between mb-2">
+          {/* Mode */}
+          <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
+            {[{ id: 'cruise', l: 'CRUISE', c: '#00d4ff' }, { id: 'fast', l: 'FAST', c: '#ffd500' }, { id: 'race', l: 'RACE', c: '#ff3366' }].map(m => (
+              <button 
+                key={m.id} 
+                onClick={() => setMode(m.id)} 
+                className="px-3 py-1 rounded-full text-[10px] font-bold transition-all"
+                style={{ background: mode === m.id ? m.c : 'transparent', color: mode === m.id ? (m.id === 'fast' ? '#000' : '#fff') : '#fff6' }}
+              >
+                {m.l}
+              </button>
             ))}
           </div>
-          <div className="flex gap-1">
-            <Btn icon="reverse" onClick={handleReverseRoute} />
-            <Btn icon="fly" onClick={handleFlyThrough} disabled={isFlying} />
-            <Btn icon="voice" onClick={handleSampleCallout} />
-            <Btn icon="share" onClick={handleShare} />
-            <Btn icon={downloadComplete ? 'check' : 'download'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} loading={isDownloading} />
+
+          {/* Actions */}
+          <div className="flex gap-1.5">
+            <Btn icon="reverse" onClick={handleReverseRoute} tip="Reverse" />
+            <Btn icon="fly" onClick={handleFlyThrough} disabled={isFlying} tip="Preview" />
+            <Btn icon="voice" onClick={handleSampleCallout} tip="Test Voice" />
+            <Btn icon="share" onClick={handleShare} tip="Share" />
+            <Btn icon={downloadComplete ? 'check' : 'download'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} loading={isDownloading} tip="Download" />
           </div>
         </div>
 
-        {/* Start */}
-        <button onClick={handleStart} className="w-full py-2.5 rounded-xl font-bold text-xs tracking-wider flex items-center justify-center gap-2 active:scale-[0.98]" style={{ background: modeColor }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
-          {routeMode === 'demo' ? 'START DEMO' : 'START'}
+        {/* Start button */}
+        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: modeColor }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+          START NAVIGATION
         </button>
       </div>
 
@@ -521,69 +508,57 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   )
 }
 
-// Small icon button
-function Btn({ icon, onClick, disabled, success, loading }) {
+// Mini elevation widget
+function MiniElevation({ data, color }) {
+  if (!data?.length) return null
+  const max = Math.max(...data.map(d => d.elevation)), min = Math.min(...data.map(d => d.elevation)), range = max - min || 1
+  return (
+    <svg viewBox="0 0 80 20" className="w-full h-6">
+      <defs><linearGradient id="meg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor={color} stopOpacity="0.4"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+      <path d={`M 0 20 ${data.map((d, i) => `L ${(i / (data.length - 1)) * 80} ${20 - ((d.elevation - min) / range) * 16}`).join(' ')} L 80 20 Z`} fill="url(#meg)" />
+      <path d={data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${(i / (data.length - 1)) * 80} ${20 - ((d.elevation - min) / range) * 16}`).join(' ')} fill="none" stroke={color} strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+// Action button
+function Btn({ icon, onClick, disabled, success, loading, tip }) {
   const icons = {
-    reverse: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
-    fly: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
-    voice: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
-    share: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
-    download: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-    check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
+    reverse: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
+    fly: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
+    voice: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
+    share: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
+    download: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
   }
   return (
-    <button onClick={onClick} disabled={disabled} className={`w-7 h-7 rounded-full flex items-center justify-center transition-all active:scale-95 ${success ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'} disabled:opacity-40`}>
+    <button onClick={onClick} disabled={disabled} title={tip} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 ${success ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-black/60 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white'} disabled:opacity-40`}>
       {loading ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : icons[icon]}
     </button>
   )
 }
 
-// Elevation chart
-function ElevationChart({ data, curves, color, settings, distance }) {
-  if (!data?.length) return null
-  const max = Math.max(...data.map(d => d.elevation)), min = Math.min(...data.map(d => d.elevation)), range = max - min || 1
-  const isMetric = settings?.units === 'metric'
-  return (
-    <div>
-      <div className="flex justify-between text-[8px] text-white/40 mb-0.5">
-        <span>{isMetric ? `${Math.round(max)}m` : `${Math.round(max * 3.28)}ft`}</span>
-        <span>{isMetric ? `${Math.round(min)}m` : `${Math.round(min * 3.28)}ft`}</span>
-      </div>
-      <svg viewBox="0 0 100 25" className="w-full h-12">
-        <defs><linearGradient id="eg" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor={color} stopOpacity="0.3"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
-        <path d={`M 0 25 ${data.map((d, i) => `L ${(i / (data.length - 1)) * 100} ${25 - ((d.elevation - min) / range) * 22}`).join(' ')} L 100 25 Z`} fill="url(#eg)" />
-        <path d={data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${(i / (data.length - 1)) * 100} ${25 - ((d.elevation - min) / range) * 22}`).join(' ')} fill="none" stroke={color} strokeWidth="1.5" />
-        {curves?.slice(0, 15).map((c, i) => {
-          const p = (c.distanceFromStart || 0) / (distance || 15000), x = p * 100, idx = Math.min(Math.floor(p * (data.length - 1)), data.length - 1)
-          return <circle key={i} cx={x} cy={25 - ((data[idx]?.elevation - min) / range) * 22} r="2" fill={getCurveColor(c.severity)} />
-        })}
-      </svg>
-      <div className="flex justify-between text-[8px] text-white/30"><span>Start</span><span>Finish</span></div>
-    </div>
-  )
-}
-
-// Curve list modal
+// Curve list
 function CurveList({ curves, mode, settings, onSelect, onClose }) {
   const getSpd = (s) => { const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }; let v = Math.round((b[s] || 40) * (m[mode] || 1)); return settings.units === 'metric' ? Math.round(v * 1.609) : v }
   return (
     <div className="fixed inset-0 z-50 flex items-end"><div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full max-h-[65vh] bg-[#0d0d12] rounded-t-xl border-t border-white/10 overflow-hidden">
-        <div className="flex items-center justify-between p-2 border-b border-white/10">
-          <span className="text-white text-xs font-semibold">All Curves ({curves.length})</span>
-          <button onClick={onClose} className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <div className="relative w-full max-h-[65vh] bg-[#0d0d12] rounded-t-2xl border-t border-white/10 overflow-hidden">
+        <div className="flex items-center justify-between p-3 border-b border-white/10">
+          <span className="text-white font-semibold">All Curves ({curves.length})</span>
+          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
         </div>
-        <div className="overflow-y-auto max-h-[55vh] p-1.5">
+        <div className="overflow-y-auto max-h-[55vh] p-2">
           {curves.map((c, i) => {
             const col = getCurveColor(c.severity), dist = settings.units === 'metric' ? `${((c.distanceFromStart || 0) / 1000).toFixed(1)}km` : `${((c.distanceFromStart || 0) / 1609).toFixed(1)}mi`
             return (
-              <button key={c.id || i} onClick={() => onSelect(c)} className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-white/5">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background: `${col}20`, border: `1px solid ${col}`, color: col }}>{c.isChicane ? c.severitySequence : c.severity}</div>
+              <button key={c.id || i} onClick={() => onSelect(c)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background: `${col}20`, border: `1px solid ${col}`, color: col }}>{c.isChicane ? c.severitySequence : c.severity}</div>
                 <div className="flex-1 text-left">
-                  <div className="text-white text-xs">{c.isChicane ? `${c.chicaneType} ${c.startDirection}` : `${c.direction} ${c.severity}`}{c.modifier && <span className="text-white/40 ml-1 text-[10px]">{c.modifier}</span>}</div>
-                  <div className="text-white/40 text-[10px]">{dist} • {getSpd(c.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}</div>
+                  <div className="text-white text-sm">{c.isChicane ? `${c.chicaneType} ${c.startDirection}` : `${c.direction} ${c.severity}`}{c.modifier && <span className="text-white/40 ml-1 text-xs">{c.modifier}</span>}</div>
+                  <div className="text-white/40 text-xs">{dist} • {getSpd(c.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}</div>
                 </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff4" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff4" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
               </button>
             )
           })}
@@ -598,14 +573,14 @@ function CurvePopup({ curve, mode, settings, onClose }) {
   const col = getCurveColor(curve.severity)
   const getSpd = (s) => { const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }; let v = Math.round((b[s] || 40) * (m[mode] || 1)); return settings.units === 'metric' ? Math.round(v * 1.609) : v }
   return (
-    <div className="absolute bottom-28 left-2 right-2 z-30 bg-black/90 rounded-xl border p-2" style={{ borderColor: `${col}50` }}>
-      <button onClick={onClose} className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-white/10 flex items-center justify-center"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-      <div className="flex items-center gap-2">
-        <div className="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold" style={{ background: `${col}20`, border: `2px solid ${col}`, color: col }}>{curve.severity}</div>
+    <div className="absolute bottom-36 left-3 right-3 z-30 bg-black/90 rounded-xl border p-3" style={{ borderColor: `${col}50` }}>
+      <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${col}20`, border: `2px solid ${col}`, color: col }}>{curve.severity}</div>
         <div>
-          <div className="text-white text-sm font-semibold">{curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}</div>
-          {curve.modifier && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${col}20`, color: col }}>{curve.modifier}</span>}
-          <div className="text-white/50 text-[10px] mt-0.5">{getSpd(curve.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}{curve.radius && ` • R${curve.radius}m`}{curve.totalAngle && ` • ${curve.totalAngle}°`}</div>
+          <div className="text-white font-semibold">{curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}</div>
+          {curve.modifier && <span className="text-xs px-2 py-0.5 rounded" style={{ background: `${col}20`, color: col }}>{curve.modifier}</span>}
+          <div className="text-white/50 text-xs mt-1">{getSpd(curve.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}{curve.radius && ` • R${curve.radius}m`}{curve.totalAngle && ` • ${curve.totalAngle}°`}</div>
         </div>
       </div>
     </div>
@@ -618,14 +593,14 @@ function ShareModal({ name, onClose }) {
   const copy = async () => { try { await navigator.clipboard.writeText(location.href); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {} }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-[#12121a] rounded-xl p-3 w-full max-w-xs border border-white/10">
-        <h3 className="text-white text-sm font-semibold mb-1">Share Route</h3>
-        <p className="text-white/50 text-xs mb-2">{name || 'Rally Route'}</p>
-        <div className="flex gap-1.5">
-          <input type="text" value={location.href} readOnly className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1.5 text-white text-[10px]" />
-          <button onClick={copy} className={`px-2.5 py-1.5 rounded text-[10px] font-medium ${copied ? 'bg-green-500 text-white' : 'bg-cyan-500 text-black'}`}>{copied ? '✓' : 'Copy'}</button>
+      <div className="relative bg-[#12121a] rounded-xl p-4 w-full max-w-sm border border-white/10">
+        <h3 className="text-white font-semibold mb-1">Share Route</h3>
+        <p className="text-white/50 text-sm mb-3">{name || 'Rally Route'}</p>
+        <div className="flex gap-2">
+          <input type="text" value={location.href} readOnly className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-xs" />
+          <button onClick={copy} className={`px-3 py-2 rounded-lg text-xs font-medium ${copied ? 'bg-green-500 text-white' : 'bg-cyan-500 text-black'}`}>{copied ? '✓' : 'Copy'}</button>
         </div>
-        <button onClick={onClose} className="w-full mt-2 py-1.5 bg-white/10 rounded text-white/60 text-[10px]">Close</button>
+        <button onClick={onClose} className="w-full mt-3 py-2 bg-white/10 rounded-lg text-white/60 text-sm">Close</button>
       </div>
     </div>
   )
