@@ -321,13 +321,20 @@ async function preloadRouteAudio(curves) {
 }
 
 // Generate callout with speeds
-export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main') {
+export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main', options = {}) {
   if (!curve) return ''
 
   const getSpeed = (severity) => {
     const speeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
     const mult = { cruise: 0.9, fast: 1.0, race: 1.15 }
     let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 1.0))
+    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  const getStraightSpeed = () => {
+    const speeds = { cruise: 55, fast: 65, race: 75 }
+    let speed = speeds[mode] || 55
     if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
     return speed
   }
@@ -340,6 +347,12 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   
   // Distance text
   const distText = getDistanceText(curve.distance, speedUnit)
+  
+  // Curve length description
+  const lengthDesc = getCurveLengthDescription(curve.length)
+  
+  // Elevation context (if available)
+  const elevationContext = options.elevationChange ? getElevationContext(options.elevationChange) : ''
   
   // PHASE: EARLY WARNING (far away, heads up)
   if (phase === 'early') {
@@ -378,6 +391,11 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     parts.push(`chicane starting ${chicaneDir}`)
     parts.push(`severity ${curve.severitySequence}`)
     parts.push(`${chicaneSpeed} through`)
+    
+    // Add length context for chicanes
+    if (curve.length > 150) {
+      parts.push(`${Math.round(curve.length)} meters long`)
+    }
   } else {
     // Braking warning for hard curves
     if (isVeryHard) {
@@ -394,6 +412,16 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     parts.push(`${dir} ${curve.severity}`)
     parts.push(severityDesc)
     
+    // Curve length description
+    if (lengthDesc) {
+      parts.push(lengthDesc)
+    }
+    
+    // Elevation context
+    if (elevationContext) {
+      parts.push(elevationContext)
+    }
+    
     // Modifier details
     if (curve.modifier) {
       switch (curve.modifier) {
@@ -405,7 +433,7 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
           parts.push(`sharp`)
           break
         case 'LONG': 
-          parts.push(`long curve`)
+          parts.push(`long sweeping curve`)
           parts.push(`hold ${speed}`)
           break
         case 'TIGHTENS':
@@ -413,8 +441,8 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
           parts.push(`exit at ${getSpeed(Math.min(6, curve.severity + 1))}`)
           break
         case 'OPENS':
-          parts.push(`opens up`)
-          parts.push(`exit at ${getSpeed(Math.max(1, curve.severity - 1))}`)
+          parts.push(`opens up on exit`)
+          parts.push(`accelerate to ${getSpeed(Math.max(1, curve.severity - 1))}`)
           break
       }
     }
@@ -422,6 +450,14 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     // Speed if not already mentioned
     if (!isHard && !isVeryHard && !curve.modifier) {
       parts.push(`${speed}`)
+    }
+    
+    // Exit direction hint for hard curves
+    if (isHard && nextCurve) {
+      const gapDist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+      if (gapDist > 200) {
+        parts.push(`exits to straight`)
+      }
     }
   }
   
@@ -441,6 +477,100 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   }
   
   return parts.join(', ').replace(/, ,/g, ',').replace(/,\s*$/, '')
+}
+
+// Generate straight section callout
+export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+  const getStraightSpeed = () => {
+    const speeds = { cruise: 55, fast: 65, race: 75 }
+    let speed = speeds[mode] || 55
+    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  const speed = getStraightSpeed()
+  const distText = getDistanceText(distanceMeters, speedUnit)
+  
+  const parts = []
+  
+  // Main message
+  if (distanceMeters >= 800) {
+    parts.push(`Clear ahead for ${distText}`)
+    parts.push(`cruise at ${speed}`)
+  } else if (distanceMeters >= 400) {
+    parts.push(`Straight section`)
+    parts.push(`${speed} for ${distText}`)
+  } else {
+    parts.push(`Short straight`)
+    parts.push(`${speed}`)
+  }
+  
+  // Add next curve preview if available
+  if (nextCurve) {
+    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+    const nextSeverity = nextCurve.severity
+    
+    if (nextSeverity >= 4) {
+      parts.push(`then ${nextDir} ${nextSeverity} ahead`)
+    } else {
+      parts.push(`${nextDir} ${nextSeverity} coming up`)
+    }
+  }
+  
+  return parts.join(', ')
+}
+
+// Generate "after curve" callout for straights following curves
+export function generatePostCurveCallout(straightDistance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+  const getStraightSpeed = () => {
+    const speeds = { cruise: 55, fast: 65, race: 75 }
+    let speed = speeds[mode] || 55
+    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  const speed = getStraightSpeed()
+  
+  if (straightDistance >= 500) {
+    const distText = getDistanceText(straightDistance, speedUnit)
+    if (nextCurve) {
+      const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+      return `Clear, ${speed}, next ${nextDir} ${nextCurve.severity} in ${distText}`
+    }
+    return `Clear ahead, ${speed} for ${distText}`
+  } else if (straightDistance >= 200) {
+    if (nextCurve) {
+      const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+      return `Short straight, ${nextDir} ${nextCurve.severity} ahead`
+    }
+    return `Short straight, ${speed}`
+  }
+  
+  return '' // Too short to call out
+}
+
+// Get curve length description
+function getCurveLengthDescription(lengthMeters) {
+  if (!lengthMeters) return ''
+  
+  if (lengthMeters < 30) return 'quick turn'
+  if (lengthMeters < 60) return 'short'
+  if (lengthMeters < 100) return '' // Normal, no need to mention
+  if (lengthMeters < 150) return 'extended'
+  if (lengthMeters < 250) return 'long'
+  return 'very long sweeper'
+}
+
+// Get elevation context
+function getElevationContext(elevationChange) {
+  if (!elevationChange) return ''
+  
+  // elevationChange is in meters, positive = uphill, negative = downhill
+  if (elevationChange > 10) return 'uphill'
+  if (elevationChange > 5) return 'slight uphill'
+  if (elevationChange < -10) return 'downhill, watch braking'
+  if (elevationChange < -5) return 'slight downhill'
+  return ''
 }
 
 // Get severity description
