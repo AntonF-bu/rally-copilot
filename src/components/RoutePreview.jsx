@@ -3,8 +3,14 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { useSpeech } from '../hooks/useSpeech'
+import { getRoute } from '../services/routeService'
+import { detectCurves } from '../utils/curveDetection'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+// Demo route endpoints
+const DEMO_START = [-71.0589, 42.3601] // Boston
+const DEMO_END = [-71.3012, 42.3665]   // Weston
 
 export default function RoutePreview({ onStartNavigation, onBack }) {
   const mapContainer = useRef(null)
@@ -12,12 +18,47 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadComplete, setDownloadComplete] = useState(false)
+  const [isLoadingRoute, setIsLoadingRoute] = useState(false)
   
-  const { routeData, mode } = useStore()
+  const { routeData, mode, routeMode, setRouteData } = useStore()
   const { initAudio, preloadRouteAudio } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+
+  // Fetch demo route if needed
+  useEffect(() => {
+    if (routeMode === 'demo' && !routeData?.coordinates) {
+      fetchDemoRoute()
+    }
+  }, [routeMode, routeData])
+
+  const fetchDemoRoute = async () => {
+    setIsLoadingRoute(true)
+    console.log('📍 Fetching demo route...')
+    
+    try {
+      const route = await getRoute(DEMO_START, DEMO_END)
+      
+      if (route && route.coordinates) {
+        const curves = detectCurves(route.coordinates)
+        
+        setRouteData({
+          name: "Boston → Weston Demo",
+          coordinates: route.coordinates,
+          curves: curves,
+          distance: route.distance,
+          duration: route.duration
+        })
+        
+        console.log(`📍 Demo route loaded: ${route.coordinates.length} points, ${curves.length} curves`)
+      }
+    } catch (err) {
+      console.error('Failed to fetch demo route:', err)
+    } finally {
+      setIsLoadingRoute(false)
+    }
+  }
 
   const routeStats = {
     distance: routeData?.distance ? (routeData.distance / 1609.34).toFixed(1) : 0,
@@ -33,21 +74,51 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     hard: routeData?.curves?.filter(c => c.severity >= 5).length || 0
   }
 
+  // Initialize map
   useEffect(() => {
     if (map.current || !routeData?.coordinates) return
 
     map.current = new mapboxgl.Map({
-      container: mapContainer.current, style: 'mapbox://styles/mapbox/dark-v11',
-      center: routeData.coordinates[0], zoom: 10, pitch: 0, bearing: 0, antialias: true, interactive: true
+      container: mapContainer.current, 
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: routeData.coordinates[0], 
+      zoom: 10, 
+      pitch: 0, 
+      bearing: 0, 
+      antialias: true, 
+      interactive: true
     })
 
     map.current.on('load', () => {
       setMapLoaded(true)
 
-      map.current.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeData.coordinates } } })
-      map.current.addLayer({ id: 'route-glow', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': modeColor, 'line-width': 12, 'line-blur': 8, 'line-opacity': 0.4 } })
-      map.current.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': modeColor, 'line-width': 4, 'line-opacity': 1 } })
+      // Add route
+      map.current.addSource('route', { 
+        type: 'geojson', 
+        data: { 
+          type: 'Feature', 
+          properties: {}, 
+          geometry: { type: 'LineString', coordinates: routeData.coordinates } 
+        } 
+      })
+      
+      map.current.addLayer({ 
+        id: 'route-glow', 
+        type: 'line', 
+        source: 'route', 
+        layout: { 'line-join': 'round', 'line-cap': 'round' }, 
+        paint: { 'line-color': modeColor, 'line-width': 12, 'line-blur': 8, 'line-opacity': 0.4 } 
+      })
+      
+      map.current.addLayer({ 
+        id: 'route-line', 
+        type: 'line', 
+        source: 'route', 
+        layout: { 'line-join': 'round', 'line-cap': 'round' }, 
+        paint: { 'line-color': modeColor, 'line-width': 4, 'line-opacity': 1 } 
+      })
 
+      // Fit bounds
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
       map.current.fitBounds(bounds, { padding: { top: 100, bottom: 380, left: 40, right: 40 }, duration: 1000 })
 
@@ -98,7 +169,10 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     return () => { map.current?.remove(); map.current = null }
   }, [routeData, modeColor])
 
-  const handleStart = async () => { await initAudio(); onStartNavigation() }
+  const handleStart = async () => { 
+    await initAudio()
+    onStartNavigation() 
+  }
 
   const handleDownload = async () => {
     if (isDownloading || !routeData?.curves?.length) return
@@ -110,24 +184,68 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     finally { setIsDownloading(false) }
   }
 
+  // Show loading state while fetching demo route
+  if (isLoadingRoute || (routeMode === 'demo' && !routeData?.coordinates)) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-white/60 text-sm">Loading demo route...</p>
+          <p className="text-white/30 text-xs mt-1">Fetching from Mapbox</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <div ref={mapContainer} className="absolute inset-0" />
 
+      {/* Back Button */}
       <button onClick={onBack} className="absolute top-12 left-4 z-20 w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
       </button>
 
+      {/* Demo badge */}
+      {routeMode === 'demo' && (
+        <div className="absolute top-12 right-4 z-20 px-3 py-1.5 rounded-full bg-purple-500/20 border border-purple-500/30">
+          <span className="text-purple-400 text-xs font-bold tracking-wider">DEMO MODE</span>
+        </div>
+      )}
+
+      {/* Bottom Panel */}
       <div className="absolute bottom-0 left-0 right-0 z-20">
         <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-16 pb-6 px-4">
           
+          {/* Route name for demo */}
+          {routeMode === 'demo' && (
+            <div className="text-center mb-3">
+              <p className="text-white/60 text-sm">Boston → Weston</p>
+              <p className="text-white/30 text-xs">Real Mapbox route with detected curves</p>
+            </div>
+          )}
+          
+          {/* Stats */}
           <div className="grid grid-cols-4 gap-2 mb-4">
-            <div className="bg-white/5 rounded-xl p-3 text-center"><div className="text-xl font-bold text-white">{routeStats.distance}</div><div className="text-[10px] text-white/40 tracking-wider">MILES</div></div>
-            <div className="bg-white/5 rounded-xl p-3 text-center"><div className="text-xl font-bold text-white">{routeStats.duration}</div><div className="text-[10px] text-white/40 tracking-wider">MIN</div></div>
-            <div className="bg-white/5 rounded-xl p-3 text-center"><div className="text-xl font-bold text-white">{routeStats.curves}</div><div className="text-[10px] text-white/40 tracking-wider">CURVES</div></div>
-            <div className="bg-white/5 rounded-xl p-3 text-center"><div className="text-xl font-bold text-red-400">{routeStats.sharpCurves}</div><div className="text-[10px] text-white/40 tracking-wider">SHARP</div></div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-white">{routeStats.distance}</div>
+              <div className="text-[10px] text-white/40 tracking-wider">MILES</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-white">{routeStats.duration}</div>
+              <div className="text-[10px] text-white/40 tracking-wider">MIN</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-white">{routeStats.curves}</div>
+              <div className="text-[10px] text-white/40 tracking-wider">CURVES</div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 text-center">
+              <div className="text-xl font-bold text-red-400">{routeStats.sharpCurves}</div>
+              <div className="text-[10px] text-white/40 tracking-wider">SHARP</div>
+            </div>
           </div>
 
+          {/* Severity bar */}
           <div className="flex gap-2 mb-4">
             <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden flex">
               <div className="bg-green-500 h-full" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%` }} />
@@ -139,26 +257,42 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             <span>{severityBreakdown.easy} Easy</span>
             <span>{severityBreakdown.medium} Medium</span>
             <span>{severityBreakdown.hard} Hard</span>
-            {routeStats.technicalSections > 0 && <span>{routeStats.technicalSections} Tech Sections</span>}
+            {routeStats.technicalSections > 0 && <span>{routeStats.technicalSections} Tech</span>}
           </div>
 
-          <button onClick={handleStart} className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 active:scale-[0.98]" style={{ background: modeColor }}>
+          {/* Start Button */}
+          <button onClick={handleStart} 
+            className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 active:scale-[0.98]" 
+            style={{ background: modeColor }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            START NAVIGATION
+            {routeMode === 'demo' ? 'START DEMO' : 'START NAVIGATION'}
           </button>
 
+          {/* Download voice */}
           {navigator.onLine && routeStats.curves > 0 && (
             <button onClick={handleDownload} disabled={isDownloading || downloadComplete}
               className="w-full mt-2 py-2.5 rounded-xl text-xs tracking-wider transition-all flex items-center justify-center gap-2 bg-white/5 border border-white/10 disabled:opacity-60">
-              {isDownloading ? <><div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" /><span className="text-white/60">Downloading voice...</span></>
-                : downloadComplete ? <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg><span className="text-green-400">Voice ready for offline</span></>
-                : <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span className="text-white/40">Download voice for offline</span></>}
+              {isDownloading ? (
+                <><div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" /><span className="text-white/60">Downloading voice...</span></>
+              ) : downloadComplete ? (
+                <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg><span className="text-green-400">Voice ready</span></>
+              ) : (
+                <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span className="text-white/40">Download voice for offline</span></>
+              )}
             </button>
           )}
         </div>
       </div>
 
-      {!mapLoaded && <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-30"><div className="text-center"><div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" /><p className="text-gray-400 text-sm">Loading route preview...</p></div></div>}
+      {/* Loading Overlay */}
+      {!mapLoaded && routeData?.coordinates && (
+        <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-30">
+          <div className="text-center">
+            <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" />
+            <p className="text-gray-400 text-sm">Loading map...</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
