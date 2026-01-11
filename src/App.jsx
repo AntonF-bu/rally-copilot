@@ -329,9 +329,11 @@ export default function App() {
       }
       
       if (callout) {
-        console.log(`🔊 Attempting to speak: "${callout}"`)
+        console.log(`🔊 Attempting to speak: "${callout}" for curve ${curveId}`)
+        console.log(`🔊 mainCalloutsRef BEFORE add: ${Array.from(mainCalloutsRef.current).join(', ')}`)
         // Mark as announced BEFORE speaking to prevent double-calls
         mainCalloutsRef.current.add(curveId)
+        console.log(`🔊 mainCalloutsRef AFTER add: ${Array.from(mainCalloutsRef.current).join(', ')}`)
         setLastAnnouncedCurveId(curveId)
         lastCalloutTimeRef.current = now
         
