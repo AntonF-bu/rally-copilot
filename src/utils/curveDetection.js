@@ -643,7 +643,13 @@ function detectChicanes(curves, points) {
       const distanceBetween = next.distanceFromStart - (current.distanceFromStart + current.length)
       const oppositeDirection = current.direction !== next.direction
       
-      if (oppositeDirection && distanceBetween < CHICANE_MAX_DISTANCE && distanceBetween >= 0) {
+      // Only create chicanes if:
+      // 1. Curves are opposite direction
+      // 2. Close together (< 150m)
+      // 3. At least one curve is severity 2+ (not just road noise)
+      const hasSignificantCurve = current.severity >= 2 || next.severity >= 2
+      
+      if (oppositeDirection && distanceBetween < CHICANE_MAX_DISTANCE && distanceBetween >= 0 && hasSignificantCurve) {
         const third = curves[i + 2]
         let isTripleChicane = false
         
