@@ -246,8 +246,6 @@ export default function App() {
       }
     }
 
-    const distance = nextCurve.distance
-    const curveId = nextCurve.id
     const isHardCurve = nextCurve.severity >= 4
 
     // EARLY WARNING (hard curves only)
