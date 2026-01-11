@@ -15,12 +15,19 @@ export default async function handler(req, res) {
     const { coordinates } = req.body || {}
     
     if (!coordinates || !Array.isArray(coordinates) || coordinates.length < 2) {
-      return res.status(400).json({ error: 'Invalid coordinates' })
+      return res.status(400).json({ error: 'Invalid coordinates', success: false })
     }
+
+    console.log(`Census API called with ${coordinates.length} coordinates`)
+
+    // IMPORTANT: Sample coordinates to reduce payload size
+    // TIGERweb can't handle thousands of coordinates
+    const sampledCoords = sampleCoordinates(coordinates, 100) // Max 100 points
+    console.log(`Sampled to ${sampledCoords.length} coordinates`)
 
     // Step 1: Query TIGERweb for tract geometries
     const polyline = {
-      paths: [coordinates],
+      paths: [sampledCoords],
       spatialReference: { wkid: 4326 }
     }
 
@@ -37,18 +44,37 @@ export default async function handler(req, res) {
 
     const tigerUrl = `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/4/query?${params}`
     
-    console.log('Fetching TIGERweb:', tigerUrl.substring(0, 100) + '...')
+    console.log('TIGERweb URL length:', tigerUrl.length)
     
-    const tigerResponse = await fetch(tigerUrl)
+    const tigerResponse = await fetch(tigerUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json'
+      }
+    })
     
     if (!tigerResponse.ok) {
-      console.error('TIGERweb error:', tigerResponse.status)
-      return res.status(502).json({ error: 'TIGERweb API error', status: tigerResponse.status })
+      const errorText = await tigerResponse.text()
+      console.error('TIGERweb error:', tigerResponse.status, errorText.substring(0, 200))
+      return res.status(502).json({ 
+        error: 'TIGERweb API error', 
+        status: tigerResponse.status,
+        success: false 
+      })
     }
 
     const tigerData = await tigerResponse.json()
     
+    if (tigerData.error) {
+      console.error('TIGERweb returned error:', tigerData.error)
+      return res.status(502).json({ 
+        error: tigerData.error.message || 'TIGERweb error', 
+        success: false 
+      })
+    }
+    
     if (!tigerData.features?.length) {
+      console.log('No census tracts found')
       return res.status(200).json({ tracts: [], success: true })
     }
 
@@ -82,7 +108,7 @@ export default async function handler(req, res) {
           const censusResponse = await fetch(censusUrl)
           
           if (!censusResponse.ok) {
-            console.warn(`Census API error for ${group.state}-${group.county}`)
+            console.warn(`Census API error for ${group.state}-${group.county}: ${censusResponse.status}`)
             return group.tracts.map(t => ({ ...t, population: null }))
           }
 
@@ -118,7 +144,8 @@ export default async function handler(req, res) {
       }
     })
 
-    console.log('Census data processed:', tractsWithDensity.map(t => `${t.geoid.slice(-4)}:${t.densityCategory}`).join(', '))
+    console.log('Census data processed:', tractsWithDensity.length, 'tracts')
+    console.log('Categories:', tractsWithDensity.map(t => `${t.geoid?.slice(-4)}:${t.densityCategory}`).join(', '))
 
     return res.status(200).json({
       tracts: tractsWithDensity,
@@ -129,6 +156,21 @@ export default async function handler(req, res) {
     console.error('Census proxy error:', error)
     return res.status(500).json({ error: error.message, success: false })
   }
+}
+
+// Sample coordinates to reduce array size
+function sampleCoordinates(coords, maxPoints) {
+  if (coords.length <= maxPoints) return coords
+  
+  const result = []
+  const step = (coords.length - 1) / (maxPoints - 1)
+  
+  for (let i = 0; i < maxPoints - 1; i++) {
+    result.push(coords[Math.floor(i * step)])
+  }
+  result.push(coords[coords.length - 1]) // Always include last point
+  
+  return result
 }
 
 function calculateDensity(population, areaLandSqMeters) {
