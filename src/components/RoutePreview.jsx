@@ -36,6 +36,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [showCurveList, setShowCurveList] = useState(false)
   const [isFlying, setIsFlying] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
+  const [showElevationExpanded, setShowElevationExpanded] = useState(false)
   const fetchedRef = useRef(false)
   const flyAnimationRef = useRef(null)
   
@@ -624,9 +625,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       <div className="absolute bottom-0 left-0 right-0 z-20">
         <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-8 pb-6 px-4">
           
-          {/* Elevation Profile */}
-          <ElevationProfile data={elevationProfile} curves={routeData?.curves} modeColor={modeColor} />
-          
           {/* Mode Selector */}
           <div className="flex justify-center mb-3">
             <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-1 border border-white/10">
@@ -647,7 +645,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
           </div>
 
           {/* Severity Bar */}
-          <div className="mb-2">
+          <div className="mb-3">
             <div className="flex h-1.5 rounded-full overflow-hidden bg-white/10">
               <div className="h-full" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%`, background: '#22c55e' }} />
               <div className="h-full" style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100 || 0}%`, background: '#ffd500' }} />
@@ -655,27 +653,12 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             </div>
           </div>
 
-          {/* Curve Sensitivity Slider */}
-          <div className="flex items-center gap-3 mb-3 px-1">
-            <span className="text-[10px] text-white/40">Sensitivity</span>
-            <div className="flex-1 flex bg-white/5 rounded-lg p-0.5">
-              {['relaxed', 'normal', 'sensitive'].map(s => (
-                <button key={s} onClick={() => updateSettings({ curveSensitivity: s })} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${(settings.curveSensitivity || 'normal') === s ? 'bg-white/20 text-white' : 'text-white/40'}`}>
-                  {s === 'relaxed' ? 'Low' : s === 'normal' ? 'Med' : 'High'}
-                </button>
-              ))}
-            </div>
-            <button onClick={handleSampleCallout} className="px-2 py-1 bg-white/10 rounded text-[10px] text-white/60 flex items-center gap-1">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-              Test
-            </button>
-          </div>
-
           {/* Action Buttons */}
-          <div className="grid grid-cols-4 gap-2 mb-3">
+          <div className="grid grid-cols-5 gap-2 mb-3">
             <ActionButton icon="reverse" label="Reverse" onClick={handleReverseRoute} />
             <ActionButton icon="fly" label="Preview" onClick={handleFlyThrough} disabled={isFlying} />
             <ActionButton icon="share" label="Share" onClick={handleShare} />
+            <ActionButton icon="voice" label="Test" onClick={handleSampleCallout} />
             <ActionButton icon={downloadComplete ? 'check' : 'download'} label={downloadComplete ? 'Ready' : 'Voice'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} />
           </div>
 
@@ -686,6 +669,16 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
           </button>
         </div>
       </div>
+
+      {/* Elevation Widget - Top Left of map */}
+      <ElevationWidget 
+        data={elevationProfile} 
+        curves={routeData?.curves}
+        modeColor={modeColor}
+        expanded={showElevationExpanded}
+        onToggle={() => setShowElevationExpanded(!showElevationExpanded)}
+        settings={settings}
+      />
 
       {/* Curve List Modal */}
       {showCurveList && (
@@ -730,49 +723,138 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   )
 }
 
-// Elevation Profile Component
-function ElevationProfile({ data, curves, modeColor }) {
+// Elevation Widget - Compact and expandable
+function ElevationWidget({ data, curves, modeColor, expanded, onToggle, settings }) {
   if (!data || data.length < 2) return null
   
   const maxElev = Math.max(...data.map(d => d.elevation))
   const minElev = Math.min(...data.map(d => d.elevation))
   const range = maxElev - minElev || 1
+  const elevGain = Math.round(maxElev - minElev)
+  const elevGainDisplay = settings?.units === 'metric' ? `${Math.round(elevGain * 0.3048)}m` : `${elevGain}ft`
   
+  // Build path
   const pathD = data.map((d, i) => {
     const x = (i / (data.length - 1)) * 100
-    const y = 100 - ((d.elevation - minElev) / range) * 80
+    const y = 100 - ((d.elevation - minElev) / range) * 70
     return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
   }).join(' ')
   
   const areaD = pathD + ` L 100 100 L 0 100 Z`
   
+  const glassStyle = {
+    background: 'linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    boxShadow: '0 4px 30px rgba(0,0,0,0.3)'
+  }
+  
+  if (!expanded) {
+    // Compact widget
+    return (
+      <button 
+        onClick={onToggle}
+        className="absolute left-4 z-20 rounded-xl px-3 py-2 cursor-pointer hover:bg-white/10 transition-all"
+        style={{ top: '180px', ...glassStyle }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
+            <path d="M2 22L12 2l10 20H2z"/>
+          </svg>
+          <span className="text-[9px] text-white/50 uppercase tracking-wider">Elev</span>
+          <span className="text-[10px] text-white/70">{elevGainDisplay}</span>
+        </div>
+        <svg viewBox="0 0 80 24" className="w-20 h-6" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="elevGradWidget" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={modeColor} stopOpacity="0.4"/>
+              <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d={areaD} fill="url(#elevGradWidget)" transform="scale(0.8, 0.6)" />
+          <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round" transform="scale(0.8, 0.6)" />
+        </svg>
+      </button>
+    )
+  }
+  
+  // Expanded view
   return (
-    <div className="mb-3 bg-white/5 rounded-xl p-2">
-      <div className="flex justify-between items-center mb-1">
-        <span className="text-[9px] text-white/40 uppercase tracking-wider">Elevation</span>
-        <span className="text-[9px] text-white/40">{Math.round(maxElev - minElev)}ft gain</span>
+    <div className="absolute left-4 right-4 z-30" style={{ top: '180px' }}>
+      <div className="rounded-2xl p-4" style={glassStyle}>
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
+              <path d="M2 22L12 2l10 20H2z"/>
+            </svg>
+            <span className="text-sm text-white font-medium">Elevation Profile</span>
+          </div>
+          <button onClick={onToggle} className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        
+        <div className="flex justify-between text-[10px] text-white/50 mb-1">
+          <span>{settings?.units === 'metric' ? `${Math.round(maxElev * 0.3048)}m` : `${Math.round(maxElev)}ft`}</span>
+          <span>Gain: {elevGainDisplay}</span>
+        </div>
+        
+        <svg viewBox="0 0 100 50" className="w-full h-24" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="elevGradExpanded" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+              <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+            </linearGradient>
+          </defs>
+          
+          {/* Grid lines */}
+          <line x1="0" y1="25" x2="100" y2="25" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
+          <line x1="25" y1="0" x2="25" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
+          <line x1="50" y1="0" x2="50" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
+          <line x1="75" y1="0" x2="75" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
+          
+          <path d={areaD} fill="url(#elevGradExpanded)" transform="scale(1, 0.5)" />
+          <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round" transform="scale(1, 0.5)" />
+          
+          {/* Curve markers */}
+          {curves?.map((curve, i) => {
+            const progress = (curve.distanceFromStart || 0) / (data[data.length - 1]?.distance || 15000)
+            const x = progress * 100
+            const dataIndex = Math.floor(progress * (data.length - 1))
+            const elev = data[dataIndex]?.elevation || minElev
+            const y = (100 - ((elev - minElev) / range) * 70) * 0.5
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y} r="3" fill={getCurveColor(curve.severity)} />
+                <line x1={x} y1={y + 3} x2={x} y2="50" stroke={getCurveColor(curve.severity)} strokeWidth="0.5" strokeOpacity="0.3" />
+              </g>
+            )
+          })}
+        </svg>
+        
+        <div className="flex justify-between text-[10px] text-white/40 mt-1">
+          <span>Start</span>
+          <span>{settings?.units === 'metric' ? `${Math.round(minElev * 0.3048)}m` : `${Math.round(minElev)}ft`}</span>
+          <span>Finish</span>
+        </div>
+        
+        {/* Legend */}
+        <div className="flex items-center justify-center gap-4 mt-3 pt-3 border-t border-white/10">
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-[9px] text-white/50">Easy</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-yellow-500" />
+            <span className="text-[9px] text-white/50">Medium</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="text-[9px] text-white/50">Hard</span>
+          </div>
+        </div>
       </div>
-      <svg viewBox="0 0 100 40" className="w-full h-10" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-            <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-          </linearGradient>
-        </defs>
-        <path d={areaD} fill="url(#elevGrad)" />
-        <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1" strokeLinecap="round" />
-        {/* Curve markers on elevation */}
-        {curves?.slice(0, 10).map((curve, i) => {
-          const progress = (curve.distanceFromStart || 0) / (data[data.length - 1]?.distance || 15000)
-          const x = progress * 100
-          const dataIndex = Math.floor(progress * (data.length - 1))
-          const elev = data[dataIndex]?.elevation || minElev
-          const y = 100 - ((elev - minElev) / range) * 80
-          return (
-            <circle key={i} cx={x} cy={y} r="2" fill={getCurveColor(curve.severity)} />
-          )
-        })}
-      </svg>
     </div>
   )
 }
@@ -795,6 +877,7 @@ function ActionButton({ icon, label, onClick, disabled, success }) {
     share: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
     download: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
     check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
+    voice: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
   }
   
   return (
