@@ -1,25 +1,27 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import useStore from '../store'
 import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 
 // ================================
-// Bottom Bar - Navigation Controls
-// With demo playback controls + Trip summary
+// Bottom Bar - Navigation Controls - v3
+// With draggable progress slider for demo mode
 // ================================
 
 export default function BottomBar() {
   const { 
     isRunning, mode, setMode, settings, updateSettings, toggleSettings,
     goToMenu, goToPreview, endTrip, routeMode, gpsAccuracy,
-    simulationSpeed, setSimulationSpeed, simulationPaused, toggleSimulationPaused
+    simulationSpeed, setSimulationSpeed, simulationPaused, toggleSimulationPaused,
+    simulationProgress, setSimulationProgress, routeData
   } = useStore()
   
   const { reroute } = useRouteAnalysis()
   const [isRerouting, setIsRerouting] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const sliderRef = useRef(null)
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
 
-  // STOP now ends trip and shows summary
   const handleStop = () => endTrip()
   const handleBack = () => goToMenu()
 
@@ -30,56 +32,178 @@ export default function BottomBar() {
     finally { setIsRerouting(false) }
   }
 
+  // Draggable slider handlers
+  const handleSliderInteraction = useCallback((clientX) => {
+    if (!sliderRef.current) return
+    const rect = sliderRef.current.getBoundingClientRect()
+    const x = clientX - rect.left
+    const progress = Math.max(0, Math.min(1, x / rect.width))
+    setSimulationProgress(progress)
+  }, [setSimulationProgress])
+
+  const handleMouseDown = (e) => {
+    setIsDragging(true)
+    handleSliderInteraction(e.clientX)
+  }
+
+  const handleMouseMove = useCallback((e) => {
+    if (!isDragging) return
+    handleSliderInteraction(e.clientX)
+  }, [isDragging, handleSliderInteraction])
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  const handleTouchStart = (e) => {
+    setIsDragging(true)
+    handleSliderInteraction(e.touches[0].clientX)
+  }
+
+  const handleTouchMove = useCallback((e) => {
+    if (!isDragging) return
+    handleSliderInteraction(e.touches[0].clientX)
+  }, [isDragging, handleSliderInteraction])
+
+  const handleTouchEnd = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  // Add global listeners when dragging
+  useState(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener('touchmove', handleTouchMove)
+      window.addEventListener('touchend', handleTouchEnd)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+        window.removeEventListener('touchmove', handleTouchMove)
+        window.removeEventListener('touchend', handleTouchEnd)
+      }
+    }
+  }, [isDragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd])
+
   const showReroute = routeMode === 'destination' || routeMode === 'imported'
   const isDemo = routeMode === 'demo'
 
-  // Demo speed options
   const speedOptions = [0.5, 1, 2, 4]
+  
+  // Format progress info
+  const progressPercent = Math.round((simulationProgress || 0) * 100)
+  const totalDistance = routeData?.distance || 0
+  const currentDistance = totalDistance * (simulationProgress || 0)
+  const remainingDistance = totalDistance - currentDistance
+  const isMetric = settings?.units === 'metric'
+  const distanceDisplay = isMetric 
+    ? `${(remainingDistance / 1000).toFixed(1)}km` 
+    : `${(remainingDistance / 1609.34).toFixed(1)}mi`
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-30 safe-bottom">
+    <div 
+      className="absolute bottom-0 left-0 right-0 z-30 safe-bottom"
+      onMouseMove={isDragging ? handleMouseMove : undefined}
+      onMouseUp={isDragging ? handleMouseUp : undefined}
+      onMouseLeave={isDragging ? handleMouseUp : undefined}
+    >
       
-      {/* Demo Playback Controls */}
+      {/* Demo Playback Controls with Progress Slider */}
       {isDemo && (
-        <div className="flex justify-center mb-2">
-          <div className="inline-flex items-center gap-1 bg-black/70 backdrop-blur-xl rounded-full px-2 py-1 border border-white/10">
-            {/* Pause/Play */}
-            <button 
-              onClick={toggleSimulationPaused}
-              className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+        <div className="px-3 mb-2">
+          {/* Draggable Progress Slider */}
+          <div className="mb-2">
+            <div 
+              ref={sliderRef}
+              className="relative h-8 cursor-pointer touch-none"
+              onMouseDown={handleMouseDown}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             >
-              {simulationPaused ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
-                  <rect x="6" y="4" width="4" height="16" rx="1"/>
-                  <rect x="14" y="4" width="4" height="16" rx="1"/>
-                </svg>
-              )}
-            </button>
-            
-            {/* Speed selector */}
-            <div className="flex items-center gap-0.5 px-2 border-l border-white/10">
-              {speedOptions.map((spd) => (
-                <button
-                  key={spd}
-                  onClick={() => setSimulationSpeed(spd)}
-                  className={`px-2 py-1 rounded text-xs font-bold transition-all ${
-                    simulationSpeed === spd 
-                      ? 'bg-cyan-500 text-black' 
-                      : 'text-white/50 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  {spd}x
-                </button>
-              ))}
+              {/* Track background */}
+              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-2 bg-white/10 rounded-full overflow-hidden">
+                {/* Progress fill */}
+                <div 
+                  className="h-full rounded-full transition-all"
+                  style={{ 
+                    width: `${progressPercent}%`,
+                    background: 'linear-gradient(90deg, #00d4ff, #00d4ff)',
+                    transition: isDragging ? 'none' : 'width 0.3s ease-out'
+                  }}
+                />
+              </div>
+              
+              {/* Draggable thumb */}
+              <div 
+                className="absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow-lg border-2 border-cyan-500 transition-transform"
+                style={{ 
+                  left: `calc(${progressPercent}% - 10px)`,
+                  transform: `translateY(-50%) scale(${isDragging ? 1.2 : 1})`,
+                  transition: isDragging ? 'transform 0.1s' : 'left 0.3s ease-out, transform 0.1s'
+                }}
+              />
+              
+              {/* Progress label */}
+              <div 
+                className="absolute -top-5 text-[10px] font-bold text-cyan-400 whitespace-nowrap"
+                style={{ 
+                  left: `${progressPercent}%`,
+                  transform: 'translateX(-50%)'
+                }}
+              >
+                {progressPercent}%
+              </div>
             </div>
             
-            {/* Status */}
-            <div className="px-2 border-l border-white/10">
-              <span className="text-[10px] text-white/40 tracking-wider">DEMO</span>
+            {/* Distance info */}
+            <div className="flex justify-between text-[10px] text-white/40 px-1">
+              <span>0</span>
+              <span>{distanceDisplay} remaining</span>
+            </div>
+          </div>
+
+          {/* Playback controls */}
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-1 bg-black/70 backdrop-blur-xl rounded-full px-2 py-1 border border-white/10">
+              {/* Pause/Play */}
+              <button 
+                onClick={toggleSimulationPaused}
+                className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+              >
+                {simulationPaused ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
+                    <rect x="6" y="4" width="4" height="16" rx="1"/>
+                    <rect x="14" y="4" width="4" height="16" rx="1"/>
+                  </svg>
+                )}
+              </button>
+              
+              {/* Speed selector */}
+              <div className="flex items-center gap-0.5 px-2 border-l border-white/10">
+                {speedOptions.map((spd) => (
+                  <button
+                    key={spd}
+                    onClick={() => setSimulationSpeed(spd)}
+                    className={`px-2 py-1 rounded text-xs font-bold transition-all ${
+                      simulationSpeed === spd 
+                        ? 'bg-cyan-500 text-black' 
+                        : 'text-white/50 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {spd}x
+                  </button>
+                ))}
+              </div>
+              
+              {/* Status */}
+              <div className="px-2 border-l border-white/10">
+                <span className="text-[10px] text-white/40 tracking-wider">DEMO</span>
+              </div>
             </div>
           </div>
         </div>
