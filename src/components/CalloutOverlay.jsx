@@ -186,17 +186,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
             />
           </div>
         </div>
-
-        {/* Elevation Widget */}
-        {settings.showElevation !== false && (
-          <ElevationWidget 
-            elevationData={elevationPoints}
-            stats={elevationStats}
-            currentIdx={currentElevationIdx}
-            modeColor={modeColor}
-            unit={elevationUnit}
-          />
-        )}
         
         <style>{hudStyles}</style>
       </div>
