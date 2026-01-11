@@ -1,125 +1,140 @@
+import { useState } from 'react'
 import useStore from '../store'
+import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 
 // ================================
-// Bottom Bar - v5
-// Uses goToMenu and goToPreview actions
+// Bottom Bar - Navigation Controls
+// With manual reroute button
 // ================================
 
 export default function BottomBar() {
-  const {
-    mode,
-    setMode,
-    toggleSettings,
+  const { 
+    isRunning,
+    mode, 
+    setMode, 
     settings,
     updateSettings,
-    gpsAccuracy,
-    simulationProgress,
-    routeData,
-    routeMode,
-    // Navigation actions
+    toggleSettings,
     goToMenu,
-    goToPreview
+    goToPreview,
+    routeMode,
+    gpsAccuracy
   } = useStore()
+  
+  const { reroute } = useRouteAnalysis()
+  const [isRerouting, setIsRerouting] = useState(false)
 
-  const modes = [
-    { id: 'cruise', label: 'CRUISE', color: '#00d4ff' },
-    { id: 'fast', label: 'FAST', color: '#ffd500' },
-    { id: 'race', label: 'RACE', color: '#ff3366' },
-  ]
-
-  // Toggle voice on/off
-  const handleToggleVoice = () => {
-    updateSettings({ voiceEnabled: !settings.voiceEnabled })
+  const modeColors = {
+    cruise: '#00d4ff',
+    fast: '#ffd500', 
+    race: '#ff3366'
   }
 
-  // STOP - go to preview
   const handleStop = () => {
     console.log('STOP button clicked')
     goToPreview()
   }
 
-  // BACK - go to menu
   const handleBack = () => {
     console.log('BACK button clicked')
     goToMenu()
   }
 
-  // Calculate route progress
-  const getRouteProgress = () => {
-    if (!routeData?.distance) return null
-    const progressPercent = Math.round(simulationProgress * 100)
-    const distanceRemaining = ((1 - simulationProgress) * routeData.distance / 1609.34).toFixed(1)
-    return { percent: progressPercent, remaining: distanceRemaining }
+  const handleReroute = async () => {
+    if (isRerouting) return
+    
+    setIsRerouting(true)
+    console.log('🔄 Manual reroute triggered')
+    
+    try {
+      const success = await reroute()
+      if (success) {
+        console.log('✅ Reroute successful')
+      } else {
+        console.log('❌ Reroute failed')
+      }
+    } catch (err) {
+      console.error('Reroute error:', err)
+    } finally {
+      setIsRerouting(false)
+    }
   }
 
-  const progress = getRouteProgress()
-
-  // GPS/Mode indicator
-  const getGpsStatus = () => {
-    if (routeMode === 'demo') return { color: '#ffd500', label: 'DEMO', accuracy: null }
-    if (routeMode === 'lookahead') return { color: '#00d4ff', label: 'LIVE', accuracy: gpsAccuracy }
-    if (!gpsAccuracy) return { color: '#22c55e', label: 'GPS', accuracy: null }
-    if (gpsAccuracy <= 10) return { color: '#22c55e', label: 'GPS', accuracy: gpsAccuracy }
-    if (gpsAccuracy <= 30) return { color: '#ffd500', label: 'GPS', accuracy: gpsAccuracy }
-    return { color: '#ff3366', label: 'WEAK', accuracy: gpsAccuracy }
-  }
-
-  const gpsStatus = getGpsStatus()
+  // Only show reroute for destination/imported modes (not demo/lookahead)
+  const showReroute = routeMode === 'destination' || routeMode === 'imported'
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-20 safe-bottom">
+    <div className="absolute bottom-0 left-0 right-0 z-30 safe-bottom">
       {/* Mode Selector */}
-      <div className="flex justify-center mb-3">
-        <div className="bg-black/60 backdrop-blur-xl rounded-full p-1 flex gap-1 border border-white/10">
-          {modes.map(m => (
+      <div className="flex justify-center mb-2">
+        <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-1 border border-white/10">
+          {['cruise', 'fast', 'race'].map((m) => (
             <button
-              key={m.id}
-              onClick={() => setMode(m.id)}
-              className={`px-5 py-2 rounded-full text-xs font-bold tracking-wider transition-colors ${
-                mode === m.id 
-                  ? 'text-black' 
-                  : 'text-white/40 hover:text-white/60'
-              }`}
-              style={{ 
-                backgroundColor: mode === m.id ? m.color : 'transparent',
+              key={m}
+              onClick={() => setMode(m)}
+              className="px-5 py-1.5 rounded-full text-xs font-bold tracking-wider transition-all"
+              style={{
+                background: mode === m ? modeColors[m] : 'transparent',
+                color: mode === m ? (m === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)'
               }}
             >
-              {m.label}
+              {m.toUpperCase()}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Main Controls Bar */}
-      <div className="mx-3 mb-2">
+      {/* Main Controls */}
+      <div className="px-3 pb-3">
         <div className="flex items-center gap-2">
-          {/* Back Button - Goes to MENU */}
+          {/* Back Button */}
           <button
             onClick={handleBack}
-            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
+            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
             </svg>
           </button>
 
-          {/* Stop Button - Goes to PREVIEW */}
+          {/* Reroute Button - Only show when relevant */}
+          {showReroute && (
+            <button
+              onClick={handleReroute}
+              disabled={isRerouting}
+              className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center disabled:opacity-50"
+              title="Reroute"
+            >
+              {isRerouting ? (
+                <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
+                  <path d="M21 12a9 9 0 11-9-9"/>
+                  <polyline points="21 3 21 9 15 9"/>
+                </svg>
+              )}
+            </button>
+          )}
+
+          {/* Stop Button */}
           <button
             onClick={handleStop}
-            className="flex-1 h-12 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 bg-red-500/90 hover:bg-red-500 active:scale-[0.98]"
+            className="flex-1 h-12 rounded-xl bg-red-500/80 backdrop-blur-xl flex items-center justify-center gap-2"
           >
-            <span className="w-3 h-3 bg-white rounded-sm" />
-            STOP
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+              <rect x="6" y="6" width="12" height="12" rx="1"/>
+            </svg>
+            <span className="text-white font-bold text-sm tracking-wider">STOP</span>
           </button>
 
-          {/* Voice Toggle Button */}
+          {/* Voice Toggle */}
           <button
-            onClick={handleToggleVoice}
-            className={`w-12 h-12 rounded-xl backdrop-blur-xl border flex items-center justify-center transition-all active:scale-95 ${
-              settings.voiceEnabled 
-                ? 'bg-cyan-500/20 border-cyan-500/50' 
-                : 'bg-black/60 border-white/10'
-            }`}
+            onClick={() => updateSettings({ voiceEnabled: !settings.voiceEnabled })}
+            className="w-12 h-12 rounded-xl backdrop-blur-xl border flex items-center justify-center transition-all"
+            style={{
+              background: settings.voiceEnabled ? 'rgba(0,212,255,0.2)' : 'rgba(0,0,0,0.6)',
+              borderColor: settings.voiceEnabled ? 'rgba(0,212,255,0.5)' : 'rgba(255,255,255,0.1)'
+            }}
           >
             {settings.voiceEnabled ? (
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
@@ -128,7 +143,7 @@ export default function BottomBar() {
                 <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
               </svg>
             ) : (
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ff3366" strokeWidth="2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2">
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
                 <line x1="23" y1="9" x2="17" y2="15"/>
                 <line x1="17" y1="9" x2="23" y2="15"/>
@@ -139,46 +154,32 @@ export default function BottomBar() {
           {/* Settings Button */}
           <button
             onClick={toggleSettings}
-            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center hover:bg-black/80 transition-colors active:scale-95"
+            className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
-              <path d="M12 1v4m0 14v4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M1 12h4m14 0h4M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
           </button>
         </div>
       </div>
 
       {/* Status Bar */}
-      <div className="mx-3 mb-3">
-        <div className="flex items-center justify-between px-3 py-2 bg-black/40 backdrop-blur rounded-xl">
-          {/* GPS/Mode Status */}
+      <div className="px-3 pb-2">
+        <div className="flex items-center justify-between text-[10px]">
           <div className="flex items-center gap-2">
-            <div 
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{ backgroundColor: gpsStatus.color }}
-            />
-            <span className="text-[10px] font-semibold tracking-wider" style={{ color: gpsStatus.color }}>
-              {gpsStatus.label}
+            <div className={`w-2 h-2 rounded-full ${gpsAccuracy && gpsAccuracy < 20 ? 'bg-green-500' : gpsAccuracy && gpsAccuracy < 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
+            <span className="text-white/50">GPS</span>
+            {gpsAccuracy && <span className="text-white/30">±{Math.round(gpsAccuracy)}m</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span className="text-white/50">
+              {routeMode === 'demo' ? 'DEMO' : 
+               routeMode === 'lookahead' ? 'LOOK-AHEAD' : 
+               'NAVIGATING'}
             </span>
-            {gpsStatus.accuracy && (
-              <span className="text-[10px] text-white/30">±{Math.round(gpsStatus.accuracy)}m</span>
-            )}
           </div>
-
-          {/* Navigating Status */}
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-[10px] font-semibold text-white/50 tracking-wider">NAVIGATING</span>
-          </div>
-
-          {/* Route Progress */}
-          {progress && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-white/30">{progress.remaining} mi</span>
-              <span className="text-[10px] font-semibold text-cyan-400">{progress.percent}%</span>
-            </div>
-          )}
         </div>
       </div>
 
