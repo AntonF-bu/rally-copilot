@@ -324,28 +324,39 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const handleStart = async () => { await initAudio(); onStartNavigation() }
 
-  // Build route segments
-  const buildSegments = useCallback((coords, curves) => {
+  // Build route segments BY CHARACTER (not curves)
+  const buildCharacterSegments = useCallback((coords, characterSegments) => {
     if (!coords?.length) return []
-    const segments = [], total = coords.length
-    let idx = 0
-    const sorted = [...(curves || [])].sort((a, b) => (a.distanceFromStart || 0) - (b.distanceFromStart || 0))
-    sorted.forEach(curve => {
-      const progress = (curve.distanceFromStart || 0) / (routeData?.distance || 15000)
-      const curveIdx = Math.floor(progress * total)
-      const start = Math.max(idx, curveIdx - Math.floor(total * 0.02))
-      if (start > idx) segments.push({ coords: coords.slice(idx, start + 1), color: '#22c55e' })
-      const end = Math.min(curveIdx + Math.floor(total * 0.01), total - 1)
-      segments.push({ coords: coords.slice(start, end + 1), color: getCurveColor(curve.severity) })
-      idx = end
+    if (!characterSegments?.length) {
+      // Fallback: single green segment
+      return [{ coords, color: '#22c55e' }]
+    }
+    
+    const totalDist = routeData?.distance || 15000
+    const segments = []
+    
+    characterSegments.forEach(seg => {
+      const startProgress = Math.max(0, seg.startDistance / totalDist)
+      const endProgress = Math.min(1, seg.endDistance / totalDist)
+      const startIdx = Math.floor(startProgress * coords.length)
+      const endIdx = Math.min(Math.ceil(endProgress * coords.length), coords.length)
+      
+      if (endIdx > startIdx) {
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.spirited
+        segments.push({
+          coords: coords.slice(startIdx, endIdx + 1),
+          color: colors.primary,
+          character: seg.character
+        })
+      }
     })
-    if (idx < total - 1) segments.push({ coords: coords.slice(idx), color: '#22c55e' })
+    
     return segments
   }, [routeData?.distance])
 
-  const addRoute = useCallback((map, coords, curves) => {
+  const addRoute = useCallback((map, coords, characterSegments) => {
     if (!map || !coords?.length) return
-    const segs = buildSegments(coords, curves)
+    const segs = buildCharacterSegments(coords, characterSegments)
     segs.forEach((seg, i) => {
       const src = `seg-${i}`, line = `line-${i}`, glow = `glow-${i}`
       if (!map.getSource(src)) {
@@ -354,7 +365,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         map.addLayer({ id: line, type: 'line', source: src, paint: { 'line-color': seg.color, 'line-width': 4 } })
       }
     })
-  }, [buildSegments])
+  }, [buildCharacterSegments])
 
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
@@ -384,32 +395,36 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [])
 
-  const rebuildRoute = useCallback((data = routeData) => {
+  const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
     for (let i = 0; i < 50; i++) {
       ['line-', 'glow-'].forEach(p => { if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) })
       if (mapRef.current.getSource('seg-' + i)) mapRef.current.removeSource('seg-' + i)
     }
-    addRoute(mapRef.current, data.coordinates, data.curves)
+    addRoute(mapRef.current, data.coordinates, charSegs)
     addMarkers(mapRef.current, data.curves, data.coordinates)
-  }, [routeData, addRoute, addMarkers])
+  }, [routeData, routeCharacter.segments, addRoute, addMarkers])
 
-  // Route character segments are now displayed via UI badges, not map overlays
-  // This keeps the map cleaner and the character analysis more accurate
+  // Rebuild route when character analysis completes
+  useEffect(() => {
+    if (mapLoaded && routeCharacter.segments.length > 0) {
+      rebuildRoute(routeData, routeCharacter.segments)
+    }
+  }, [routeCharacter.segments, mapLoaded])
 
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
     mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
     mapRef.current.on('load', () => {
       setMapLoaded(true)
-      addRoute(mapRef.current, routeData.coordinates, routeData.curves)
+      addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments)
       addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
       mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { markersRef.current.forEach(m => m.remove()); zoneLayersRef.current = []; if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current); mapRef.current?.remove(); mapRef.current = null }
-  }, [mapContainer, routeData, mapStyle, addRoute, addMarkers, rebuildRoute])
+  }, [mapContainer, routeData, mapStyle, addRoute, addMarkers, rebuildRoute, routeCharacter.segments])
 
   const handleStyleChange = () => {
     const next = mapStyle === 'dark' ? 'satellite' : 'dark'
@@ -526,60 +541,36 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
       {/* BOTTOM BAR - Compact */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
-        {/* Route Character Summary */}
+        {/* Route Character - Compact single line */}
         {routeCharacter.summary && (
-          <div className="mb-2">
-            {/* Character breakdown bar */}
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-[10px] text-white/40 font-medium">ROUTE CHARACTER</span>
-              {isLoadingCharacter && <span className="text-[10px] text-white/30">(analyzing...)</span>}
-              {routeCharacter.summary.funPercentage > 0 && (
-                <span className="text-[10px] font-bold" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
-                  {routeCharacter.summary.funPercentage}% fun
-                </span>
-              )}
-            </div>
-            
-            {/* Visual breakdown */}
-            <div className="flex h-2 rounded-full overflow-hidden bg-white/10 mb-1.5">
-              {Object.values(ROUTE_CHARACTER).map(char => {
-                const data = routeCharacter.summary.byCharacter[char]
-                if (!data || data.percentage === 0) return null
-                const colors = CHARACTER_COLORS[char]
-                return (
-                  <div 
-                    key={char}
-                    style={{ width: `${data.percentage}%`, background: colors.primary }}
-                    title={`${colors.label}: ${data.percentage}%`}
-                  />
-                )
-              })}
-            </div>
-            
-            {/* Character badges */}
-            <div className="flex gap-1 flex-wrap">
-              {Object.values(ROUTE_CHARACTER).map(char => {
-                const data = routeCharacter.summary.byCharacter[char]
-                if (!data || data.percentage === 0) return null
-                const colors = CHARACTER_COLORS[char]
-                const miles = (data.distance / 1609.34).toFixed(1)
-                return (
-                  <span 
-                    key={char}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-medium"
-                    style={{ background: `${colors.primary}20`, color: colors.primary }}
-                  >
-                    {colors.label} {miles}mi
+          <div className="flex items-center gap-2 mb-2 overflow-x-auto">
+            {isLoadingCharacter ? (
+              <span className="text-[10px] text-white/40">Analyzing route...</span>
+            ) : (
+              <>
+                {Object.values(ROUTE_CHARACTER).map(char => {
+                  const data = routeCharacter.summary.byCharacter[char]
+                  if (!data || data.percentage === 0) return null
+                  const colors = CHARACTER_COLORS[char]
+                  const dist = settings.units === 'metric' 
+                    ? `${(data.distance / 1000).toFixed(1)}km`
+                    : `${(data.distance / 1609.34).toFixed(1)}mi`
+                  return (
+                    <span 
+                      key={char}
+                      className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                      style={{ background: `${colors.primary}20`, color: colors.primary, border: `1px solid ${colors.primary}40` }}
+                    >
+                      {colors.label} {dist}
+                    </span>
+                  )
+                })}
+                {routeCharacter.summary.funPercentage > 0 && (
+                  <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
+                    {routeCharacter.summary.funPercentage}% fun
                   </span>
-                )
-              })}
-            </div>
-            
-            {/* Best section highlight */}
-            {routeCharacter.summary.bestSection && (
-              <div className="mt-1.5 text-[10px] text-white/50">
-                Best: {CHARACTER_COLORS[routeCharacter.summary.bestSection.character]?.label} section at mile {routeCharacter.summary.bestSection.startMile.toFixed(1)}-{routeCharacter.summary.bestSection.endMile.toFixed(1)}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
