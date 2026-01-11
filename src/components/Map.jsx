@@ -16,7 +16,6 @@ export default function Map() {
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
-  const routeAddedRef = useRef(false)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
@@ -97,55 +96,61 @@ export default function Map() {
     }
   }, [])
 
-  // Add route to map when loaded
+  // Add or update route on map
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     if (!routeData?.coordinates?.length) return
-    if (routeAddedRef.current) return
 
     try {
-      map.current.addSource('route', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: routeData.coordinates
+      const routeGeoJSON = {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: routeData.coordinates
+        }
+      }
+
+      // Check if source already exists
+      if (map.current.getSource('route')) {
+        // Update existing source
+        map.current.getSource('route').setData(routeGeoJSON)
+      } else {
+        // Add new source and layers
+        map.current.addSource('route', {
+          type: 'geojson',
+          data: routeGeoJSON
+        })
+
+        map.current.addLayer({
+          id: 'route-glow',
+          type: 'line',
+          source: 'route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': modeColor,
+            'line-width': 14,
+            'line-blur': 10,
+            'line-opacity': 0.4
           }
-        }
-      })
+        })
 
-      map.current.addLayer({
-        id: 'route-glow',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00d4ff',
-          'line-width': 14,
-          'line-blur': 10,
-          'line-opacity': 0.4
-        }
-      })
-
-      map.current.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#00d4ff',
-          'line-width': 5,
-          'line-opacity': 0.9
-        }
-      })
-
-      routeAddedRef.current = true
+        map.current.addLayer({
+          id: 'route-line',
+          type: 'line',
+          source: 'route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': modeColor,
+            'line-width': 5,
+            'line-opacity': 0.9
+          }
+        })
+      }
     } catch (e) {
-      console.log('Route add error:', e)
+      console.log('Route update error:', e)
     }
-  }, [mapLoaded, routeData])
+  }, [mapLoaded, routeData, modeColor])
 
   // Update route color when mode changes
   useEffect(() => {
