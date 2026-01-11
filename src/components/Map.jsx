@@ -266,14 +266,24 @@ export default function Map() {
     })
   }, [position, heading, routeData])
 
-  // Update curve markers
+  // Update curve markers - show ALL route curves
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
 
-    upcomingCurves.forEach((curve) => {
+    // Use route curves (all curves on route), not just upcoming
+    const curvesToShow = routeData?.curves || []
+    
+    if (curvesToShow.length === 0) {
+      console.log('📍 No curves to display')
+      return
+    }
+
+    curvesToShow.forEach((curve) => {
+      if (!curve.position) return
+      
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
       const color = getCurveColor(curve.severity)
@@ -316,7 +326,9 @@ export default function Map() {
 
       curveMarkers.current.push(marker)
     })
-  }, [upcomingCurves, activeCurve, mapLoaded])
+    
+    console.log('📍 Added', curveMarkers.current.length, 'curve markers')
+  }, [routeData, activeCurve, mapLoaded])
 
   // Keep screen awake
   useEffect(() => {
