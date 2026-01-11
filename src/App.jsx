@@ -32,6 +32,7 @@ export default function App() {
     showRouteSelector,
     showRoutePreview,
     routeMode,
+    routeData,
     goToMenu,
     goToPreview,
     goToDriving,
