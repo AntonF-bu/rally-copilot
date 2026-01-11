@@ -1,14 +1,26 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
+import { CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 
 // ================================
-// Map Component - v11
-// Fixed curve marker directions + Smoother camera
+// Map Component - v12
+// With severity gradients, zone colors, better markers
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+// Severity colors for braking zones
+const SEVERITY_COLORS = {
+  0: '#22c55e',  // Green - clear
+  1: '#22c55e',  // Green
+  2: '#84cc16',  // Lime
+  3: '#eab308',  // Yellow
+  4: '#f97316',  // Orange
+  5: '#ef4444',  // Red
+  6: '#dc2626',  // Dark red
+}
 
 export default function Map() {
   const mapContainer = useRef(null)
@@ -16,6 +28,7 @@ export default function Map() {
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
+  const routeLayersRef = useRef([])
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
@@ -30,11 +43,70 @@ export default function Map() {
     activeCurve,
     mode,
     settings,
-    routeData
+    routeData,
+    routeZones,
+    simulationProgress
   } = useStore()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+
+  // Build severity segments for route coloring
+  const buildSeveritySegments = useCallback((coordinates, curves) => {
+    if (!coordinates?.length) return []
+    if (!curves?.length) {
+      return [{ coords: coordinates, color: '#22c55e' }]
+    }
+
+    const segments = []
+    const totalDist = routeData?.distance || 15000
+    let lastIdx = 0
+    
+    // Sort curves by distance
+    const sortedCurves = [...curves].sort((a, b) => 
+      (a.distanceFromStart || 0) - (b.distanceFromStart || 0)
+    )
+
+    sortedCurves.forEach(curve => {
+      const curveDist = curve.distanceFromStart || 0
+      const warningDist = 200 // meters before curve to start coloring
+      
+      const curveProgress = curveDist / totalDist
+      const warningProgress = Math.max(0, (curveDist - warningDist) / totalDist)
+      
+      const curveIdx = Math.min(Math.floor(curveProgress * coordinates.length), coordinates.length - 1)
+      const warningIdx = Math.floor(warningProgress * coordinates.length)
+      
+      // Green segment before warning zone
+      if (warningIdx > lastIdx) {
+        segments.push({
+          coords: coordinates.slice(lastIdx, warningIdx + 1),
+          color: '#22c55e'
+        })
+      }
+      
+      // Colored segment for curve (warning zone)
+      if (curveIdx > warningIdx) {
+        const color = SEVERITY_COLORS[curve.severity] || SEVERITY_COLORS[3]
+        segments.push({
+          coords: coordinates.slice(warningIdx, curveIdx + 1),
+          color
+        })
+      }
+      
+      lastIdx = curveIdx
+    })
+    
+    // Final green segment after last curve
+    if (lastIdx < coordinates.length - 1) {
+      segments.push({
+        coords: coordinates.slice(lastIdx),
+        color: '#22c55e'
+      })
+    }
+    
+    return segments
+  }, [routeData?.distance])
 
   // Initialize map ONCE
   useEffect(() => {
@@ -89,57 +161,71 @@ export default function Map() {
     }
   }, [])
 
-  // Add or update route on map
+  // Add or update route with severity segments
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     if (!routeData?.coordinates?.length) return
 
     const addRoute = () => {
       try {
-        const routeGeoJSON = {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: routeData.coordinates
-          }
-        }
+        // Remove old route layers
+        routeLayersRef.current.forEach(id => {
+          try {
+            if (map.current.getLayer(id)) map.current.removeLayer(id)
+            if (map.current.getSource(id)) map.current.removeSource(id)
+          } catch (e) {}
+        })
+        routeLayersRef.current = []
 
-        const existingSource = map.current.getSource('route')
+        // Build severity segments
+        const segments = buildSeveritySegments(routeData.coordinates, routeData.curves)
         
-        if (existingSource) {
-          existingSource.setData(routeGeoJSON)
-        } else {
-          map.current.addSource('route', {
+        // Add each segment
+        segments.forEach((seg, i) => {
+          if (!seg.coords || seg.coords.length < 2) return
+          
+          const sourceId = `route-seg-${i}`
+          const glowId = `route-glow-${i}`
+          const lineId = `route-line-${i}`
+          
+          map.current.addSource(sourceId, {
             type: 'geojson',
-            data: routeGeoJSON
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: { type: 'LineString', coordinates: seg.coords }
+            }
           })
 
+          // Glow layer
           map.current.addLayer({
-            id: 'route-glow',
+            id: glowId,
             type: 'line',
-            source: 'route',
+            source: sourceId,
             layout: { 'line-join': 'round', 'line-cap': 'round' },
             paint: {
-              'line-color': modeColor,
+              'line-color': seg.color,
               'line-width': 14,
-              'line-blur': 10,
+              'line-blur': 8,
               'line-opacity': 0.4
             }
           })
 
+          // Main line
           map.current.addLayer({
-            id: 'route-line',
+            id: lineId,
             type: 'line',
-            source: 'route',
+            source: sourceId,
             layout: { 'line-join': 'round', 'line-cap': 'round' },
             paint: {
-              'line-color': modeColor,
+              'line-color': seg.color,
               'line-width': 5,
               'line-opacity': 0.9
             }
           })
-        }
+          
+          routeLayersRef.current.push(sourceId, glowId, lineId)
+        })
       } catch (e) {
         console.log('Route add/update error:', e.message)
       }
@@ -150,32 +236,7 @@ export default function Map() {
     } else {
       map.current.once('styledata', addRoute)
     }
-  }, [mapLoaded, routeData, modeColor])
-
-  // Update route color when mode changes
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return
-    
-    try {
-      if (map.current.getLayer('route-line')) {
-        map.current.setPaintProperty('route-line', 'line-color', modeColor)
-      }
-      if (map.current.getLayer('route-glow')) {
-        map.current.setPaintProperty('route-glow', 'line-color', modeColor)
-      }
-    } catch (e) {}
-    
-    if (userMarkerEl.current) {
-      const divs = userMarkerEl.current.querySelectorAll('div')
-      const arrow = userMarkerEl.current.querySelector('#heading-arrow')
-      if (divs[0]) divs[0].style.borderColor = modeColor
-      if (divs[2]) {
-        divs[2].style.background = modeColor
-        divs[2].style.boxShadow = `0 2px 15px ${modeColor}80`
-      }
-      if (arrow) arrow.style.borderBottomColor = modeColor
-    }
-  }, [modeColor, mapLoaded])
+  }, [mapLoaded, routeData, buildSeveritySegments])
 
   // Create user marker ONCE
   useEffect(() => {
@@ -185,9 +246,9 @@ export default function Map() {
     const el = document.createElement('div')
     el.innerHTML = `
       <div style="position: relative; width: 44px; height: 44px;">
-        <div style="position: absolute; inset: 0; border: 2px solid #00d4ff; border-radius: 50%; animation: pulse 2s ease-out infinite;"></div>
-        <div id="heading-arrow" style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 18px solid #00d4ff; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));"></div>
-        <div style="position: absolute; inset: 10px; background: #00d4ff; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 15px #00d4ff80;"></div>
+        <div style="position: absolute; inset: 0; border: 2px solid ${modeColor}; border-radius: 50%; animation: pulse 2s ease-out infinite;"></div>
+        <div id="heading-arrow" style="position: absolute; top: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 18px solid ${modeColor}; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));"></div>
+        <div style="position: absolute; inset: 10px; background: ${modeColor}; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 15px ${modeColor}80;"></div>
       </div>
     `
     
@@ -203,7 +264,21 @@ export default function Map() {
       .setLngLat(startPos)
       .addTo(map.current)
 
-  }, [mapLoaded])
+  }, [mapLoaded, modeColor])
+
+  // Update user marker color when mode changes
+  useEffect(() => {
+    if (!userMarkerEl.current) return
+    
+    const divs = userMarkerEl.current.querySelectorAll('div')
+    const arrow = userMarkerEl.current.querySelector('#heading-arrow')
+    if (divs[0]) divs[0].style.borderColor = modeColor
+    if (divs[2]) {
+      divs[2].style.background = modeColor
+      divs[2].style.boxShadow = `0 2px 15px ${modeColor}80`
+    }
+    if (arrow) arrow.style.borderBottomColor = modeColor
+  }, [modeColor])
 
   // Listen for user drag event
   useEffect(() => {
@@ -215,7 +290,7 @@ export default function Map() {
     return () => window.removeEventListener('map-user-drag', handleUserDrag)
   }, [])
 
-  // Update position and camera - IMPROVED smoothness
+  // Update position and camera
   useEffect(() => {
     if (!map.current || !mapLoaded || !userMarker.current) return
     
@@ -230,8 +305,6 @@ export default function Map() {
       }
 
       if (isRunning && isFollowing) {
-        // Adjust camera smoothness based on speed
-        // Faster speed = shorter duration for snappier response
         const currentSpeed = speed || 0
         const duration = currentSpeed > 50 ? 400 : currentSpeed > 30 ? 600 : 800
         const zoom = currentSpeed > 50 ? 15.5 : currentSpeed > 30 ? 16 : 16.5
@@ -242,7 +315,7 @@ export default function Map() {
           pitch: 60,
           zoom: zoom,
           duration: duration,
-          easing: (t) => 1 - Math.pow(1 - t, 3) // ease-out cubic
+          easing: (t) => 1 - Math.pow(1 - t, 3)
         })
       }
     }
@@ -275,7 +348,7 @@ export default function Map() {
     })
   }, [position, heading, routeData])
 
-  // Update curve markers - FIXED directions
+  // Update curve markers - Enhanced style
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -293,12 +366,11 @@ export default function Map() {
       const isActive = activeCurve?.id === curve.id
       const color = getCurveColor(curve.severity)
       
-      // FIXED: Use startDirection for chicanes
+      // Use startDirection for chicanes
       const direction = curve.isChicane ? curve.startDirection : curve.direction
       const isLeft = direction === 'LEFT'
       
       if (curve.isTechnicalSection) {
-        // Technical section marker
         const dirChar = isLeft ? '←' : '→'
         el.innerHTML = `
           <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
@@ -312,17 +384,13 @@ export default function Map() {
         
         el.innerHTML = `
           <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
-            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color}; letter-spacing: 1px;">${typeLabel}${dirChar}</span>
-            <span style="font-size: 13px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
+            <span style="font-size: 9px; font-weight: 700; color: ${isActive ? 'white' : color};">${typeLabel}${dirChar}</span>
+            <span style="font-size: 11px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
           </div>
         `
       } else {
-        let modifierText = ''
-        if (curve.modifier === 'TIGHTENS') modifierText = '<div style="font-size: 9px; color: #f97316; font-weight: 700;">TIGHTENS</div>'
-        else if (curve.modifier === 'OPENS') modifierText = '<div style="font-size: 9px; color: #22c55e; font-weight: 700;">OPENS</div>'
-        else if (curve.modifier === 'SHARP') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">SHARP</div>`
-        else if (curve.modifier === 'HAIRPIN') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">HAIRPIN</div>`
-        else if (curve.modifier === 'LONG') modifierText = `<div style="font-size: 9px; color: ${color}; font-weight: 700;">LONG</div>`
+        // Regular curve - clean pill style
+        const modifierText = curve.modifier ? `<span style="font-size: 8px; color: ${isActive ? 'white' : color}; opacity: 0.8; margin-top: 2px;">${curve.modifier}</span>` : ''
         
         el.innerHTML = `
           <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
