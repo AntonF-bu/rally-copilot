@@ -560,12 +560,17 @@ function getDistanceText(distanceMeters, speedUnit = 'mph') {
     if (feet >= 2640) {
       const miles = Math.round(feet / 528) / 10
       return `${miles} miles`
-    } else if (feet >= 1000) {
+    } else if (feet >= 800) {
+      // Round to nearest 100 feet for clarity
       return `${Math.round(feet / 100) * 100} feet`
-    } else if (feet >= 200) {
-      return `${Math.round(feet / 50) * 50} feet`
+    } else if (feet >= 300) {
+      // Use simpler terms for closer distances
+      return `${Math.round(feet / 100) * 100} feet`
+    } else if (feet >= 150) {
+      return `200 feet`
     }
-    return `${Math.round(feet / 25) * 25} feet`
+    // Very close - don't give specific distance
+    return `ahead`
   }
 }
 
