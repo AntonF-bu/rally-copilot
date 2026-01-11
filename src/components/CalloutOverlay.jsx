@@ -67,6 +67,28 @@ export default function CalloutOverlay() {
     : null
   const elevationUnit = isMetric ? 'm' : 'ft'
 
+  // Elevation data - must be before any early returns that use it
+  const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
+    const numPoints = 20
+    const points = []
+    const baseElev = altitude !== null ? altitude : 50
+    for (let i = 0; i < numPoints; i++) {
+      const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
+      points.push(baseElev + variation)
+    }
+    const minElev = Math.min(...points)
+    const maxElev = Math.max(...points)
+    const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
+    const elevRange = isMetric 
+      ? Math.round(maxElev - minElev)
+      : Math.round((maxElev - minElev) * 3.28084)
+    return {
+      elevationData: points,
+      totalElevation: elevRange,
+      elevationPosition: pos
+    }
+  }, [altitude, simulationProgress, isMetric])
+
   if (!isRunning) return null
 
   const hasNetworkIssue = !isOnline
@@ -150,28 +172,6 @@ export default function CalloutOverlay() {
   // FIXED: Use startDirection for chicanes, direction for regular curves
   const displayDirection = curve.isChicane ? curve.startDirection : curve.direction
   const isLeft = displayDirection === 'LEFT'
-  
-  // Elevation data
-  const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
-    const numPoints = 20
-    const points = []
-    const baseElev = altitude !== null ? altitude : 50
-    for (let i = 0; i < numPoints; i++) {
-      const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
-      points.push(baseElev + variation)
-    }
-    const minElev = Math.min(...points)
-    const maxElev = Math.max(...points)
-    const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
-    const elevRange = isMetric 
-      ? Math.round(maxElev - minElev)
-      : Math.round((maxElev - minElev) * 3.28084)
-    return {
-      elevationData: points,
-      totalElevation: elevRange,
-      elevationPosition: pos
-    }
-  }, [altitude, simulationProgress, isMetric])
 
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
