@@ -227,25 +227,29 @@ export default function App() {
     const behavior = getBehaviorForCurve(routeZones, nextCurve)
     
     // Check if curve should be announced based on character behavior
-    const shouldAnnounce = shouldAnnounceCurve(routeZones, nextCurve)
+    let shouldAnnounce = shouldAnnounceCurve(routeZones, nextCurve)
+    
+    // OVERRIDE: Always announce severity 5+ curves regardless of zone
+    if (nextCurve.severity >= 5) {
+      shouldAnnounce = true
+    }
+    
+    // OVERRIDE: Always announce chicanes with any 4+ severity component
+    if (nextCurve.isChicane) {
+      const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
+      const maxSev = Math.max(...severities)
+      if (maxSev >= 4) {
+        shouldAnnounce = true
+      }
+    }
     
     if (!shouldAnnounce) {
-      // Still allow chicanes through if they have any severity 3+ curve
-      if (nextCurve.isChicane) {
-        const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
-        const maxSev = Math.max(...severities)
-        if (maxSev < behavior.minSeverity) {
-          checkClearCallout(now, nextCurve.distance)
-          return
-        }
-      } else {
-        // Log why we're skipping this curve
-        if (now % 3000 < 100) {
-          console.log(`⏭️ Skipping curve ${nextCurve.id}: severity ${nextCurve.severity} < minSeverity ${behavior.minSeverity}`)
-        }
-        checkClearCallout(now, nextCurve.distance)
-        return
+      // Log why we're skipping this curve
+      if (now % 3000 < 100) {
+        console.log(`⏭️ Skipping curve ${nextCurve.id}: severity ${nextCurve.severity} < minSeverity ${behavior.minSeverity}`)
       }
+      checkClearCallout(now, nextCurve.distance)
+      return
     }
 
     const isHardCurve = nextCurve.severity >= 4
