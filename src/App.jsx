@@ -193,6 +193,9 @@ export default function App() {
   // ================================
   
   useEffect(() => {
+    // Debug: Log why we might exit early
+    console.log(`🔍 Callout effect check: isRunning=${isRunning}, voiceEnabled=${settings.voiceEnabled}, curves=${upcomingCurves.length}, mode=${currentDrivingMode}`)
+    
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
@@ -205,14 +208,16 @@ export default function App() {
     const distances = getWarningDistances(currentDrivingMode, currentSpeed, currentSpeed)
     const voiceParams = getVoiceParamsForMode(currentDrivingMode)
     
-    // Log timing info periodically
-    if (now % 5000 < 100) {
-      console.log(`📊 Callout check: mode=${currentDrivingMode}, distance=${Math.round(nextCurve.distance)}m, earlyDist=${Math.round(distances.early)}m, mainDist=${Math.round(distances.main)}m, minPause=${voiceParams.minPause}ms`)
-    }
+    const distance = nextCurve.distance
+    const curveId = nextCurve.id
+    
+    // Log on every check
+    console.log(`📊 Mode: ${currentDrivingMode} | Curve ${curveId}: ${Math.round(distance)}m | Early: ${Math.round(distances.early)}m | Main: ${Math.round(distances.main)}m | Already announced: ${mainCalloutsRef.current.has(curveId)}`)
     
     // Respect minimum pause between callouts
     const timeSinceLastCallout = now - lastCalloutTimeRef.current
     if (timeSinceLastCallout < voiceParams.minPause) {
+      console.log(`⏳ Waiting: ${Math.round(timeSinceLastCallout)}ms < ${voiceParams.minPause}ms minPause`)
       return
     }
     
