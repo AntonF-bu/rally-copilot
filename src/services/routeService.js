@@ -130,74 +130,81 @@ export function parseGoogleMapsUrl(url) {
     console.log('Decoded URL:', decodedUrl)
 
     // Format 0: saddr/daddr format (older Google Maps format)
-    // Example: ?saddr=42.3528913,-71.0756559&daddr=Campion+Center...
+    // Example: ?saddr=42.3528913,-71.0756559&daddr=Campion+Center+to:42.123,-71.456+to:Place2
     const saddrMatch = decodedUrl.match(/[?&]saddr=([^&]+)/)
     const daddrMatch = decodedUrl.match(/[?&]daddr=([^&]+)/)
     
     if (saddrMatch || daddrMatch) {
       console.log('Found saddr/daddr format')
       
-      let originStr = saddrMatch ? saddrMatch[1].replace(/\+/g, ' ') : null
-      let destStr = daddrMatch ? daddrMatch[1].replace(/\+/g, ' ') : null
+      const originStr = saddrMatch ? decodeURIComponent(saddrMatch[1]).replace(/\+/g, ' ') : null
+      const daddrStr = daddrMatch ? decodeURIComponent(daddrMatch[1]).replace(/\+/g, ' ') : null
       
-      // daddr can have multiple destinations with "to:" separator
-      // Example: daddr=Place1+to:42.123,-71.456+to:Place2
-      if (destStr && destStr.includes(' to:')) {
-        const parts = destStr.split(/\s+to:/)
-        // Take the first destination for now (could support waypoints later)
-        destStr = parts[0]
-        console.log('Multiple destinations, using first:', destStr)
-      }
+      console.log('saddr:', originStr)
+      console.log('daddr:', daddrStr)
       
-      console.log('saddr:', originStr, 'daddr:', destStr)
+      // Parse all waypoints from daddr (can have "to:" separators)
+      const allWaypoints = []
       
-      const originCoords = originStr ? parseCoordinateString(originStr) : null
-      const destCoords = destStr ? parseCoordinateString(destStr) : null
-      
-      // Both are coordinates
-      if (originCoords && destCoords) {
-        console.log('Both are coordinates')
-        return { coordinates: [originCoords, destCoords] }
-      }
-      
-      // Origin is coordinates, destination needs geocoding
-      if (originCoords && destStr && !destCoords) {
-        console.log('Origin is coords, dest needs geocoding')
-        return {
-          originCoordinates: originCoords,
-          needsGeocoding: true,
-          destination: destStr
+      // Add origin first
+      if (originStr) {
+        const originCoords = parseCoordinateString(originStr)
+        if (originCoords) {
+          allWaypoints.push({ coords: originCoords, name: null })
+        } else {
+          allWaypoints.push({ coords: null, name: originStr })
         }
       }
       
-      // Destination is coordinates, origin needs geocoding or use current location
-      if (destCoords && (!originStr || !originCoords)) {
-        console.log('Dest is coords, need origin')
-        return {
-          coordinates: [destCoords],
-          needsOrigin: !originStr,
-          destinationCoordinates: destCoords,
-          needsGeocoding: !!originStr && !originCoords,
-          origin: originStr
+      // Parse destinations (split by " to:" pattern)
+      if (daddrStr) {
+        // Split by "to:" but be careful with spaces
+        const destParts = daddrStr.split(/\s+to:/)
+        console.log('Destination parts:', destParts)
+        
+        for (const part of destParts) {
+          const trimmed = part.trim()
+          if (!trimmed) continue
+          
+          const coords = parseCoordinateString(trimmed)
+          if (coords) {
+            allWaypoints.push({ coords, name: null })
+          } else {
+            allWaypoints.push({ coords: null, name: trimmed })
+          }
         }
       }
       
-      // Both need geocoding
-      if (originStr && destStr) {
-        console.log('Both need geocoding')
-        return {
-          needsGeocoding: true,
-          origin: originStr,
-          destination: destStr
-        }
-      }
+      console.log('All waypoints:', allWaypoints)
       
-      // Just destination
-      if (destStr) {
+      // If we have waypoints that need geocoding
+      const needsGeocoding = allWaypoints.some(w => w.coords === null)
+      const hasCoords = allWaypoints.filter(w => w.coords !== null)
+      
+      if (allWaypoints.length >= 2) {
+        // Check if all have coordinates
+        if (!needsGeocoding) {
+          return { 
+            coordinates: allWaypoints.map(w => w.coords),
+            isMultiStop: allWaypoints.length > 2
+          }
+        }
+        
+        // Need to geocode some waypoints
         return {
           needsGeocoding: true,
-          destination: destStr
+          waypoints: allWaypoints,
+          isMultiStop: allWaypoints.length > 2
         }
+      }
+      
+      // Single destination
+      if (allWaypoints.length === 1) {
+        const wp = allWaypoints[0]
+        if (wp.coords) {
+          return { coordinates: [wp.coords], needsOrigin: true }
+        }
+        return { needsGeocoding: true, destination: wp.name }
       }
     }
 
