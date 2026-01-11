@@ -1,5 +1,5 @@
 // Vercel Edge Function for ElevenLabs Text-to-Speech
-// This keeps your API key secure on the server
+// Now accepts dynamic voice settings per driving mode
 
 export const config = {
   runtime: 'edge',
@@ -12,7 +12,7 @@ export default async function handler(request) {
   }
 
   try {
-    const { text, voiceId } = await request.json()
+    const { text, voiceId, voiceSettings } = await request.json()
 
     if (!text) {
       return new Response('Missing text', { status: 400 })
@@ -23,8 +23,16 @@ export default async function handler(request) {
       return new Response('ElevenLabs API key not configured', { status: 500 })
     }
 
-    // Default to Adam voice if not specified
-    const voice = voiceId || 'pNInz6obpgDQGcFmaJgB'
+    // Default to specific voice if not specified
+    const voice = voiceId || 'puLAe8o1npIDg374vYZp'
+
+    // Default voice settings (can be overridden by caller)
+    const settings = {
+      stability: voiceSettings?.stability ?? 0.85,
+      similarity_boost: voiceSettings?.similarity_boost ?? 0.80,
+      style: voiceSettings?.style ?? 0.15,
+      use_speaker_boost: voiceSettings?.use_speaker_boost ?? true
+    }
 
     // Call ElevenLabs API
     const response = await fetch(
@@ -38,13 +46,8 @@ export default async function handler(request) {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_multilingual_v2', // More consistent than turbo
-          voice_settings: {
-            stability: 0.85,        // High stability = consistent voice
-            similarity_boost: 0.80, // Keep it sounding like Adam
-            style: 0.15,            // Low style = less variation
-            use_speaker_boost: true
-          }
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: settings
         }),
       }
     )
@@ -63,7 +66,7 @@ export default async function handler(request) {
     return new Response(audioBuffer, {
       headers: {
         'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        'Cache-Control': 'public, max-age=3600',
       },
     })
 
