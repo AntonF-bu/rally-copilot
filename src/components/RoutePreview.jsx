@@ -15,13 +15,11 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const [mapLoaded, setMapLoaded] = useState(false)
-  
-  // Download states
-  const [downloadState, setDownloadState] = useState('idle') // idle, downloading, ready, error
-  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, cached: 0 })
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadComplete, setDownloadComplete] = useState(false)
   
   const { routeData, mode } = useStore()
-  const { preloadRouteAudio, getCacheStatus, initAudio } = useSpeech()
+  const { initAudio, preloadRouteAudio } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -149,42 +147,27 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
   }, [routeData, modeColor])
 
-  // Handle download for offline
-  const handleDownloadAudio = async () => {
-    if (!routeData?.curves || routeData.curves.length === 0) {
-      setDownloadState('ready')
-      return
-    }
+  // Start navigation
+  const handleStart = async () => {
+    await initAudio()
+    onStartNavigation()
+  }
 
-    setDownloadState('downloading')
+  // Download voice for offline
+  const handleDownload = async () => {
+    if (isDownloading || !routeData?.curves?.length) return
     
+    setIsDownloading(true)
     try {
-      const result = await preloadRouteAudio(routeData.curves, (current, total, cached) => {
-        setDownloadProgress({ current, total, cached: cached || 0 })
-      })
-
+      const result = await preloadRouteAudio(routeData.curves)
       if (result.success) {
-        setDownloadState('ready')
-      } else {
-        setDownloadState('error')
+        setDownloadComplete(true)
       }
     } catch (err) {
       console.error('Download error:', err)
-      setDownloadState('error')
+    } finally {
+      setIsDownloading(false)
     }
-  }
-
-  // Start navigation (with or without download)
-  const handleStart = async () => {
-    // Initialize audio on user interaction (required for iOS)
-    await initAudio()
-    onStartNavigation()
-  }
-
-  // Skip download and start anyway
-  const handleSkipAndStart = async () => {
-    await initAudio()
-    onStartNavigation()
   }
 
   return (
@@ -241,119 +224,48 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             {routeStats.chicanes > 0 && <span>{routeStats.chicanes} Chicanes</span>}
           </div>
 
-          {/* Download / Start Section */}
-          {downloadState === 'idle' && (
-            <div className="space-y-2">
-              {/* Main Start Button */}
-              <button
-                onClick={handleSkipAndStart}
-                className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
-                style={{ background: modeColor }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                START NAVIGATION
-              </button>
-              
-              {/* Optional Download Button */}
-              {navigator.onLine && routeStats.curves > 0 && (
-                <button
-                  onClick={handleDownloadAudio}
-                  className="w-full py-3 rounded-xl font-medium text-sm tracking-wider transition-all flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white/60"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          {/* Start Button */}
+          <button
+            onClick={handleStart}
+            className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+            style={{ background: modeColor }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            START NAVIGATION
+          </button>
+
+          {/* Download for Offline - Optional */}
+          {navigator.onLine && routeStats.curves > 0 && (
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading || downloadComplete}
+              className="w-full mt-2 py-2.5 rounded-xl text-xs tracking-wider transition-all flex items-center justify-center gap-2 bg-white/5 border border-white/10 disabled:opacity-60"
+            >
+              {isDownloading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-white/60">Downloading voice...</span>
+                </>
+              ) : downloadComplete ? (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  <span className="text-green-400">Voice ready for offline</span>
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                     <polyline points="7,10 12,15 17,10"/>
                     <line x1="12" y1="15" x2="12" y2="3"/>
                   </svg>
-                  Download voice for offline (optional)
-                </button>
+                  <span className="text-white/40">Download voice for offline</span>
+                </>
               )}
-            </div>
-          )}
-
-          {downloadState === 'downloading' && (
-            <div className="space-y-3">
-              <div className="bg-white/5 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-white/70">Downloading voice callouts...</span>
-                  <span className="text-sm text-white/50">
-                    {downloadProgress.current}/{downloadProgress.total}
-                  </span>
-                </div>
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-cyan-500 transition-all duration-300"
-                    style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
-                  />
-                </div>
-                <p className="text-[10px] text-white/30 mt-2">
-                  This ensures voice works even without cell signal
-                </p>
-              </div>
-            </div>
-          )}
-
-          {downloadState === 'ready' && (
-            <div className="space-y-2">
-              <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 flex items-center gap-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-                <div>
-                  <div className="text-sm font-semibold text-green-400">Ready for Offline</div>
-                  <div className="text-[10px] text-white/40">
-                    {downloadProgress.cached || getCacheStatus().cachedCount} callouts downloaded
-                  </div>
-                </div>
-              </div>
-              
-              <button
-                onClick={handleStart}
-                className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
-                style={{ background: modeColor }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                START NAVIGATION
-              </button>
-            </div>
-          )}
-
-          {downloadState === 'error' && (
-            <div className="space-y-2">
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-center gap-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                <div>
-                  <div className="text-sm font-semibold text-red-400">Download Failed</div>
-                  <div className="text-[10px] text-white/40">
-                    Voice will fall back to device speaker when offline
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDownloadAudio}
-                  className="flex-1 py-3 rounded-xl font-bold text-sm tracking-wider bg-white/10 border border-white/20 text-white"
-                >
-                  Retry
-                </button>
-                <button
-                  onClick={handleStart}
-                  className="flex-1 py-3 rounded-xl font-bold text-sm tracking-wider"
-                  style={{ background: modeColor }}
-                >
-                  Start Anyway
-                </button>
-              </div>
-            </div>
+            </button>
           )}
         </div>
       </div>
