@@ -405,20 +405,29 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
       return curveDist >= seg.startDistance && curveDist <= seg.endDistance
     })
     
+    console.log(`  📍 Checking TRANSIT segment ${seg.id} (${seg.startDistance.toFixed(0)}m - ${seg.endDistance.toFixed(0)}m): found ${segmentCurves.length} curves`)
+    
     // Check for sharp curves (including chicanes with high severity)
     const hasSharpCurve = segmentCurves.some(c => {
       // Regular curve
-      if (c.severity >= 4) return true
+      if (c.severity >= 4) {
+        console.log(`    🚨 Sharp curve: severity ${c.severity} at ${c.distanceFromStart}m`)
+        return true
+      }
       // Chicane - check severity sequence
       if (c.isChicane && c.severitySequence) {
         const severities = c.severitySequence.split('-').map(Number)
-        return severities.some(s => s >= 4)
+        const maxSev = Math.max(...severities)
+        if (maxSev >= 4) {
+          console.log(`    🚨 Sharp chicane: ${c.severitySequence} (max ${maxSev}) at ${c.distanceFromStart}m`)
+          return true
+        }
       }
       return false
     })
     
     if (hasSharpCurve) {
-      console.log(`  🚨 Segment ${seg.id} has sharp curve - reclassifying from TRANSIT to SPIRITED`)
+      console.log(`  ✅ Segment ${seg.id} reclassified from TRANSIT to SPIRITED`)
       return {
         ...seg,
         character: ROUTE_CHARACTER.SPIRITED,
