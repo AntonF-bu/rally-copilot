@@ -233,21 +233,31 @@ export function useSpeech() {
       if (audioRef.current) {
         audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
         audioRef.current.volume = 0.01
-        await audioRef.current.play()
-        audioRef.current.pause()
+        try {
+          await audioRef.current.play()
+          audioRef.current.pause()
+        } catch (playErr) {
+          console.log('Audio unlock skipped:', playErr.message)
+        }
       }
       
       // Unlock speech synthesis
       if (synthRef.current) {
-        const u = new SpeechSynthesisUtterance('')
-        u.volume = 0
-        synthRef.current.speak(u)
-        setTimeout(() => synthRef.current.cancel(), 10)
+        try {
+          const u = new SpeechSynthesisUtterance('')
+          u.volume = 0
+          synthRef.current.speak(u)
+          setTimeout(() => synthRef.current?.cancel(), 10)
+        } catch (speechErr) {
+          console.log('Speech unlock skipped:', speechErr.message)
+        }
       }
       
       console.log('🔊 Audio initialized')
+      return true
     } catch (e) {
-      console.log('Audio init:', e.message)
+      console.log('Audio init error:', e.message)
+      return true // Return true anyway to not block navigation
     }
   }, [])
 
@@ -322,155 +332,168 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     return speed
   }
 
-  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  const dir = curve.direction === 'LEFT' ? 'left' : 'right'
+  const Dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
   const speed = getSpeed(curve.severity)
   const isHard = curve.severity >= 4
   const isVeryHard = curve.severity >= 5
+  
+  // Distance text
+  const distText = getDistanceText(curve.distance, speedUnit)
   
   // PHASE: EARLY WARNING (far away, heads up)
   if (phase === 'early') {
     if (curve.isChicane) {
       const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-      return `Chicane ahead, ${chicaneDir} entry`
+      return `Chicane ahead in ${distText}, starts ${chicaneDir}`
     }
     
     if (isVeryHard) {
-      return `Caution, ${dir} ${curve.severity} ahead${curve.modifier === 'HAIRPIN' ? ', hairpin' : ''}`
+      const modText = curve.modifier === 'HAIRPIN' ? 'hairpin ' : (curve.modifier === 'SHARP' ? 'sharp ' : '')
+      return `Caution ahead, ${modText}${dir} ${curve.severity} in ${distText}, prepare to slow to ${speed}`
     }
     
-    return `${dir} ${curve.severity} ahead`
+    return `${Dir} ${curve.severity} ahead in ${distText}`
   }
   
-  // PHASE: FINAL WARNING (very close, action needed)
+  // PHASE: FINAL WARNING (very close, action needed NOW)
   if (phase === 'final') {
     if (curve.isChicane) {
-      return `Chicane now`
+      const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+      return `Chicane now, ${chicaneDir}, ${getSpeed(curve.severity)}`
     }
     
-    if (isVeryHard) {
-      return `${dir} ${curve.severity} now, ${speed}`
-    }
-    
-    return `${dir} now`
+    return `${Dir} ${curve.severity} now`
   }
   
   // PHASE: MAIN CALLOUT (primary announcement with full details)
   const parts = []
-  
-  // Distance context (converted from meters to spoken form)
-  const distanceText = getDistanceText(curve.distance, speedUnit)
   
   if (curve.isChicane) {
     const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
     const maxSev = Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity]))
     const chicaneSpeed = getSpeed(maxSev)
     
-    if (distanceText) {
-      parts.push(`${distanceText}, chicane ${chicaneDir}`)
-    } else {
-      parts.push(`Chicane ${chicaneDir}`)
-    }
-    parts.push(`${curve.severitySequence}, ${chicaneSpeed} through`)
+    parts.push(`In ${distText}`)
+    parts.push(`chicane starting ${chicaneDir}`)
+    parts.push(`severity ${curve.severitySequence}`)
+    parts.push(`${chicaneSpeed} through`)
   } else {
-    // Speed warning for hard curves
+    // Braking warning for hard curves
     if (isVeryHard) {
       parts.push(`Slow to ${speed}`)
     } else if (isHard) {
-      parts.push(`Brake`)
+      parts.push(`Brake to ${speed}`)
     }
     
-    // Distance + direction + severity
-    if (distanceText) {
-      parts.push(`${distanceText}, ${dir} ${curve.severity}`)
-    } else {
-      parts.push(`${dir} ${curve.severity}`)
-    }
+    // Distance
+    parts.push(`In ${distText}`)
+    
+    // Direction and severity with description
+    const severityDesc = getSeverityDescription(curve.severity)
+    parts.push(`${dir} ${curve.severity}`)
+    parts.push(severityDesc)
     
     // Modifier details
     if (curve.modifier) {
       switch (curve.modifier) {
         case 'HAIRPIN': 
-          parts.push(`hairpin, ${getSpeed(6)}`)
+          parts.push(`hairpin turn`)
+          parts.push(`slow to ${getSpeed(6)}`)
           break
         case 'SHARP': 
-          parts.push(`sharp, ${speed - 5}`)
+          parts.push(`sharp`)
           break
         case 'LONG': 
-          parts.push(`long, hold ${speed}`)
+          parts.push(`long curve`)
+          parts.push(`hold ${speed}`)
           break
         case 'TIGHTENS':
-          parts.push(`tightens to ${getSpeed(Math.min(6, curve.severity + 1))}`)
+          parts.push(`tightens through the turn`)
+          parts.push(`exit at ${getSpeed(Math.min(6, curve.severity + 1))}`)
           break
         case 'OPENS':
-          parts.push(`opens to ${getSpeed(Math.max(1, curve.severity - 1))}`)
+          parts.push(`opens up`)
+          parts.push(`exit at ${getSpeed(Math.max(1, curve.severity - 1))}`)
           break
-        default: 
-          if (!isHard && !isVeryHard) parts.push(`${speed}`)
       }
-    } else if (!isHard && !isVeryHard) {
+    }
+    
+    // Speed if not already mentioned
+    if (!isHard && !isVeryHard && !curve.modifier) {
       parts.push(`${speed}`)
     }
   }
   
   // Next curve info (sequence awareness)
   if (nextCurve && !curve.isChicane) {
-    const dist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+    const gapDist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
     const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
     const nextSpeed = getSpeed(nextCurve.severity)
     
-    if (dist >= 0 && dist < 30) {
-      parts.push(`into ${nextDir} ${nextCurve.severity}`)
-    } else if (dist >= 0 && dist < 100) {
-      parts.push(`then ${nextDir} ${nextCurve.severity}`)
-    } else if (dist >= 0 && dist < 200) {
-      // Just mention there's more coming
-      parts.push(`more ahead`)
+    if (gapDist >= 0 && gapDist < 50) {
+      parts.push(`immediately into ${nextDir} ${nextCurve.severity}`)
+    } else if (gapDist >= 0 && gapDist < 150) {
+      parts.push(`then ${nextDir} ${nextCurve.severity} at ${nextSpeed}`)
+    } else if (gapDist >= 0 && gapDist < 300) {
+      parts.push(`followed by ${nextDir} ${nextCurve.severity}`)
     }
   }
   
-  return parts.join(', ').replace(/, ,/g, ',')
+  return parts.join(', ').replace(/, ,/g, ',').replace(/,\s*$/, '')
+}
+
+// Get severity description
+function getSeverityDescription(severity) {
+  switch(severity) {
+    case 1: return 'very gentle'
+    case 2: return 'easy'
+    case 3: return 'moderate'
+    case 4: return 'tight'
+    case 5: return 'very tight'
+    case 6: return 'extreme'
+    default: return ''
+  }
 }
 
 // Convert distance to natural speech
 function getDistanceText(distanceMeters, speedUnit = 'mph') {
-  if (!distanceMeters || distanceMeters < 0) return ''
+  if (!distanceMeters || distanceMeters < 0) return 'ahead'
   
   if (speedUnit === 'kmh') {
     // Metric
-    if (distanceMeters >= 500) {
-      return `In ${Math.round(distanceMeters / 100) * 100} meters`
+    if (distanceMeters >= 1000) {
+      const km = Math.round(distanceMeters / 100) / 10
+      return `${km} kilometers`
     } else if (distanceMeters >= 200) {
-      return `In ${Math.round(distanceMeters / 50) * 50} meters`
-    } else if (distanceMeters >= 100) {
-      return `In ${Math.round(distanceMeters / 25) * 25} meters`
+      return `${Math.round(distanceMeters / 50) * 50} meters`
+    } else if (distanceMeters >= 50) {
+      return `${Math.round(distanceMeters / 25) * 25} meters`
     }
-    return '' // Too close for distance callout
+    return `${Math.round(distanceMeters)} meters`
   } else {
-    // Imperial - convert to feet, round nicely
+    // Imperial - convert to feet
     const feet = distanceMeters * 3.28084
-    if (feet >= 1000) {
-      const tenths = Math.round(feet / 528) / 10 // Convert to tenths of a mile
-      if (tenths >= 0.2) {
-        return `In ${tenths} miles`
-      }
-      return `In ${Math.round(feet / 100) * 100} feet`
-    } else if (feet >= 300) {
-      return `In ${Math.round(feet / 100) * 100} feet`
-    } else if (feet >= 150) {
-      return `In ${Math.round(feet / 50) * 50} feet`
+    if (feet >= 2640) { // Half mile+
+      const miles = Math.round(feet / 528) / 10
+      return `${miles} miles`
+    } else if (feet >= 1000) {
+      return `${Math.round(feet / 100) * 100} feet`
+    } else if (feet >= 200) {
+      return `${Math.round(feet / 50) * 50} feet`
     }
-    return '' // Too close for distance callout
+    return `${Math.round(feet / 25) * 25} feet`
   }
 }
 
 // Generate early warning callout
-export function generateEarlyWarning(curve, mode = 'cruise') {
-  return generateCallout(curve, mode, 'mph', null, 'early')
+export function generateEarlyWarning(curve, mode = 'cruise', speedUnit = 'mph') {
+  return generateCallout(curve, mode, speedUnit, null, 'early')
 }
 
 // Generate final "NOW" callout
-export function generateFinalWarning(curve, mode = 'cruise') {
-  return generateCallout(curve, mode, 'mph', null, 'final')
+export function generateFinalWarning(curve, mode = 'cruise', speedUnit = 'mph') {
+  return generateCallout(curve, mode, speedUnit, null, 'final')
 }
 
 export function generateShortCallout(curve, mode = 'cruise') {
