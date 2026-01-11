@@ -536,8 +536,9 @@ function createCurveObject(points, headings, startIndex, endIndex, totalHeadingC
   const radius = estimateRadius(curveLength, absAngle)
   const severity = getSeverityFromRadius(radius, absAngle)
   
-  // FIXED: Determine direction from the FIRST significant heading change
-  // This ensures we announce the direction you'll turn first
+  // Determine direction from the FIRST significant heading change
+  // Positive heading change = turning RIGHT (clockwise)
+  // Negative heading change = turning LEFT (counter-clockwise)
   let entryDirection = 'RIGHT'
   if (segmentChanges && segmentChanges.length > 0) {
     // Find first significant change (>1 degree)
