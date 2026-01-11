@@ -1,12 +1,12 @@
 // ================================
-// Curve Detection Algorithm v7
-// MAXIMUM sensitivity for long wide curves
+// Curve Detection Algorithm v8
+// ULTRA sensitive for subtle road bends
 // ================================
 
-const SAMPLE_INTERVAL = 8 // meters between samples - very fine granularity
-const SLIDING_WINDOW_DISTANCE = 200 // meters for gradual curve detection - catches very wide bends
-const MIN_CURVE_SEPARATION = 50 // meters - closer curves get merged
-const CHICANE_MAX_DISTANCE = 150 // meters - max distance for S-curve/chicane detection
+const SAMPLE_INTERVAL = 8 // meters - fine granularity
+const SLIDING_WINDOW_DISTANCE = 250 // meters - very long window for gradual bends
+const MIN_CURVE_SEPARATION = 30 // meters - allow close curves
+const CHICANE_MAX_DISTANCE = 150 // meters
 
 /**
  * Main entry point - detect all curves with full analysis
@@ -132,10 +132,10 @@ function detectAllCurves(points, headings) {
 function detectSharpCurves(points, headings, usedPoints) {
   const curves = []
   
-  // ULTRA sensitivity thresholds - detect everything
-  const CURVE_START_THRESHOLD = 1.0  // Detect even 1 degree changes
-  const CURVE_CONTINUE_THRESHOLD = 0.3  // Keep tracking micro-curves
-  const MIN_CURVE_ANGLE = 5  // Capture very slight bends
+  // ULTRA sensitive - detect even slight direction changes
+  const CURVE_START_THRESHOLD = 1.5  // Start detecting at 1.5 degrees
+  const CURVE_CONTINUE_THRESHOLD = 0.5  // Continue tracking at 0.5 degrees
+  const MIN_CURVE_ANGLE = 5  // Minimum 5 degrees total to count as curve
 
   let i = 0
   while (i < headings.length - 1) {
@@ -196,12 +196,12 @@ function detectSharpCurves(points, headings, usedPoints) {
 
 /**
  * Detect gradual curves using sliding window
- * ULTRA sensitivity for even the slightest bends
+ * ULTRA sensitive for subtle road bends
  */
 function detectGradualCurves(points, headings, usedPoints) {
   const curves = []
-  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL) // 25 samples at 8m = 200m window
-  const MIN_GRADUAL_ANGLE = 5 // Detect even 5 degree changes over 200m - ULTRA sensitive
+  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL) // ~31 samples at 8m = 250m window
+  const MIN_GRADUAL_ANGLE = 4 // Detect even 4 degree changes over 250m - very subtle bends
   
   let i = 0
   while (i < headings.length - windowSize) {
@@ -210,7 +210,7 @@ function detectGradualCurves(points, headings, usedPoints) {
     for (let j = i; j < i + windowSize && !hasUsedPoint; j++) {
       if (usedPoints.has(j)) hasUsedPoint = true
     }
-    if (hasUsedPoint) { i += Math.floor(windowSize / 5); continue } // Very small skip
+    if (hasUsedPoint) { i += Math.floor(windowSize / 6); continue } // Small skip to not miss curves
     
     // Calculate total heading change over window
     let windowHeadingChange = 0
@@ -227,10 +227,10 @@ function detectGradualCurves(points, headings, usedPoints) {
       let totalChange = windowHeadingChange
       const direction = Math.sign(windowHeadingChange)
       
-      // Expand backwards - extremely sensitive
+      // Expand backwards - very sensitive
       while (curveStart > 0 && !usedPoints.has(curveStart - 1)) {
         const change = getHeadingChange(headings[curveStart - 1], headings[curveStart])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {  // Ultra sensitive
+        if (Math.sign(change) === direction && Math.abs(change) > 0.1) {
           totalChange += change
           curveStart--
         } else {
@@ -238,10 +238,10 @@ function detectGradualCurves(points, headings, usedPoints) {
         }
       }
       
-      // Expand forwards - extremely sensitive
+      // Expand forwards - very sensitive
       while (curveEnd < headings.length - 1 && !usedPoints.has(curveEnd + 1)) {
         const change = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {  // Ultra sensitive
+        if (Math.sign(change) === direction && Math.abs(change) > 0.1) {
           totalChange += change
           curveEnd++
         } else {
