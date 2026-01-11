@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import useStore from '../store'
 import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 
@@ -56,12 +56,14 @@ export default function BottomBar() {
   }, [])
 
   const handleTouchStart = (e) => {
+    e.preventDefault()
     setIsDragging(true)
     handleSliderInteraction(e.touches[0].clientX)
   }
 
   const handleTouchMove = useCallback((e) => {
     if (!isDragging) return
+    e.preventDefault()
     handleSliderInteraction(e.touches[0].clientX)
   }, [isDragging, handleSliderInteraction])
 
@@ -70,11 +72,11 @@ export default function BottomBar() {
   }, [])
 
   // Add global listeners when dragging
-  useState(() => {
+  useEffect(() => {
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove)
       window.addEventListener('mouseup', handleMouseUp)
-      window.addEventListener('touchmove', handleTouchMove)
+      window.addEventListener('touchmove', handleTouchMove, { passive: false })
       window.addEventListener('touchend', handleTouchEnd)
       return () => {
         window.removeEventListener('mousemove', handleMouseMove)
