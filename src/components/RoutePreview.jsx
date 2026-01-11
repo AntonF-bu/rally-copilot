@@ -6,7 +6,6 @@ import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
-import { addCensusSleeveAsCollection, removeCensusSleeve, getCensusLegendItems } from '../services/censusSleeveLayer'
 
 // ================================
 // Route Preview - v13
@@ -27,7 +26,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const zoneLayersRef = useRef([])
-  const sleeveLayerIdsRef = useRef([])  // NEW: Track census sleeve layers
   const [mapContainer, setMapContainer] = useState(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [mapStyle, setMapStyle] = useState('dark')
@@ -201,45 +199,21 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
 
-  // NEW: Add census sleeve when map loads after character analysis
-  useEffect(() => {
-    if (mapLoaded && mapRef.current && routeData?.coordinates?.length > 0) {
-      // Need either census tracts or route segments to render sleeve
-      const hasData = routeCharacter.censusTracts?.length > 0 || routeCharacter.segments?.length > 0
-      
-      if (hasData) {
-        console.log('🗺️ Adding census sleeve...')
-        
-        // Remove old sleeve first
-        removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)
-        
-        // Add new sleeve - pass tracts, segments, and coordinates
-        sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
-          mapRef.current,
-          routeCharacter.censusTracts || [],
-          routeCharacter.segments || [],
-          routeData.coordinates
-        )
-      }
-    }
-  }, [mapLoaded, routeCharacter.censusTracts, routeCharacter.segments, routeData?.coordinates])
-
-  // NEW: Toggle sleeve visibility
+  // Toggle sleeve visibility
   const handleToggleSleeve = useCallback(() => {
     const newVisibility = !showSleeve
     setShowSleeve(newVisibility)
     
-    // Inline toggle logic
+    // Toggle all sleeve layers
     if (mapRef.current) {
-      const visibility = newVisibility ? 'visible' : 'none'
-      try {
-        if (mapRef.current.getLayer('census-sleeve-buffer')) {
-          mapRef.current.setLayoutProperty('census-sleeve-buffer', 'visibility', visibility)
-        }
-        if (mapRef.current.getLayer('census-sleeve-outline')) {
-          mapRef.current.setLayoutProperty('census-sleeve-outline', 'visibility', visibility)
-        }
-      } catch (e) {}
+      for (let i = 0; i < 50; i++) {
+        const sleeveId = `sleeve-${i}`
+        try {
+          if (mapRef.current.getLayer(sleeveId)) {
+            mapRef.current.setLayoutProperty(sleeveId, 'visibility', newVisibility ? 'visible' : 'none')
+          }
+        } catch (e) {}
+      }
     }
   }, [showSleeve])
 
@@ -410,14 +384,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (!map || !coords?.length) return
     const segs = buildCharacterSegments(coords, characterSegments)
     segs.forEach((seg, i) => {
-      const src = `seg-${i}`, line = `line-${i}`, glow = `glow-${i}`
+      const src = `seg-${i}`, sleeve = `sleeve-${i}`, glow = `glow-${i}`, line = `line-${i}`
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
+        // Wide sleeve layer (outermost, low opacity)
+        if (showSleeve) {
+          map.addLayer({ id: sleeve, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 45, 'line-blur': 4, 'line-opacity': 0.2 } })
+        }
+        // Glow layer
         map.addLayer({ id: glow, type: 'line', source: src, paint: { 'line-color': seg.color, 'line-width': 10, 'line-blur': 6, 'line-opacity': 0.4 } })
+        // Main route line
         map.addLayer({ id: line, type: 'line', source: src, paint: { 'line-color': seg.color, 'line-width': 4 } })
       }
     })
-  }, [buildCharacterSegments])
+  }, [buildCharacterSegments, showSleeve])
 
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
@@ -442,7 +422,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
     for (let i = 0; i < 50; i++) {
-      ['line-', 'glow-'].forEach(p => { if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) })
+      ['sleeve-', 'line-', 'glow-'].forEach(p => { if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) })
       if (mapRef.current.getSource('seg-' + i)) mapRef.current.removeSource('seg-' + i)
     }
     addRoute(mapRef.current, data.coordinates, charSegs)
@@ -470,9 +450,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { 
       markersRef.current.forEach(m => m.remove())
-      removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)  // NEW: Cleanup sleeve
       zoneLayersRef.current = []
-      sleeveLayerIdsRef.current = []
       if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
       mapRef.current?.remove()
       mapRef.current = null 
@@ -560,24 +538,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         </div>
       </div>
-
-      {/* NEW: Census Density Legend - shows when sleeve is visible */}
-      {showSleeve && routeCharacter.censusTracts?.length > 0 && (
-        <div className="absolute left-3 z-20" style={{ top: '180px' }}>
-          <div className="bg-black/80 rounded-lg p-2 border border-white/10">
-            <div className="text-[9px] text-white/50 mb-1.5 uppercase tracking-wider">Density</div>
-            {getCensusLegendItems().map(item => (
-              <div key={item.category} className="flex items-center gap-2 py-0.5">
-                <div 
-                  className="w-3 h-3 rounded-sm" 
-                  style={{ backgroundColor: item.color, opacity: 0.6 }}
-                />
-                <span className="text-[10px] text-white/70">{item.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ELEVATION - Right side mini widget */}
       {elevationData.length > 0 && (
