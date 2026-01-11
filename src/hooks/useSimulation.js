@@ -2,10 +2,12 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
+import { analyzeRouteCharacter } from '../services/zoneService'
 
 // ================================
-// Simulation Hook - v3
+// Simulation Hook - v4
 // Realistic driving simulation with proper curve handling
+// Now includes route character analysis for zone-aware callouts
 // ================================
 
 // Demo route coordinates (Boston to Weston via scenic route)
@@ -57,6 +59,8 @@ export function useSimulation(enabled) {
   const initDemoRoute = useCallback(async () => {
     if (routeInitializedRef.current) return
     
+    const { setRouteZones } = useStore.getState()
+    
     try {
       const route = await getRoute(DEMO_START, DEMO_END)
       if (!route?.coordinates) {
@@ -84,6 +88,17 @@ export function useSimulation(enabled) {
         setUpcomingCurves(curves.slice(0, 5))
       }
 
+      // Analyze route character for zone-aware callouts
+      try {
+        const analysis = await analyzeRouteCharacter(route.coordinates, curves)
+        if (analysis?.segments?.length > 0) {
+          setRouteZones(analysis.segments)
+          console.log(`🎯 Demo route zones: ${analysis.segments.length} character segments`)
+        }
+      } catch (err) {
+        console.warn('Route character analysis failed:', err)
+      }
+
       console.log(`🚗 Demo route loaded: ${curves.length} curves, ${Math.round(segments.totalLength)}m`)
     } catch (err) {
       console.error('Demo route init error:', err)
@@ -103,6 +118,22 @@ export function useSimulation(enabled) {
       segmentDataRef.current = calculateSegments(routeData.coordinates)
     }
   }, [routeData?.coordinates, calculateSegments])
+
+  // Sync internal progress with external changes (from slider drag)
+  useEffect(() => {
+    // Subscribe to simulationProgress changes
+    const unsubscribe = useStore.subscribe(
+      (state) => state.simulationProgress,
+      (newProgress) => {
+        // Only sync if significantly different (slider was dragged)
+        if (Math.abs(newProgress - progressRef.current) > 0.02) {
+          progressRef.current = newProgress
+          console.log(`🎚️ Progress jumped to: ${Math.round(newProgress * 100)}%`)
+        }
+      }
+    )
+    return unsubscribe
+  }, [])
 
   // Main animation loop - REALISTIC DRIVING
   useEffect(() => {
