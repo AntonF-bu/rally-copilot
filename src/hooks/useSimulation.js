@@ -4,13 +4,13 @@ import { detectCurves } from '../utils/curveDetection'
 import { getRoute } from '../services/routeService'
 
 // ================================
-// Simulation Hook - Demo Mode v3
-// Real Mapbox route + Playback controls
+// Simulation Hook - Demo Mode v4
+// Short demo route for faster testing
 // ================================
 
-// Demo waypoints: Boston to Weston via scenic route
-const DEMO_START = [-71.0589, 42.3601] // Boston
-const DEMO_END = [-71.3012, 42.3665]   // Weston (Campion Center area)
+// Demo waypoints: Short route through Back Bay (about 2 miles with curves)
+const DEMO_START = [-71.0776, 42.3490] // Prudential Center
+const DEMO_END = [-71.1150, 42.3530]   // Near Fenway (short windy route)
 
 export function useSimulation(enabled = false) {
   const {
@@ -261,10 +261,14 @@ export function useSimulation(enabled = false) {
 
       progressRef.current += progressThisFrame
       
-      // Loop at end
+      // End trip when complete (instead of looping)
       if (progressRef.current >= 1) {
-        progressRef.current = 0
-        currentSpeedRef.current = 35
+        progressRef.current = 1
+        setSimulationProgress(1)
+        // End the trip and show summary
+        const { endTrip } = useStore.getState()
+        endTrip()
+        return // Stop animation
       }
 
       setSimulationProgress(progressRef.current)
