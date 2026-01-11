@@ -462,9 +462,8 @@ function MapStyleButton({ map, currentStyle, onStyleChange }) {
   const [isOpen, setIsOpen] = useState(false)
   
   const styles = [
-    { id: 'dark', label: 'Dark', icon: '🌙', mapbox: 'mapbox://styles/mapbox/dark-v11' },
-    { id: 'satellite', label: 'Satellite', icon: '🛰️', mapbox: 'mapbox://styles/mapbox/satellite-streets-v12' },
-    { id: 'outdoors', label: 'Terrain', icon: '🏔️', mapbox: 'mapbox://styles/mapbox/outdoors-v12' },
+    { id: 'dark', label: 'Dark', mapbox: 'mapbox://styles/mapbox/dark-v11' },
+    { id: 'satellite', label: 'Satellite', mapbox: 'mapbox://styles/mapbox/satellite-v9' },
   ]
   
   const handleStyleChange = (style) => {
@@ -474,8 +473,6 @@ function MapStyleButton({ map, currentStyle, onStyleChange }) {
     }
     setIsOpen(false)
   }
-  
-  const current = styles.find(s => s.id === currentStyle) || styles[0]
   
   if (!isOpen) {
     return (
@@ -504,7 +501,16 @@ function MapStyleButton({ map, currentStyle, onStyleChange }) {
               : 'text-white/60 hover:bg-white/10'
           }`}
         >
-          <span>{style.icon}</span>
+          {style.id === 'dark' && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          )}
+          {style.id === 'satellite' && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+            </svg>
+          )}
           <span>{style.label}</span>
         </button>
       ))}
