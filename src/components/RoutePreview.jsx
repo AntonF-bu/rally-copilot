@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
@@ -8,7 +8,7 @@ import { detectCurves } from '../utils/curveDetection'
 
 // ================================
 // Route Preview Screen
-// v5: Fixed demo route loading
+// v6: Fixed map container initialization
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -18,8 +18,8 @@ const DEMO_START = [-71.0589, 42.3601] // Boston
 const DEMO_END = [-71.3012, 42.3665]   // Weston
 
 export default function RoutePreview({ onStartNavigation, onBack }) {
-  const mapContainer = useRef(null)
   const map = useRef(null)
+  const [mapContainer, setMapContainer] = useState(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadComplete, setDownloadComplete] = useState(false)
@@ -32,6 +32,13 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+
+  // Callback ref for map container
+  const mapContainerRef = useCallback((node) => {
+    if (node !== null) {
+      setMapContainer(node)
+    }
+  }, [])
 
   // Fetch demo route on mount if demo mode
   useEffect(() => {
@@ -63,7 +70,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
         console.log(`📍 Demo route loaded: ${route.coordinates.length} points, ${curves.length} curves`)
       } else {
         setLoadError('Could not load demo route')
-        console.error('Invalid route data received')
       }
     } catch (err) {
       console.error('Failed to fetch demo route:', err)
@@ -87,12 +93,16 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     hard: routeData?.curves?.filter(c => c.severity >= 5).length || 0
   }
 
-  // Initialize map
+  // Initialize map when container AND route data are ready
   useEffect(() => {
-    if (map.current || !routeData?.coordinates) return
+    if (map.current) return
+    if (!mapContainer) return
+    if (!routeData?.coordinates) return
+
+    console.log('📍 Initializing Mapbox map...')
 
     map.current = new mapboxgl.Map({
-      container: mapContainer.current,
+      container: mapContainer,
       style: 'mapbox://styles/mapbox/dark-v11',
       center: routeData.coordinates[0],
       zoom: 10,
@@ -104,6 +114,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
     map.current.on('load', () => {
       setMapLoaded(true)
+      console.log('📍 Map loaded')
 
       map.current.addSource('route', {
         type: 'geojson',
@@ -166,10 +177,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             `
           } else {
             const isLeft = curve.direction === 'LEFT'
-            let modifierBadge = ''
-            if (curve.modifier === 'TIGHTENS') modifierBadge = '<div style="font-size:7px;color:#f97316;font-weight:700;margin-top:1px;">⟩</div>'
-            else if (curve.modifier === 'OPENS') modifierBadge = '<div style="font-size:7px;color:#22c55e;font-weight:700;margin-top:1px;">⟨</div>'
-            
             el.innerHTML = `
               <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:4px 8px;border-radius:8px;border:2px solid ${color};box-shadow:0 2px 10px ${color}40;">
                 <div style="display:flex;align-items:center;gap:2px;">
@@ -178,7 +185,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
                   </svg>
                   <span style="font-size:14px;font-weight:700;color:${color};">${curve.severity}</span>
                 </div>
-                ${modifierBadge}
               </div>
             `
           }
@@ -191,10 +197,12 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     })
 
     return () => {
-      map.current?.remove()
-      map.current = null
+      if (map.current) {
+        map.current.remove()
+        map.current = null
+      }
     }
-  }, [routeData, modeColor])
+  }, [mapContainer, routeData, modeColor])
 
   // Start navigation
   const handleStart = async () => {
@@ -220,7 +228,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   }
 
   // Show loading state while fetching demo route
-  if (isLoadingRoute || (routeMode === 'demo' && !routeData?.coordinates)) {
+  if (isLoadingRoute) {
     return (
       <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center">
@@ -252,8 +260,8 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     )
   }
 
-  // Show waiting state if no route data yet
-  if (!routeData?.coordinates) {
+  // Show waiting state if no route data yet (for demo mode)
+  if (routeMode === 'demo' && !routeData?.coordinates) {
     return (
       <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center">
@@ -264,10 +272,24 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     )
   }
 
+  // Normal routes should have data by now
+  if (!routeData?.coordinates) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
+        <div className="text-center p-6">
+          <p className="text-white text-lg font-semibold mb-2">No Route Data</p>
+          <button onClick={onBack} className="px-6 py-2 bg-white/10 rounded-lg text-white">
+            Go Back
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       {/* Map */}
-      <div ref={mapContainer} className="absolute inset-0" />
+      <div ref={mapContainerRef} className="absolute inset-0" />
 
       {/* Back Button */}
       <button
@@ -345,7 +367,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
             {routeMode === 'demo' ? 'START DEMO' : 'START NAVIGATION'}
           </button>
 
-          {/* Download for Offline - Optional */}
+          {/* Download for Offline */}
           {navigator.onLine && routeStats.curves > 0 && (
             <button
               onClick={handleDownload}
@@ -379,12 +401,12 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
         </div>
       </div>
 
-      {/* Loading Overlay */}
+      {/* Loading Overlay for map */}
       {!mapLoaded && (
         <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-30">
           <div className="text-center">
             <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" />
-            <p className="text-gray-400 text-sm">Loading route preview...</p>
+            <p className="text-gray-400 text-sm">Loading map...</p>
           </div>
         </div>
       )}
