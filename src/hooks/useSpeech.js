@@ -305,38 +305,110 @@ async function preloadRouteAudio(curves) {
   }
 }
 
-// Generate callout text from curve data
+// Generate smart callout text with speeds
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
   if (!curve) return ''
 
+  // Get recommended speed for severity
+  const getSpeed = (severity) => {
+    const baseSpeedsImperial = {
+      1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20
+    }
+    const modeMultipliers = { cruise: 0.9, fast: 1.0, race: 1.15 }
+    const multiplier = modeMultipliers[mode] || 1.0
+    const speed = Math.round((baseSpeedsImperial[severity] || 40) * multiplier)
+    
+    if (speedUnit === 'kmh') {
+      return Math.round(speed * 1.609)
+    }
+    return speed
+  }
+
   const parts = []
+  const speed = getSpeed(curve.severity)
   
   if (curve.isChicane) {
+    // Chicane/S-curve callout
     const dirWord = curve.startDirection === 'LEFT' ? 'left' : 'right'
-    parts.push(curve.chicaneType === 'CHICANE' 
-      ? `Chicane ${dirWord} ${curve.severitySequence}`
-      : `S ${dirWord} ${curve.severitySequence}`)
+    const chicaneSpeed = getSpeed(Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity])))
+    
+    if (curve.chicaneType === 'CHICANE') {
+      parts.push(`Chicane ${dirWord} ${curve.severitySequence}, ${chicaneSpeed} through`)
+    } else {
+      parts.push(`S ${dirWord} ${curve.severitySequence}, ${chicaneSpeed}`)
+    }
   } else {
+    // Standard curve
     const dirWord = curve.direction === 'LEFT' ? 'Left' : 'Right'
     parts.push(dirWord)
     parts.push(curve.severity.toString())
     
+    // Add modifier with speed implications
     if (curve.modifier) {
-      parts.push(curve.modifier.toLowerCase())
+      switch (curve.modifier) {
+        case 'HAIRPIN':
+          parts.push(`hairpin, ${getSpeed(6)}`)
+          break
+        case 'SHARP':
+          parts.push(`sharp, ${speed - 5}`)
+          break
+        case 'LONG':
+          parts.push(`long, hold ${speed}`)
+          break
+        case 'TIGHTENS':
+          // Tightening curve - give entry speed then exit speed
+          const tighterSpeed = getSpeed(Math.min(6, curve.severity + 1))
+          parts.push(`tightens, ${speed} to ${tighterSpeed}`)
+          break
+        case 'OPENS':
+          // Opening curve - can accelerate through
+          const fasterSpeed = getSpeed(Math.max(1, curve.severity - 1))
+          parts.push(`opens, ${speed} to ${fasterSpeed}`)
+          break
+        default:
+          parts.push(`, ${speed}`)
+      }
+    } else {
+      // No modifier - just add speed
+      parts.push(`, ${speed}`)
     }
   }
   
+  // Add linked curve info if present
   if (nextCurve && !curve.isChicane) {
     const distanceToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+    const nextSpeed = getSpeed(nextCurve.severity)
+    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
     
     if (distanceToNext < 30 && distanceToNext >= 0) {
-      parts.push(`into ${nextCurve.direction === 'LEFT' ? 'left' : 'right'} ${nextCurve.severity}`)
-    } else if (distanceToNext < 100 && distanceToNext >= 0) {
-      parts.push(`then ${nextCurve.direction === 'LEFT' ? 'left' : 'right'} ${nextCurve.severity}`)
+      // Very close - "into"
+      parts.push(`into ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
+    } else if (distanceToNext < 80 && distanceToNext >= 0) {
+      // Close - "then"
+      parts.push(`then ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
+    } else if (distanceToNext < 150 && distanceToNext >= 0) {
+      // Medium distance - "and"
+      parts.push(`and ${nextDir} ${nextCurve.severity}`)
     }
   }
   
   return parts.join(' ')
+}
+
+// Generate shorter callout for repeats/updates (just key info)
+export function generateShortCallout(curve, mode = 'cruise') {
+  if (!curve) return ''
+  
+  const getSpeed = (severity) => {
+    const baseSpeeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
+    const multipliers = { cruise: 0.9, fast: 1.0, race: 1.15 }
+    return Math.round((baseSpeeds[severity] || 40) * (multipliers[mode] || 1.0))
+  }
+  
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  const speed = getSpeed(curve.severity)
+  
+  return `${dir} ${curve.severity}, ${speed}`
 }
 
 export default useSpeech
