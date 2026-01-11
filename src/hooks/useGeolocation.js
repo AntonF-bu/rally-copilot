@@ -2,130 +2,190 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 
 // ================================
-// Real GPS Hook
+// Geolocation Hook - Real GPS Tracking
+// With accuracy filtering & error handling
 // ================================
 
-export function useGeolocation() {
+export function useGeolocation(enabled = false) {
   const {
-    isRunning,
-    routeMode,
     setPosition,
     setHeading,
-    setSpeed
+    setSpeed,
+    setGpsAccuracy,
+    isRunning
   } = useStore()
 
   const watchIdRef = useRef(null)
   const lastPositionRef = useRef(null)
-  const lastTimestampRef = useRef(null)
+  const lastUpdateTimeRef = useRef(0)
+  const positionHistoryRef = useRef([])
 
-  // Calculate heading from two points
-  const calculateHeading = useCallback((from, to) => {
-    const dLon = (to[0] - from[0]) * Math.PI / 180
-    const lat1 = from[1] * Math.PI / 180
-    const lat2 = to[1] * Math.PI / 180
+  // Calculate heading from position history (more stable than device heading)
+  const calculateHeading = useCallback((newPos) => {
+    const history = positionHistoryRef.current
     
-    const y = Math.sin(dLon) * Math.cos(lat2)
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+    if (history.length < 2) return null
     
-    let heading = Math.atan2(y, x) * 180 / Math.PI
-    return (heading + 360) % 360
+    // Use last few positions to calculate heading (smoother)
+    const oldPos = history[Math.max(0, history.length - 3)]
+    
+    const dLng = newPos[0] - oldPos[0]
+    const dLat = newPos[1] - oldPos[1]
+    
+    // Only calculate if we've moved enough (avoid jitter)
+    const distance = Math.sqrt(dLng * dLng + dLat * dLat) * 111000 // rough meters
+    if (distance < 5) return null
+    
+    const heading = (Math.atan2(dLng, dLat) * 180 / Math.PI + 360) % 360
+    return heading
   }, [])
 
-  // Start watching position
-  const startWatching = useCallback(() => {
-    if (!navigator.geolocation) {
-      console.error('Geolocation not supported')
+  // Handle position update
+  const handlePosition = useCallback((position) => {
+    const { latitude, longitude, accuracy, speed, heading } = position.coords
+    const now = Date.now()
+
+    // *** ACCURACY FILTER ***
+    // Ignore very inaccurate readings (common in urban areas, tunnels)
+    if (accuracy > 50) {
+      console.log(`📍 GPS update ignored - accuracy too low: ${accuracy.toFixed(0)}m`)
       return
     }
 
-    // Clear any existing watch
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current)
+    // *** THROTTLE UPDATES ***
+    // Don't update more than 4x per second
+    if (now - lastUpdateTimeRef.current < 250) {
+      return
+    }
+
+    const newPosition = [longitude, latitude]
+    
+    // *** JUMP FILTER ***
+    // If position jumped too far too fast, it's probably a GPS glitch
+    if (lastPositionRef.current) {
+      const timeDelta = (now - lastUpdateTimeRef.current) / 1000 // seconds
+      const distance = getDistance(lastPositionRef.current, newPosition)
+      const impliedSpeed = distance / timeDelta // m/s
+      
+      // If implied speed > 200 mph (89 m/s), probably a glitch
+      if (impliedSpeed > 89 && timeDelta < 5) {
+        console.log(`📍 GPS jump ignored - implied ${(impliedSpeed * 2.237).toFixed(0)} mph`)
+        return
+      }
+    }
+
+    // Update position history (keep last 10)
+    positionHistoryRef.current.push(newPosition)
+    if (positionHistoryRef.current.length > 10) {
+      positionHistoryRef.current.shift()
+    }
+
+    // Set position
+    setPosition(newPosition)
+    lastPositionRef.current = newPosition
+    lastUpdateTimeRef.current = now
+
+    // Set GPS accuracy
+    setGpsAccuracy(accuracy)
+
+    // Set speed (convert m/s to mph)
+    if (speed !== null && speed >= 0) {
+      const speedMph = speed * 2.237
+      setSpeed(speedMph)
+    }
+
+    // Set heading (prefer calculated over device heading for stability)
+    const calculatedHeading = calculateHeading(newPosition)
+    if (calculatedHeading !== null) {
+      setHeading(calculatedHeading)
+    } else if (heading !== null && !isNaN(heading)) {
+      setHeading(heading)
+    }
+
+    console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${(speed * 2.237).toFixed(0)} mph`)
+
+  }, [setPosition, setHeading, setSpeed, setGpsAccuracy, calculateHeading])
+
+  // Handle errors
+  const handleError = useCallback((error) => {
+    console.error('📍 GPS Error:', error.message)
+    
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        console.error('📍 Location permission denied')
+        // Could show UI notification here
+        break
+      case error.POSITION_UNAVAILABLE:
+        console.error('📍 Location unavailable (tunnel? airplane mode?)')
+        break
+      case error.TIMEOUT:
+        console.error('📍 Location request timed out')
+        break
+    }
+  }, [])
+
+  // Start/stop watching
+  useEffect(() => {
+    if (!enabled || !isRunning) {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current)
+        watchIdRef.current = null
+        console.log('📍 GPS tracking stopped')
+      }
+      return
+    }
+
+    if (!navigator.geolocation) {
+      console.error('📍 Geolocation not supported')
+      return
+    }
+
+    console.log('📍 Starting GPS tracking...')
+
+    // High accuracy options
+    const options = {
+      enableHighAccuracy: true,
+      maximumAge: 1000,        // Accept cached position up to 1s old
+      timeout: 10000           // Wait up to 10s for position
     }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude, heading, speed, accuracy } = position.coords
-        const timestamp = position.timestamp
-        const newPosition = [longitude, latitude]
-
-        // Update position
-        setPosition(newPosition)
-
-        // Use device heading if available, otherwise calculate from movement
-        if (heading !== null && !isNaN(heading)) {
-          setHeading(heading)
-        } else if (lastPositionRef.current) {
-          const calculatedHeading = calculateHeading(lastPositionRef.current, newPosition)
-          setHeading(calculatedHeading)
-        }
-
-        // Use device speed if available, otherwise calculate
-        if (speed !== null && !isNaN(speed) && speed >= 0) {
-          // Convert m/s to mph
-          setSpeed(speed * 2.237)
-        } else if (lastPositionRef.current && lastTimestampRef.current) {
-          // Calculate speed from distance/time
-          const timeDelta = (timestamp - lastTimestampRef.current) / 1000 // seconds
-          if (timeDelta > 0) {
-            const distance = getDistance(lastPositionRef.current, newPosition)
-            const calculatedSpeed = (distance / timeDelta) * 2.237 // m/s to mph
-            setSpeed(Math.min(calculatedSpeed, 150)) // Cap at 150mph for sanity
-          }
-        }
-
-        // Store for next calculation
-        lastPositionRef.current = newPosition
-        lastTimestampRef.current = timestamp
-
-        // Log accuracy for debugging
-        if (accuracy > 30) {
-          console.warn(`GPS accuracy low: ${accuracy}m`)
-        }
-      },
-      (error) => {
-        console.error('Geolocation error:', error.message)
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 10000
-      }
+      handlePosition,
+      handleError,
+      options
     )
-  }, [setPosition, setHeading, setSpeed, calculateHeading])
 
-  // Stop watching
-  const stopWatching = useCallback(() => {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current)
-      watchIdRef.current = null
+    // Also get immediate position
+    navigator.geolocation.getCurrentPosition(
+      handlePosition,
+      handleError,
+      options
+    )
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current)
+        watchIdRef.current = null
+        console.log('📍 GPS tracking stopped')
+      }
     }
-    lastPositionRef.current = null
-    lastTimestampRef.current = null
-  }, [])
+  }, [enabled, isRunning, handlePosition, handleError])
 
-  // Auto start/stop based on running state and mode
+  // Clear history on stop
   useEffect(() => {
-    const isRealGpsMode = routeMode === 'lookahead' || routeMode === 'destination' || routeMode === 'imported'
-    
-    if (isRunning && isRealGpsMode) {
-      startWatching()
-    } else {
-      stopWatching()
+    if (!isRunning) {
+      positionHistoryRef.current = []
+      lastPositionRef.current = null
+      lastUpdateTimeRef.current = 0
     }
+  }, [isRunning])
 
-    return () => stopWatching()
-  }, [isRunning, routeMode, startWatching, stopWatching])
-
-  return {
-    startWatching,
-    stopWatching
-  }
+  return null
 }
 
-// Helper: Calculate distance between two points in meters
+// Helper: Calculate distance between two coordinates in meters
 function getDistance(pos1, pos2) {
-  const R = 6371e3
+  const R = 6371e3 // Earth radius in meters
   const φ1 = pos1[1] * Math.PI / 180
   const φ2 = pos2[1] * Math.PI / 180
   const Δφ = (pos2[1] - pos1[1]) * Math.PI / 180
