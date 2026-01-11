@@ -172,9 +172,9 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
           'rural', SLEEVE_COLORS.rural,
           SLEEVE_COLORS.unknown
         ],
-        'fill-opacity': 0.2
+        'fill-opacity': 0.25
       }
-    }, 'road-label')
+    })
 
     // Add outline layer
     map.addLayer({
@@ -191,10 +191,10 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
           SLEEVE_COLORS.unknown
         ],
         'line-width': 2,
-        'line-opacity': 0.6,
+        'line-opacity': 0.7,
         'line-dasharray': [4, 2]
       }
-    }, 'road-label')
+    })
 
     return [sourceId, fillId, outlineId]
 
