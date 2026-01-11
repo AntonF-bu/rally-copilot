@@ -21,7 +21,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, cached: 0 })
   
   const { routeData, mode } = useStore()
-  const { preloadRouteAudio, getCacheStatus } = useSpeech()
+  const { preloadRouteAudio, getCacheStatus, initAudio } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -175,12 +175,15 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   }
 
   // Start navigation (with or without download)
-  const handleStart = () => {
+  const handleStart = async () => {
+    // Initialize audio on user interaction (required for iOS)
+    await initAudio()
     onStartNavigation()
   }
 
   // Skip download and start anyway
-  const handleSkipAndStart = () => {
+  const handleSkipAndStart = async () => {
+    await initAudio()
     onStartNavigation()
   }
 
