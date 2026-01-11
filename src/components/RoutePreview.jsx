@@ -6,7 +6,7 @@ import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
-import { addCensusSleeveAsCollection, removeCensusSleeve, toggleSleeveVisibility, getCensusLegendItems } from '../services/censusSleeveLayer'
+import { addCensusSleeveAsCollection, removeCensusSleeve, getCensusLegendItems } from '../services/censusSleeveLayer'
 
 // ================================
 // Route Preview - v13
@@ -228,7 +228,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const handleToggleSleeve = useCallback(() => {
     const newVisibility = !showSleeve
     setShowSleeve(newVisibility)
-    toggleSleeveVisibility(mapRef.current, newVisibility)
+    
+    // Inline toggle logic
+    if (mapRef.current) {
+      const visibility = newVisibility ? 'visible' : 'none'
+      try {
+        if (mapRef.current.getLayer('census-sleeve-buffer')) {
+          mapRef.current.setLayoutProperty('census-sleeve-buffer', 'visibility', visibility)
+        }
+        if (mapRef.current.getLayer('census-sleeve-outline')) {
+          mapRef.current.setLayoutProperty('census-sleeve-outline', 'visibility', visibility)
+        }
+      } catch (e) {}
+    }
   }, [showSleeve])
 
   const fetchDemoRoute = async () => {
