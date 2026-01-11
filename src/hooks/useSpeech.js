@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook - Simple & Working
-// ElevenLabs with native fallback
-// Voice ID: puLAe8o1npIDg434vYZp
+// Speech Hook - iOS Fixed
+// Native speech with timeout fallback
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
+const AUDIO_CACHE = new Map()
 
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
@@ -18,31 +18,30 @@ export function useSpeech() {
   const lastSpokenRef = useRef(null)
   const lastSpokenTimeRef = useRef(0)
   const isPlayingRef = useRef(false)
+  const timeoutRef = useRef(null)
 
   // Initialize on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create audio element with iOS-friendly settings
+    // Create audio element
     const audio = new Audio()
     audio.playsInline = true
-    audio.setAttribute('playsinline', 'true')
-    audio.setAttribute('webkit-playsinline', 'true')
-    
-    audio.addEventListener('ended', () => {
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    })
-    
-    audio.addEventListener('error', (e) => {
-      console.error('Audio error:', e)
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    })
-    
     audioRef.current = audio
 
-    // Native speech synthesis fallback
+    audio.onended = () => {
+      clearTimeout(timeoutRef.current)
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+    }
+    
+    audio.onerror = () => {
+      clearTimeout(timeoutRef.current)
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+    }
+
+    // Native speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -50,12 +49,12 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
         
-        // Find a good English voice
-        const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava', 'Tom']
+        const preferred = ['Samantha', 'Daniel', 'Karen', 'Alex', 'Ava']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
             voiceRef.current = found
+            console.log('🔊 Voice selected:', found.name)
             break
           }
         }
@@ -65,76 +64,104 @@ export function useSpeech() {
       }
 
       loadVoices()
-      if (synthRef.current.onvoiceschanged !== undefined) {
-        synthRef.current.onvoiceschanged = loadVoices
-      }
+      synthRef.current.onvoiceschanged = loadVoices
+      
+      // iOS hack: voices may not load immediately
+      setTimeout(loadVoices, 100)
+      setTimeout(loadVoices, 500)
     }
 
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
+      clearTimeout(timeoutRef.current)
+      audioRef.current?.pause()
       synthRef.current?.cancel()
     }
   }, [setSpeaking])
 
-  // Native speech (reliable fallback)
+  // Clear speaking state after timeout (iOS safety)
+  const setSpeakingWithTimeout = useCallback((speaking, text, duration = 5000) => {
+    clearTimeout(timeoutRef.current)
+    setSpeaking(speaking, text)
+    
+    if (speaking) {
+      // Auto-clear after timeout in case events don't fire (iOS issue)
+      timeoutRef.current = setTimeout(() => {
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      }, duration)
+    }
+  }, [setSpeaking])
+
+  // Native speech
   const speakNative = useCallback((text) => {
-    if (!synthRef.current) return false
+    if (!synthRef.current) {
+      console.log('🔊 No speech synthesis available')
+      return false
+    }
 
     try {
+      // Cancel any ongoing speech
       synthRef.current.cancel()
+      
+      // iOS fix: need small delay after cancel
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(text)
+        
+        if (voiceRef.current) {
+          utterance.voice = voiceRef.current
+        }
+        utterance.rate = 1.0
+        utterance.pitch = 1.0
+        utterance.volume = settings.volume || 1.0
 
-      const utterance = new SpeechSynthesisUtterance(text)
-      if (voiceRef.current) {
-        utterance.voice = voiceRef.current
-      }
-      utterance.rate = 1.0
-      utterance.pitch = 1.0
-      utterance.volume = settings.volume || 1.0
+        utterance.onstart = () => {
+          console.log('🔊 Speaking:', text)
+        }
+        
+        utterance.onend = () => {
+          clearTimeout(timeoutRef.current)
+          isPlayingRef.current = false
+          setSpeaking(false, '')
+        }
+        
+        utterance.onerror = (e) => {
+          console.log('🔊 Speech error:', e.error)
+          clearTimeout(timeoutRef.current)
+          isPlayingRef.current = false
+          setSpeaking(false, '')
+        }
 
-      utterance.onstart = () => {
-        isPlayingRef.current = true
-        setSpeaking(true, text)
-      }
-      utterance.onend = () => {
-        isPlayingRef.current = false
-        setSpeaking(false, '')
-      }
-      utterance.onerror = () => {
-        isPlayingRef.current = false
-        setSpeaking(false, '')
-      }
+        synthRef.current.speak(utterance)
+      }, 10)
 
-      synthRef.current.speak(utterance)
+      isPlayingRef.current = true
+      setSpeakingWithTimeout(true, text, 5000)
       return true
     } catch (err) {
       console.error('Native speech error:', err)
       return false
     }
-  }, [setSpeaking, settings.volume])
+  }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
-  // ElevenLabs TTS (checks cache first)
+  // ElevenLabs TTS
   const speakElevenLabs = useCallback(async (text) => {
-    // Check cache first (for offline support)
+    // Check cache
     if (AUDIO_CACHE.has(text)) {
       try {
         audioRef.current.src = AUDIO_CACHE.get(text)
         audioRef.current.volume = settings.volume || 1.0
         isPlayingRef.current = true
-        setSpeaking(true, text)
+        setSpeakingWithTimeout(true, text, 5000)
         await audioRef.current.play()
         return true
       } catch (err) {
         console.error('Cache playback error:', err)
+        isPlayingRef.current = false
+        setSpeaking(false, '')
       }
     }
 
-    // Can't fetch if offline
-    if (!navigator.onLine) {
-      return false
-    }
+    if (!navigator.onLine) return false
 
     try {
       const response = await fetch('/api/tts', {
@@ -143,26 +170,19 @@ export function useSpeech() {
         body: JSON.stringify({ text, voiceId: ELEVENLABS_VOICE_ID }),
       })
 
-      if (!response.ok) {
-        console.error('TTS API error:', response.status)
-        return false
-      }
+      if (!response.ok) return false
 
       const blob = await response.blob()
-      if (blob.size < 500) {
-        return false
-      }
+      if (blob.size < 500) return false
 
       const audioUrl = URL.createObjectURL(blob)
-      
-      // Cache for future use
       AUDIO_CACHE.set(text, audioUrl)
       
       audioRef.current.src = audioUrl
       audioRef.current.volume = settings.volume || 1.0
       
       isPlayingRef.current = true
-      setSpeaking(true, text)
+      setSpeakingWithTimeout(true, text, 5000)
       
       await audioRef.current.play()
       return true
@@ -172,7 +192,7 @@ export function useSpeech() {
       setSpeaking(false, '')
       return false
     }
-  }, [setSpeaking, settings.volume])
+  }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
   // Main speak function
   const speak = useCallback(async (text, priority = 'normal') => {
@@ -180,182 +200,125 @@ export function useSpeech() {
 
     const now = Date.now()
     
-    // Don't repeat same callout within 2 seconds
+    // Don't repeat within 2 seconds
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 2000) {
       return false
     }
 
     // Handle priority
     if (priority === 'high') {
+      clearTimeout(timeoutRef.current)
       audioRef.current?.pause()
       synthRef.current?.cancel()
       isPlayingRef.current = false
-    } else if (isPlayingRef.current || synthRef.current?.speaking) {
+    } else if (isPlayingRef.current) {
       return false
     }
 
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Detect iOS
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    // Try native speech (most reliable on iOS)
+    const nativeSuccess = speakNative(text)
+    if (nativeSuccess) return true
     
-    if (isIOS) {
-      // On iOS, native speech is more reliable
-      // Try native first, ElevenLabs as backup
-      const nativeSuccess = speakNative(text)
-      if (nativeSuccess) return true
-      
-      // Fallback to ElevenLabs if native fails
-      return await speakElevenLabs(text)
-    } else {
-      // On desktop/Android, try ElevenLabs first for better voice
-      const success = await speakElevenLabs(text)
-      if (success) return true
+    // Fallback to ElevenLabs
+    return await speakElevenLabs(text)
+  }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
-      // Fallback to native
-      return speakNative(text)
+  // Initialize audio (call from user interaction)
+  const initAudio = useCallback(async () => {
+    try {
+      // Unlock audio context
+      if (audioRef.current) {
+        audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
+        audioRef.current.volume = 0.01
+        await audioRef.current.play()
+        audioRef.current.pause()
+      }
+      
+      // Unlock speech synthesis
+      if (synthRef.current) {
+        const u = new SpeechSynthesisUtterance('')
+        u.volume = 0
+        synthRef.current.speak(u)
+        setTimeout(() => synthRef.current.cancel(), 10)
+      }
+      
+      console.log('🔊 Audio initialized')
+    } catch (e) {
+      console.log('Audio init:', e.message)
     }
-  }, [settings.voiceEnabled, speakElevenLabs, speakNative])
+  }, [])
 
   const stop = useCallback(() => {
+    clearTimeout(timeoutRef.current)
     audioRef.current?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
   }, [setSpeaking])
 
-  const isSpeaking = useCallback(() => {
-    return isPlayingRef.current || (synthRef.current?.speaking ?? false)
-  }, [])
-
-  // Initialize audio on user tap (REQUIRED for iOS)
-  // Must be called from a user interaction like button tap
-  const initAudio = useCallback(async () => {
-    if (!audioRef.current) return
-    
-    try {
-      // iOS requires playing audio from a user gesture to unlock
-      // Create a short silent audio and play it
-      audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
-      audioRef.current.volume = 0.01
-      await audioRef.current.play()
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-      audioRef.current.volume = 1.0
-      console.log('🔊 iOS audio unlocked')
-      
-      // Also try to unlock speech synthesis
-      if (synthRef.current) {
-        const utterance = new SpeechSynthesisUtterance('')
-        utterance.volume = 0
-        synthRef.current.speak(utterance)
-        synthRef.current.cancel()
-      }
-    } catch (e) {
-      console.log('Audio init error (may be ok):', e.message)
-    }
-  }, [])
+  const isSpeaking = useCallback(() => isPlayingRef.current, [])
 
   return { speak, stop, isSpeaking, initAudio, preloadRouteAudio }
 }
 
-// Audio cache for offline use
-const AUDIO_CACHE = new Map()
-
-// Preload callouts for a route (for offline use)
+// Preload for offline
 async function preloadRouteAudio(curves) {
-  if (!curves || curves.length === 0) {
+  if (!curves?.length || !navigator.onLine) {
     return { success: true, cached: 0, total: 0 }
   }
 
-  if (!navigator.onLine) {
-    return { success: false, cached: 0, total: 0 }
-  }
-
   const callouts = new Set()
-
-  // Generate callouts for each curve
   curves.forEach(curve => {
     if (curve.isChicane) {
       const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-      callouts.add(curve.chicaneType === 'CHICANE' 
-        ? `Chicane ${dir} ${curve.severitySequence}`
-        : `S ${dir} ${curve.severitySequence}`)
+      callouts.add(`Chicane ${dir} ${curve.severitySequence}`)
     } else {
       const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
       callouts.add(`${dir} ${curve.severity}`)
-      
       if (curve.modifier) {
         callouts.add(`${dir} ${curve.severity} ${curve.modifier.toLowerCase()}`)
       }
     }
   })
 
-  const calloutList = Array.from(callouts)
-  console.log(`🎤 Pre-loading ${calloutList.length} callouts...`)
-
+  const list = Array.from(callouts)
   let cached = 0
-  let failed = 0
 
-  for (const text of calloutList) {
-    if (AUDIO_CACHE.has(text)) {
-      cached++
-      continue
-    }
-
+  for (const text of list) {
+    if (AUDIO_CACHE.has(text)) { cached++; continue }
+    
     try {
-      const response = await fetch('/api/tts', {
+      const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: 'puLAe8o1npIDg374vYZp' }),
+        body: JSON.stringify({ text, voiceId: ELEVENLABS_VOICE_ID }),
       })
-
-      if (response.ok) {
-        const blob = await response.blob()
+      if (res.ok) {
+        const blob = await res.blob()
         if (blob.size > 500) {
           AUDIO_CACHE.set(text, URL.createObjectURL(blob))
           cached++
-        } else {
-          failed++
         }
-      } else {
-        failed++
       }
-    } catch (err) {
-      failed++
-    }
-
-    // Small delay between requests
+    } catch (e) {}
     await new Promise(r => setTimeout(r, 100))
   }
 
-  console.log(`🎤 Cached ${cached}/${calloutList.length} callouts`)
-  
-  return { 
-    success: cached > 0, 
-    cached, 
-    total: calloutList.length, 
-    failed 
-  }
+  return { success: cached > 0, cached, total: list.length }
 }
 
-// Generate smart callout text with speeds
+// Generate callout with speeds
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
   if (!curve) return ''
 
-  // Get recommended speed for severity
   const getSpeed = (severity) => {
-    const baseSpeedsImperial = {
-      1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20
-    }
-    const modeMultipliers = { cruise: 0.9, fast: 1.0, race: 1.15 }
-    const multiplier = modeMultipliers[mode] || 1.0
-    const speed = Math.round((baseSpeedsImperial[severity] || 40) * multiplier)
-    
-    if (speedUnit === 'kmh') {
-      return Math.round(speed * 1.609)
-    }
+    const speeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
+    const mult = { cruise: 0.9, fast: 1.0, race: 1.15 }
+    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 1.0))
+    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
     return speed
   }
 
@@ -363,86 +326,52 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   const speed = getSpeed(curve.severity)
   
   if (curve.isChicane) {
-    // Chicane/S-curve callout
-    const dirWord = curve.startDirection === 'LEFT' ? 'left' : 'right'
-    const chicaneSpeed = getSpeed(Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity])))
-    
-    if (curve.chicaneType === 'CHICANE') {
-      parts.push(`Chicane ${dirWord} ${curve.severitySequence}, ${chicaneSpeed} through`)
-    } else {
-      parts.push(`S ${dirWord} ${curve.severitySequence}, ${chicaneSpeed}`)
-    }
+    const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+    const maxSev = Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity]))
+    parts.push(`Chicane ${dir} ${curve.severitySequence}, ${getSpeed(maxSev)} through`)
   } else {
-    // Standard curve
-    const dirWord = curve.direction === 'LEFT' ? 'Left' : 'Right'
-    parts.push(dirWord)
-    parts.push(curve.severity.toString())
+    const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+    parts.push(`${dir} ${curve.severity}`)
     
-    // Add modifier with speed implications
     if (curve.modifier) {
       switch (curve.modifier) {
-        case 'HAIRPIN':
-          parts.push(`hairpin, ${getSpeed(6)}`)
-          break
-        case 'SHARP':
-          parts.push(`sharp, ${speed - 5}`)
-          break
-        case 'LONG':
-          parts.push(`long, hold ${speed}`)
-          break
+        case 'HAIRPIN': parts.push(`hairpin, ${getSpeed(6)}`); break
+        case 'SHARP': parts.push(`sharp, ${speed - 5}`); break
+        case 'LONG': parts.push(`long, hold ${speed}`); break
         case 'TIGHTENS':
-          // Tightening curve - give entry speed then exit speed
-          const tighterSpeed = getSpeed(Math.min(6, curve.severity + 1))
-          parts.push(`tightens, ${speed} to ${tighterSpeed}`)
+          parts.push(`tightens, ${speed} to ${getSpeed(Math.min(6, curve.severity + 1))}`)
           break
         case 'OPENS':
-          // Opening curve - can accelerate through
-          const fasterSpeed = getSpeed(Math.max(1, curve.severity - 1))
-          parts.push(`opens, ${speed} to ${fasterSpeed}`)
+          parts.push(`opens, ${speed} to ${getSpeed(Math.max(1, curve.severity - 1))}`)
           break
-        default:
-          parts.push(`, ${speed}`)
+        default: parts.push(`, ${speed}`)
       }
     } else {
-      // No modifier - just add speed
       parts.push(`, ${speed}`)
     }
   }
   
-  // Add linked curve info if present
   if (nextCurve && !curve.isChicane) {
-    const distanceToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
-    const nextSpeed = getSpeed(nextCurve.severity)
+    const dist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
     const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+    const nextSpeed = getSpeed(nextCurve.severity)
     
-    if (distanceToNext < 30 && distanceToNext >= 0) {
-      // Very close - "into"
+    if (dist >= 0 && dist < 30) {
       parts.push(`into ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
-    } else if (distanceToNext < 80 && distanceToNext >= 0) {
-      // Close - "then"
+    } else if (dist >= 0 && dist < 80) {
       parts.push(`then ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
-    } else if (distanceToNext < 150 && distanceToNext >= 0) {
-      // Medium distance - "and"
-      parts.push(`and ${nextDir} ${nextCurve.severity}`)
     }
   }
   
   return parts.join(' ')
 }
 
-// Generate shorter callout for repeats/updates (just key info)
 export function generateShortCallout(curve, mode = 'cruise') {
   if (!curve) return ''
-  
-  const getSpeed = (severity) => {
-    const baseSpeeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
-    const multipliers = { cruise: 0.9, fast: 1.0, race: 1.15 }
-    return Math.round((baseSpeeds[severity] || 40) * (multipliers[mode] || 1.0))
-  }
-  
+  const speeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
+  const mult = { cruise: 0.9, fast: 1.0, race: 1.15 }
+  const speed = Math.round((speeds[curve.severity] || 40) * (mult[mode] || 1.0))
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-  const speed = getSpeed(curve.severity)
-  
   return `${dir} ${curve.severity}, ${speed}`
 }
 
