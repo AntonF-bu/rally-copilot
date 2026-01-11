@@ -129,6 +129,78 @@ export function parseGoogleMapsUrl(url) {
     
     console.log('Decoded URL:', decodedUrl)
 
+    // Format 0: saddr/daddr format (older Google Maps format)
+    // Example: ?saddr=42.3528913,-71.0756559&daddr=Campion+Center...
+    const saddrMatch = decodedUrl.match(/[?&]saddr=([^&]+)/)
+    const daddrMatch = decodedUrl.match(/[?&]daddr=([^&]+)/)
+    
+    if (saddrMatch || daddrMatch) {
+      console.log('Found saddr/daddr format')
+      
+      let originStr = saddrMatch ? saddrMatch[1].replace(/\+/g, ' ') : null
+      let destStr = daddrMatch ? daddrMatch[1].replace(/\+/g, ' ') : null
+      
+      // daddr can have multiple destinations with "to:" separator
+      // Example: daddr=Place1+to:42.123,-71.456+to:Place2
+      if (destStr && destStr.includes(' to:')) {
+        const parts = destStr.split(/\s+to:/)
+        // Take the first destination for now (could support waypoints later)
+        destStr = parts[0]
+        console.log('Multiple destinations, using first:', destStr)
+      }
+      
+      console.log('saddr:', originStr, 'daddr:', destStr)
+      
+      const originCoords = originStr ? parseCoordinateString(originStr) : null
+      const destCoords = destStr ? parseCoordinateString(destStr) : null
+      
+      // Both are coordinates
+      if (originCoords && destCoords) {
+        console.log('Both are coordinates')
+        return { coordinates: [originCoords, destCoords] }
+      }
+      
+      // Origin is coordinates, destination needs geocoding
+      if (originCoords && destStr && !destCoords) {
+        console.log('Origin is coords, dest needs geocoding')
+        return {
+          originCoordinates: originCoords,
+          needsGeocoding: true,
+          destination: destStr
+        }
+      }
+      
+      // Destination is coordinates, origin needs geocoding or use current location
+      if (destCoords && (!originStr || !originCoords)) {
+        console.log('Dest is coords, need origin')
+        return {
+          coordinates: [destCoords],
+          needsOrigin: !originStr,
+          destinationCoordinates: destCoords,
+          needsGeocoding: !!originStr && !originCoords,
+          origin: originStr
+        }
+      }
+      
+      // Both need geocoding
+      if (originStr && destStr) {
+        console.log('Both need geocoding')
+        return {
+          needsGeocoding: true,
+          origin: originStr,
+          destination: destStr
+        }
+      }
+      
+      // Just destination
+      if (destStr) {
+        return {
+          needsGeocoding: true,
+          destination: destStr
+        }
+      }
+    }
+
     // Format 1: /dir/origin/destination (most common from sharing)
     // Example: /dir/42.3528330,-71.0755902/Campion+Center,+319+Concord+Rd,+Weston,+MA+02493
     const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@?]+)/)
