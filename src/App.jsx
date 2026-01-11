@@ -3,7 +3,7 @@ import useStore from './store'
 import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useRouteAnalysis } from './hooks/useRouteAnalysis'
-import { useSpeech, generateCallout, generateEarlyWarning, generateFinalWarning } from './hooks/useSpeech'
+import { useSpeech, generateCallout, generateEarlyWarning, generateFinalWarning, generateStraightCallout, generatePostCurveCallout } from './hooks/useSpeech'
 
 // Components
 import Map from './components/Map'
@@ -15,8 +15,8 @@ import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
 
 // ================================
-// Rally Co-Pilot App - v8
-// Progressive callouts: early, main, final
+// Rally Co-Pilot App - v9
+// Progressive callouts + straight sections
 // ================================
 
 export default function App() {
@@ -43,7 +43,9 @@ export default function App() {
   const earlyWarningsRef = useRef(new Set())   // Early "heads up" given
   const mainCalloutsRef = useRef(new Set())    // Main callout given
   const finalWarningsRef = useRef(new Set())   // Final "NOW" given
+  const straightCalledRef = useRef(new Set())  // Straight sections announced
   const lastCalloutTimeRef = useRef(0)
+  const lastCurvePassedRef = useRef(null)      // Track last curve we passed for post-curve callouts
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -57,6 +59,8 @@ export default function App() {
     earlyWarningsRef.current = new Set()
     mainCalloutsRef.current = new Set()
     finalWarningsRef.current = new Set()
+    straightCalledRef.current = new Set()
+    lastCurvePassedRef.current = null
     lastCalloutTimeRef.current = Date.now()
   }, [routeMode, routeData])
 
@@ -188,6 +192,23 @@ export default function App() {
         mainCalloutsRef.current.add(secondCurve.id)
         setLastAnnouncedCurveId(secondCurve.id)
         lastCalloutTimeRef.current = now
+        return
+      }
+    }
+
+    // STRAIGHT SECTION CALLOUT
+    // If next curve is far away and we haven't announced this straight yet
+    if (distance > 400 && !straightCalledRef.current.has(`straight-${curveId}`)) {
+      // Check if we just passed a curve (transition to straight)
+      const straightDistance = distance - 50 // Account for being past the last curve
+      
+      if (straightDistance >= 300) {
+        const callout = generateStraightCallout(straightDistance, mode, settings.speedUnit, nextCurve)
+        console.log('🔊 STRAIGHT:', callout)
+        speak(callout, 'normal')
+        
+        straightCalledRef.current.add(`straight-${curveId}`)
+        lastCalloutTimeRef.current = now
       }
     }
 
@@ -207,6 +228,14 @@ export default function App() {
         }
       })
     })
+    
+    // Clean up straight callouts for passed curves
+    straightCalledRef.current.forEach(key => {
+      const curveId = parseInt(key.split('-')[1])
+      if (!upcomingIds.has(curveId)) {
+        straightCalledRef.current.delete(key)
+      }
+    })
   }, [isRunning, upcomingCurves])
 
   // Handle starting navigation from preview
@@ -214,6 +243,7 @@ export default function App() {
     earlyWarningsRef.current = new Set()
     mainCalloutsRef.current = new Set()
     finalWarningsRef.current = new Set()
+    straightCalledRef.current = new Set()
     goToDriving()
   }
 
