@@ -5,11 +5,11 @@ import { getCurveColor } from '../data/routes'
 import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
-import { detectZones, ZONE_COLORS } from '../services/zoneService'
+import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 
 // ================================
-// Route Preview - v11
-// With zone detection and edit route button
+// Route Preview - v12
+// With smart route character detection
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -36,7 +36,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [selectedCurve, setSelectedCurve] = useState(null)
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
-  const [showZones, setShowZones] = useState(true)
   
   // Fly-through state
   const [isFlying, setIsFlying] = useState(false)
@@ -51,11 +50,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   
   const fetchedRef = useRef(false)
   const elevationFetchedRef = useRef(false)
-  const zonesFetchedRef = useRef(false)
+  const characterFetchedRef = useRef(false)
   
-  // Zone state
-  const [zones, setZones] = useState([])
-  const [isLoadingZones, setIsLoadingZones] = useState(false)
+  // Route character state (replaces zones)
+  const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null })
+  const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
   
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
@@ -167,29 +166,28 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData?.coordinates, fetchElevationData])
 
-  // Fetch zones
-  const fetchZones = useCallback(async (coordinates) => {
-    if (!coordinates?.length || coordinates.length < 2 || zonesFetchedRef.current) return
-    zonesFetchedRef.current = true
-    setIsLoadingZones(true)
+  // Fetch route character analysis
+  const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
+    if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
+    characterFetchedRef.current = true
+    setIsLoadingCharacter(true)
     
     try {
-      const allOverrides = [...(globalZoneOverrides || []), ...(routeZoneOverrides || [])]
-      const detectedZones = await detectZones(coordinates, allOverrides)
-      setZones(detectedZones)
-      setRouteZones(detectedZones)
+      const analysis = await analyzeRouteCharacter(coordinates, curves || [])
+      setRouteCharacter(analysis)
+      setRouteZones(analysis.segments) // Store in global state too
     } catch (err) {
-      console.error('Zone detection error:', err)
+      console.error('Route character analysis error:', err)
     } finally {
-      setIsLoadingZones(false)
+      setIsLoadingCharacter(false)
     }
-  }, [globalZoneOverrides, routeZoneOverrides, setRouteZones])
+  }, [setRouteZones])
 
   useEffect(() => {
-    if (routeData?.coordinates?.length > 0 && !zonesFetchedRef.current) {
-      fetchZones(routeData.coordinates)
+    if (routeData?.coordinates?.length > 0 && !characterFetchedRef.current) {
+      fetchRouteCharacter(routeData.coordinates, routeData.curves)
     }
-  }, [routeData?.coordinates, fetchZones])
+  }, [routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
 
   const fetchDemoRoute = async () => {
     setIsLoadingRoute(true)
@@ -396,92 +394,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     addMarkers(mapRef.current, data.curves, data.coordinates)
   }, [routeData, addRoute, addMarkers])
 
-  // Add zone overlays to map
-  const addZoneOverlays = useCallback((map, zonesToRender) => {
-    if (!map || !zonesToRender?.length) return
-    
-    // Remove existing zone layers
-    zoneLayersRef.current.forEach(id => {
-      try {
-        if (map.getLayer(id)) map.removeLayer(id)
-        if (map.getSource(id)) map.removeSource(id)
-      } catch (e) {}
-    })
-    zoneLayersRef.current = []
-    
-    zonesToRender.forEach((zone, i) => {
-      if (!zone.coordinates?.length || zone.coordinates.length < 2) return
-      
-      const colors = ZONE_COLORS[zone.type] || ZONE_COLORS.rural
-      const sourceId = `zone-src-${i}`
-      const fillId = `zone-fill-${i}`
-      const lineId = `zone-line-${i}`
-      
-      // Create buffer polygon around route segment (bigger buffer)
-      const bufferCoords = createRouteBuffer(zone.coordinates, 0.001)
-      if (bufferCoords.length < 4) return
-      
-      try {
-        map.addSource(sourceId, {
-          type: 'geojson',
-          data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [bufferCoords] } }
-        })
-        
-        // Add zone fill layer (no before reference - goes to bottom)
-        map.addLayer({
-          id: fillId,
-          type: 'fill',
-          source: sourceId,
-          paint: { 'fill-color': colors.label, 'fill-opacity': 0.15 }
-        })
-        
-        // Add zone border
-        map.addLayer({
-          id: lineId,
-          type: 'line',
-          source: sourceId,
-          paint: { 'line-color': colors.border, 'line-width': 2, 'line-dasharray': [4, 3], 'line-opacity': 0.7 }
-        })
-        
-        zoneLayersRef.current.push(sourceId, fillId, lineId)
-        console.log(`✓ Added zone overlay: ${zone.type} (${zone.coordinates.length} coords)`)
-      } catch (err) {
-        console.log('Zone layer error:', err.message)
-      }
-    })
-  }, [])
-
-  // Create buffer polygon around route
-  const createRouteBuffer = (coords, bufferSize) => {
-    if (!coords?.length || coords.length < 2) return []
-    const left = [], right = []
-    
-    for (let i = 0; i < coords.length; i++) {
-      const curr = coords[i]
-      const next = coords[i + 1] || coords[i]
-      const prev = coords[i - 1] || coords[i]
-      
-      const dx = next[0] - prev[0]
-      const dy = next[1] - prev[1]
-      const len = Math.sqrt(dx * dx + dy * dy) || 1
-      
-      const perpX = -dy / len * bufferSize
-      const perpY = dx / len * bufferSize
-      
-      left.push([curr[0] + perpX, curr[1] + perpY])
-      right.push([curr[0] - perpX, curr[1] - perpY])
-    }
-    
-    return [...left, ...right.reverse(), left[0]]
-  }
-
-  // Render zones when they change
-  useEffect(() => {
-    if (mapLoaded && mapRef.current && zones.length > 0 && showZones) {
-      // Wait for route to be added first
-      setTimeout(() => addZoneOverlays(mapRef.current, zones), 100)
-    }
-  }, [mapLoaded, zones, showZones, addZoneOverlays])
+  // Route character segments are now displayed via UI badges, not map overlays
+  // This keeps the map cleaner and the character analysis more accurate
 
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
@@ -612,31 +526,61 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
       {/* BOTTOM BAR - Compact */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
-        {/* Zone indicator */}
-        {zones.length > 0 && (
-          <div className="flex items-center justify-between mb-2">
-            <button 
-              onClick={() => setShowZones(!showZones)}
-              className={`flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-all ${showZones ? 'bg-white/10 text-white' : 'bg-transparent text-white/40'}`}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <path d="M3 12h18M12 3v18"/>
-              </svg>
-              {zones.length} zones
-              {isLoadingZones && <span className="text-white/30">(loading)</span>}
-            </button>
-            <div className="flex gap-1">
-              {Object.entries(ZONE_COLORS).slice(0, 4).map(([type, colors]) => {
-                const count = zones.filter(z => z.type === type).length
-                if (count === 0) return null
+        {/* Route Character Summary */}
+        {routeCharacter.summary && (
+          <div className="mb-2">
+            {/* Character breakdown bar */}
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[10px] text-white/40 font-medium">ROUTE CHARACTER</span>
+              {isLoadingCharacter && <span className="text-[10px] text-white/30">(analyzing...)</span>}
+              {routeCharacter.summary.funPercentage > 0 && (
+                <span className="text-[10px] font-bold" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
+                  {routeCharacter.summary.funPercentage}% fun
+                </span>
+              )}
+            </div>
+            
+            {/* Visual breakdown */}
+            <div className="flex h-2 rounded-full overflow-hidden bg-white/10 mb-1.5">
+              {Object.values(ROUTE_CHARACTER).map(char => {
+                const data = routeCharacter.summary.byCharacter[char]
+                if (!data || data.percentage === 0) return null
+                const colors = CHARACTER_COLORS[char]
                 return (
-                  <span key={type} className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ background: `${colors.label}20`, color: colors.label }}>
-                    {count} {type}
+                  <div 
+                    key={char}
+                    style={{ width: `${data.percentage}%`, background: colors.primary }}
+                    title={`${colors.label}: ${data.percentage}%`}
+                  />
+                )
+              })}
+            </div>
+            
+            {/* Character badges */}
+            <div className="flex gap-1 flex-wrap">
+              {Object.values(ROUTE_CHARACTER).map(char => {
+                const data = routeCharacter.summary.byCharacter[char]
+                if (!data || data.percentage === 0) return null
+                const colors = CHARACTER_COLORS[char]
+                const miles = (data.distance / 1609.34).toFixed(1)
+                return (
+                  <span 
+                    key={char}
+                    className="px-1.5 py-0.5 rounded text-[9px] font-medium"
+                    style={{ background: `${colors.primary}20`, color: colors.primary }}
+                  >
+                    {colors.label} {miles}mi
                   </span>
                 )
               })}
             </div>
+            
+            {/* Best section highlight */}
+            {routeCharacter.summary.bestSection && (
+              <div className="mt-1.5 text-[10px] text-white/50">
+                Best: {CHARACTER_COLORS[routeCharacter.summary.bestSection.character]?.label} section at mile {routeCharacter.summary.bestSection.startMile.toFixed(1)}-{routeCharacter.summary.bestSection.endMile.toFixed(1)}
+              </div>
+            )}
           </div>
         )}
 
