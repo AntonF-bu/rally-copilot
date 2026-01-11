@@ -100,7 +100,7 @@ export default function App() {
     const MIN_CALLOUT_INTERVAL = 1000
     
     // Get speed unit for voice callouts
-    const speedUnit = speedUnit
+    const speedUnit = settings.units === 'metric' ? 'kmh' : 'mph'
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) return
 
