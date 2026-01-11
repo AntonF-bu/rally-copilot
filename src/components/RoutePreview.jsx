@@ -252,6 +252,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // Fly animation
+  // Fly-through animation refs
+  const isPausedRef = useRef(false)
+  const flySpeedRef = useRef(1)
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
+  
+  useEffect(() => {
+    flySpeedRef.current = flySpeed
+  }, [flySpeed])
+
   const startFlyAnimation = useCallback(() => {
     if (!mapRef.current || !routeData?.coordinates) return
     const coords = routeData.coordinates
@@ -265,11 +278,22 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     
     let lastTime = 0
-    const frameInterval = 120 / flySpeed
     
     const animate = (timestamp) => {
-      if (flyIndexRef.current >= coords.length - 1) { stopFlyThrough(); return }
+      // Check if we should stop
+      if (flyIndexRef.current >= coords.length - 1) { 
+        stopFlyThrough()
+        return 
+      }
       
+      // Check if paused (use ref for immediate response)
+      if (isPausedRef.current) {
+        flyAnimationRef.current = requestAnimationFrame(animate)
+        return
+      }
+      
+      // Control speed - base interval is 80ms at 1x speed
+      const frameInterval = 80 / flySpeedRef.current
       if (timestamp - lastTime < frameInterval) {
         flyAnimationRef.current = requestAnimationFrame(animate)
         return
@@ -277,43 +301,74 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       lastTime = timestamp
       
       const current = coords[flyIndexRef.current]
-      const next = coords[Math.min(flyIndexRef.current + 10, coords.length - 1)]
-      mapRef.current?.easeTo({ center: current, bearing: getBearing(current, next), pitch: 55, zoom: 15.5, duration: 150 })
-      flyIndexRef.current += Math.max(1, Math.ceil(flySpeed))
+      const lookAhead = Math.min(flyIndexRef.current + 15, coords.length - 1)
+      const next = coords[lookAhead]
+      
+      mapRef.current?.easeTo({ 
+        center: current, 
+        bearing: getBearing(current, next), 
+        pitch: 55, 
+        zoom: 15.5, 
+        duration: 120 
+      })
+      
+      // Step size based on speed - slower movement
+      const step = Math.max(1, Math.ceil(flySpeedRef.current * 2))
+      flyIndexRef.current += step
+      
       flyAnimationRef.current = requestAnimationFrame(animate)
     }
+    
     flyAnimationRef.current = requestAnimationFrame(animate)
-  }, [routeData, flySpeed])
+  }, [routeData])
 
   const handleFlyThrough = () => {
     if (!mapRef.current || !routeData?.coordinates || isFlying) return
     setIsFlying(true)
     setIsPaused(false)
+    isPausedRef.current = false
     flyIndexRef.current = 0
-    mapRef.current.easeTo({ center: routeData.coordinates[0], pitch: 60, zoom: 14, duration: 800 })
-    setTimeout(() => startFlyAnimation(), 800)
+    
+    // Start at beginning of route
+    mapRef.current.easeTo({ 
+      center: routeData.coordinates[0], 
+      pitch: 60, 
+      zoom: 14, 
+      duration: 800 
+    })
+    setTimeout(() => startFlyAnimation(), 850)
   }
 
   const toggleFlyPause = () => {
     if (!isFlying) return
-    if (isPaused) { setIsPaused(false); startFlyAnimation() } 
-    else { setIsPaused(true); if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current) }
+    const newPaused = !isPaused
+    setIsPaused(newPaused)
+    isPausedRef.current = newPaused
+    console.log(`🎬 Fly-through ${newPaused ? 'paused' : 'resumed'}`)
   }
 
   const stopFlyThrough = useCallback(() => {
-    if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
-    flyAnimationRef.current = null
+    console.log('🎬 Stopping fly-through')
+    if (flyAnimationRef.current) {
+      cancelAnimationFrame(flyAnimationRef.current)
+      flyAnimationRef.current = null
+    }
     setIsFlying(false)
     setIsPaused(false)
+    isPausedRef.current = false
     flyIndexRef.current = 0
     
+    // Reset camera to overview
     if (mapRef.current && routeData?.coordinates) {
       setTimeout(() => {
         if (!mapRef.current) return
-        const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+        const bounds = routeData.coordinates.reduce(
+          (b, c) => b.extend(c), 
+          new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
+        )
         mapRef.current.fitBounds(bounds, { 
           padding: { top: 120, bottom: 160, left: 40, right: 40 }, 
-          duration: 1200, 
+          duration: 1000, 
           pitch: 0,
           bearing: 0
         })
@@ -321,12 +376,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData])
 
+  // React to speed changes during flight
   useEffect(() => {
-    if (isFlying && !isPaused) {
-      if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
-      startFlyAnimation()
-    }
-  }, [flySpeed, isFlying, isPaused, startFlyAnimation])
+    // Speed changes are handled via ref, no need to restart animation
+  }, [flySpeed])
 
   const handleSampleCallout = async () => {
     await initAudio()
