@@ -173,6 +173,52 @@ export default function CalloutOverlay() {
   const displayDirection = curve.isChicane ? curve.startDirection : curve.direction
   const isLeft = displayDirection === 'LEFT'
 
+  // Minimal HUD mode - just show curve info
+  if (settings.hudStyle === 'minimal') {
+    return (
+      <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        <div className="hud-glass rounded-2xl px-4 py-3">
+          <div className="flex items-center justify-between">
+            {/* Curve indicator */}
+            <div className="flex items-center gap-3">
+              {curve.isChicane ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold" style={{ color: severityColor }}>
+                    {isLeft ? '←' : '→'}{curve.severitySequence}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <svg 
+                    width="20" height="20" viewBox="0 0 24 24" 
+                    fill={severityColor}
+                    style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
+                  >
+                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                  </svg>
+                  <span className="text-2xl font-bold" style={{ color: severityColor }}>
+                    {curve.severity}
+                  </span>
+                </div>
+              )}
+              <span className="text-lg text-white/60">{distanceDisplay}{distanceUnit}</span>
+            </div>
+            
+            {/* Target speed */}
+            <div className="text-right">
+              <span className="text-2xl font-bold" style={{ color: modeColor }}>
+                {recommendedSpeed}
+              </span>
+              <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
+            </div>
+          </div>
+        </div>
+        <style>{hudStyles}</style>
+      </div>
+    )
+  }
+
+  // Full HUD mode
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
@@ -229,32 +275,45 @@ export default function CalloutOverlay() {
             </div>
 
             {/* Speed Display - Current + Recommended */}
-            <div className="text-right pl-2 flex flex-col items-end">
-              {/* Current Speed (large) */}
-              <div className="flex items-baseline gap-1">
-                <div 
-                  className="text-4xl font-bold tracking-tight leading-none"
-                  style={{ 
-                    color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' : 
-                           currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white',
-                    textShadow: '0 0 20px rgba(255,255,255,0.3)'
-                  }}
-                >
-                  {currentSpeedDisplay}
+            {settings.showSpeedometer !== false ? (
+              <div className="text-right pl-2 flex flex-col items-end">
+                {/* Current Speed (large) */}
+                <div className="flex items-baseline gap-1">
+                  <div 
+                    className="text-4xl font-bold tracking-tight leading-none"
+                    style={{ 
+                      color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' : 
+                             currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white',
+                      textShadow: '0 0 20px rgba(255,255,255,0.3)'
+                    }}
+                  >
+                    {currentSpeedDisplay}
+                  </div>
+                  <span className="text-xs text-white/40">{speedUnit}</span>
                 </div>
-                <span className="text-xs text-white/40">{speedUnit}</span>
+                {/* Recommended Speed (small, below) */}
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-[10px] text-white/40">TARGET</span>
+                  <span 
+                    className="text-sm font-bold"
+                    style={{ color: modeColor }}
+                  >
+                    {recommendedSpeed}
+                  </span>
+                </div>
               </div>
-              {/* Recommended Speed (small, below) */}
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="text-[10px] text-white/40">TARGET</span>
-                <span 
-                  className="text-sm font-bold"
-                  style={{ color: modeColor }}
+            ) : (
+              /* Just show target when speedometer is hidden */
+              <div className="text-right pl-2">
+                <div 
+                  className="text-3xl font-bold tracking-tight leading-none"
+                  style={{ color: modeColor, textShadow: `0 0 20px ${modeColor}30` }}
                 >
                   {recommendedSpeed}
-                </span>
+                </div>
+                <span className="text-[10px] text-white/40">{speedUnit}</span>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
