@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
-import { useSpeech } from '../hooks/useSpeech'
+import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 
 // ================================
 // Route Preview - Mission Briefing
-// v7: Full feature upgrade
+// v8: Complete feature set
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -32,13 +32,18 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [isLoadingRoute, setIsLoadingRoute] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const [routeAnimated, setRouteAnimated] = useState(false)
+  const [selectedCurve, setSelectedCurve] = useState(null)
+  const [showCurveList, setShowCurveList] = useState(false)
+  const [isFlying, setIsFlying] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
   const fetchedRef = useRef(false)
+  const flyAnimationRef = useRef(null)
   
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
-    isFavorite, toggleFavorite, settings 
+    isFavorite, toggleFavorite, settings, updateSettings 
   } = useStore()
-  const { initAudio, preloadRouteAudio } = useSpeech()
+  const { initAudio, preloadRouteAudio, speak } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -76,7 +81,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     const hardRatio = severityBreakdown.hard / total
     const mediumRatio = severityBreakdown.medium / total
     const avgSeverity = routeData.curves.reduce((sum, c) => sum + c.severity, 0) / total
-    const curveDensity = total / (routeStats.distance || 1) // curves per mile
+    const curveDensity = total / (routeStats.distance || 1)
     
     if (avgSeverity >= 4 || hardRatio > 0.3 || curveDensity > 4) {
       return { label: 'Expert', color: '#ff3366' }
@@ -87,6 +92,43 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
     return { label: 'Easy', color: '#22c55e' }
   }, [routeData, severityBreakdown, routeStats])
+
+  // Find hardest section (cluster of hard curves)
+  const hardestSection = useMemo(() => {
+    if (!routeData?.curves?.length) return null
+    
+    const hardCurves = routeData.curves.filter(c => c.severity >= 4)
+    if (hardCurves.length === 0) return null
+    
+    // Find the hardest single curve
+    const hardest = hardCurves.reduce((max, c) => c.severity > max.severity ? c : max, hardCurves[0])
+    return hardest
+  }, [routeData])
+
+  // Generate elevation profile data
+  const elevationProfile = useMemo(() => {
+    if (!routeData?.coordinates) return []
+    
+    // Simulate elevation data (in real app, fetch from Mapbox Terrain API)
+    const points = []
+    const numPoints = Math.min(50, routeData.coordinates.length)
+    const step = Math.floor(routeData.coordinates.length / numPoints)
+    
+    let baseElev = 50 + Math.random() * 100
+    for (let i = 0; i < numPoints; i++) {
+      const idx = i * step
+      // Simulate rolling terrain
+      baseElev += (Math.random() - 0.5) * 30
+      baseElev = Math.max(0, Math.min(500, baseElev))
+      
+      points.push({
+        distance: (idx / routeData.coordinates.length) * (routeData.distance || 15000),
+        elevation: baseElev,
+        coord: routeData.coordinates[idx]
+      })
+    }
+    return points
+  }, [routeData])
 
   // Fetch demo route
   useEffect(() => {
@@ -130,13 +172,11 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       coordinates: [...routeData.coordinates].reverse(),
       curves: routeData.curves ? routeData.curves.map(c => ({
         ...c,
-        position: c.position, // Keep same position
-        direction: c.direction === 'LEFT' ? 'RIGHT' : 'LEFT', // Flip direction
+        direction: c.direction === 'LEFT' ? 'RIGHT' : 'LEFT',
         startDirection: c.startDirection === 'LEFT' ? 'RIGHT' : 'LEFT'
       })).reverse() : []
     }
     
-    // Recalculate curve positions along reversed route
     if (reversed.curves.length > 0) {
       const totalDist = routeData.distance || 15000
       reversed.curves = reversed.curves.map(c => ({
@@ -146,137 +186,209 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
     
     setRouteData(reversed)
+    if (mapRef.current && mapLoaded) rebuildRoute(reversed)
+  }
+
+  // Fly through animation
+  const handleFlyThrough = () => {
+    if (!mapRef.current || !routeData?.coordinates || isFlying) return
     
-    // Rebuild map with new route
-    if (mapRef.current && mapLoaded) {
-      rebuildRoute(reversed)
+    setIsFlying(true)
+    const coords = routeData.coordinates
+    const totalPoints = coords.length
+    let currentIndex = 0
+    
+    // Calculate bearing between points
+    const getBearing = (start, end) => {
+      const dLon = (end[0] - start[0]) * Math.PI / 180
+      const lat1 = start[1] * Math.PI / 180
+      const lat2 = end[1] * Math.PI / 180
+      const y = Math.sin(dLon) * Math.cos(lat2)
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+    }
+    
+    const animate = () => {
+      if (currentIndex >= totalPoints - 1) {
+        setIsFlying(false)
+        // Reset view
+        const bounds = coords.reduce((b, coord) => b.extend(coord), 
+          new mapboxgl.LngLatBounds(coords[0], coords[0]))
+        mapRef.current?.fitBounds(bounds, {
+          padding: { top: 100, bottom: 400, left: 50, right: 50 },
+          duration: 1000
+        })
+        return
+      }
+      
+      const current = coords[currentIndex]
+      const next = coords[Math.min(currentIndex + 5, totalPoints - 1)]
+      const bearing = getBearing(current, next)
+      
+      mapRef.current?.easeTo({
+        center: current,
+        bearing: bearing,
+        pitch: 60,
+        zoom: 15,
+        duration: 100
+      })
+      
+      currentIndex += 2
+      flyAnimationRef.current = requestAnimationFrame(animate)
+    }
+    
+    // Start with zoom out then fly
+    mapRef.current.easeTo({
+      center: coords[0],
+      pitch: 60,
+      zoom: 14,
+      duration: 1000
+    })
+    
+    setTimeout(() => {
+      flyAnimationRef.current = requestAnimationFrame(animate)
+    }, 1000)
+  }
+
+  const stopFlyThrough = () => {
+    if (flyAnimationRef.current) {
+      cancelAnimationFrame(flyAnimationRef.current)
+      flyAnimationRef.current = null
+    }
+    setIsFlying(false)
+    
+    // Reset view
+    if (mapRef.current && routeData?.coordinates) {
+      const bounds = routeData.coordinates.reduce((b, coord) => b.extend(coord), 
+        new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+      mapRef.current.fitBounds(bounds, {
+        padding: { top: 100, bottom: 400, left: 50, right: 50 },
+        duration: 1000,
+        pitch: 0
+      })
     }
   }
 
-  // Build colored route segments based on upcoming curve severity
+  // Play sample callout
+  const handleSampleCallout = async () => {
+    await initAudio()
+    const sampleCurve = routeData?.curves?.find(c => c.severity >= 3) || routeData?.curves?.[0]
+    if (sampleCurve) {
+      const callout = generateCallout(sampleCurve, mode, settings.units === 'metric' ? 'kmh' : 'mph')
+      speak(callout, 'high')
+    }
+  }
+
+  // Share route
+  const handleShare = async () => {
+    const shareData = {
+      title: routeData?.name || 'Rally Co-Pilot Route',
+      text: `Check out this route: ${routeStats.distance} ${settings.units === 'metric' ? 'km' : 'mi'}, ${routeStats.curves} curves`,
+      url: window.location.href
+    }
+    
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData)
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setShowShareModal(true)
+        }
+      }
+    } else {
+      setShowShareModal(true)
+    }
+  }
+
+  // Zoom to curve
+  const handleCurveClick = (curve) => {
+    setSelectedCurve(curve)
+    if (mapRef.current && curve.position) {
+      mapRef.current.flyTo({
+        center: curve.position,
+        zoom: 16,
+        pitch: 45,
+        duration: 1000
+      })
+    }
+  }
+
+  // Build colored route segments
   const buildColoredRouteSegments = useCallback((coordinates, curves) => {
     if (!coordinates || coordinates.length < 2) return []
     
     const segments = []
     let currentIndex = 0
-    
-    // Sort curves by distance from start
     const sortedCurves = [...(curves || [])].sort((a, b) => 
       (a.distanceFromStart || 0) - (b.distanceFromStart || 0)
     )
-    
-    // Create segments between curves
     const totalPoints = coordinates.length
     
-    sortedCurves.forEach((curve, i) => {
+    sortedCurves.forEach((curve) => {
       const curveProgress = (curve.distanceFromStart || 0) / (routeData?.distance || 15000)
       const curveIndex = Math.floor(curveProgress * totalPoints)
-      
-      // Segment before this curve (approach zone - color by this curve's severity)
       const approachStart = Math.max(currentIndex, curveIndex - Math.floor(totalPoints * 0.02))
+      
       if (approachStart > currentIndex) {
-        // Green segment (safe zone)
-        segments.push({
-          coordinates: coordinates.slice(currentIndex, approachStart + 1),
-          color: '#22c55e'
-        })
+        segments.push({ coordinates: coordinates.slice(currentIndex, approachStart + 1), color: '#22c55e' })
       }
       
-      // Approach + curve segment
       const curveEnd = Math.min(curveIndex + Math.floor(totalPoints * 0.01), totalPoints - 1)
-      segments.push({
-        coordinates: coordinates.slice(approachStart, curveEnd + 1),
-        color: getCurveColor(curve.severity)
-      })
-      
+      segments.push({ coordinates: coordinates.slice(approachStart, curveEnd + 1), color: getCurveColor(curve.severity) })
       currentIndex = curveEnd
     })
     
-    // Final segment to end
     if (currentIndex < totalPoints - 1) {
-      segments.push({
-        coordinates: coordinates.slice(currentIndex),
-        color: '#22c55e'
-      })
+      segments.push({ coordinates: coordinates.slice(currentIndex), color: '#22c55e' })
     }
     
     return segments
   }, [routeData?.distance])
 
-  // Add route to map with animation
+  // Add route to map
   const addRouteToMap = useCallback((mapInstance, routeCoords, curves, animate = true) => {
     if (!mapInstance || !routeCoords) return
 
-    // Remove existing route layers
-    ['route-glow', 'route-line', 'route-colored'].forEach(id => {
+    ['route-glow', 'route-line'].forEach(id => {
       if (mapInstance.getLayer(id)) mapInstance.removeLayer(id)
     })
     if (mapInstance.getSource('route')) mapInstance.removeSource('route')
     
-    // Remove colored segment layers
-    for (let i = 0; i < 50; i++) {
-      if (mapInstance.getLayer(`route-segment-${i}`)) {
-        mapInstance.removeLayer(`route-segment-${i}`)
-      }
-      if (mapInstance.getSource(`route-segment-${i}`)) {
-        mapInstance.removeSource(`route-segment-${i}`)
-      }
+    for (let i = 0; i < 100; i++) {
+      if (mapInstance.getLayer(`route-segment-${i}`)) mapInstance.removeLayer(`route-segment-${i}`)
+      if (mapInstance.getSource(`route-segment-${i}`)) mapInstance.removeSource(`route-segment-${i}`)
     }
 
-    // Add main route source
     mapInstance.addSource('route', {
       type: 'geojson',
-      data: {
-        type: 'Feature',
-        properties: {},
-        geometry: { type: 'LineString', coordinates: routeCoords }
-      }
+      data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords } }
     })
 
-    // Glow layer
     mapInstance.addLayer({
       id: 'route-glow',
       type: 'line',
       source: 'route',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 
-        'line-color': '#ffffff', 
-        'line-width': 14, 
-        'line-blur': 10, 
-        'line-opacity': 0.2 
-      }
+      paint: { 'line-color': '#ffffff', 'line-width': 14, 'line-blur': 10, 'line-opacity': 0.2 }
     })
 
-    // Build colored segments
     const segments = buildColoredRouteSegments(routeCoords, curves)
     
     segments.forEach((segment, i) => {
-      const sourceId = `route-segment-${i}`
-      const layerId = `route-segment-${i}`
-      
-      mapInstance.addSource(sourceId, {
+      mapInstance.addSource(`route-segment-${i}`, {
         type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: segment.coordinates }
-        }
+        data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: segment.coordinates } }
       })
       
       mapInstance.addLayer({
-        id: layerId,
+        id: `route-segment-${i}`,
         type: 'line',
-        source: sourceId,
+        source: `route-segment-${i}`,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 
-          'line-color': segment.color, 
-          'line-width': 5, 
-          'line-opacity': animate ? 0 : 1 
-        }
+        paint: { 'line-color': segment.color, 'line-width': 5, 'line-opacity': animate ? 0 : 1 }
       })
     })
 
-    // Animate segments appearing
     if (animate && segments.length > 0) {
       segments.forEach((_, i) => {
         setTimeout(() => {
@@ -285,7 +397,6 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
           }
         }, i * (1500 / segments.length))
       })
-      
       setTimeout(() => setRouteAnimated(true), 1500)
     } else {
       setRouteAnimated(true)
@@ -294,84 +405,76 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
   // Add markers to map
   const addMarkersToMap = useCallback((mapInstance, routeCoords, curves) => {
-    // Clear existing markers
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
 
-    // Start marker (green with flag icon)
+    // Start marker
     const startEl = document.createElement('div')
     startEl.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center;">
         <div style="width:32px;height:32px;background:#22c55e;border:3px solid white;border-radius:50%;box-shadow:0 2px 10px rgba(34,197,94,0.5);display:flex;align-items:center;justify-content:center;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>
         </div>
         <div style="font-size:10px;color:white;background:#22c55e;padding:2px 6px;border-radius:4px;margin-top:4px;font-weight:600;">START</div>
       </div>
     `
-    const startMarker = new mapboxgl.Marker({ element: startEl, anchor: 'bottom' })
-      .setLngLat(routeCoords[0])
-      .addTo(mapInstance)
-    markersRef.current.push(startMarker)
+    markersRef.current.push(new mapboxgl.Marker({ element: startEl, anchor: 'bottom' }).setLngLat(routeCoords[0]).addTo(mapInstance))
 
-    // End marker (red flag)
+    // End marker
     const endEl = document.createElement('div')
     endEl.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center;">
         <div style="width:32px;height:32px;background:#ef4444;border:3px solid white;border-radius:50%;box-shadow:0 2px 10px rgba(239,68,68,0.5);display:flex;align-items:center;justify-content:center;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-            <path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/>
-          </svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/></svg>
         </div>
         <div style="font-size:10px;color:white;background:#ef4444;padding:2px 6px;border-radius:4px;margin-top:4px;font-weight:600;">FINISH</div>
       </div>
     `
-    const endMarker = new mapboxgl.Marker({ element: endEl, anchor: 'bottom' })
-      .setLngLat(routeCoords[routeCoords.length - 1])
-      .addTo(mapInstance)
-    markersRef.current.push(endMarker)
+    markersRef.current.push(new mapboxgl.Marker({ element: endEl, anchor: 'bottom' }).setLngLat(routeCoords[routeCoords.length - 1]).addTo(mapInstance))
 
     // Curve markers
     if (curves) {
       curves.forEach((curve) => {
         const color = getCurveColor(curve.severity)
         const el = document.createElement('div')
-        el.className = 'curve-marker'
         el.style.cursor = 'pointer'
+        
+        const isHardest = hardestSection && curve.id === hardestSection.id
+        const borderStyle = isHardest ? `3px solid ${color}` : `2px solid ${color}`
+        const shadowStyle = isHardest ? `0 0 20px ${color}80, 0 0 40px ${color}40` : `0 2px 10px ${color}40`
         
         if (curve.isChicane) {
           const dirChar = curve.startDirection === 'LEFT' ? 'L' : 'R'
           const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
           el.innerHTML = `
-            <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${color};box-shadow:0 2px 10px ${color}40;transition:transform 0.2s;">
+            <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:${borderStyle};box-shadow:${shadowStyle};transition:transform 0.2s;">
               <span style="font-size:8px;font-weight:700;color:${color};letter-spacing:0.5px;">${typeLabel}${dirChar}</span>
               <span style="font-size:12px;font-weight:700;color:${color};">${curve.severitySequence}</span>
+              ${isHardest ? '<span style="font-size:7px;color:#ff3366;font-weight:700;">HARDEST</span>' : ''}
             </div>
           `
         } else {
           const isLeft = curve.direction === 'LEFT'
           el.innerHTML = `
-            <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${color};box-shadow:0 2px 10px ${color}40;transition:transform 0.2s;">
+            <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:${borderStyle};box-shadow:${shadowStyle};transition:transform 0.2s;">
               <div style="display:flex;align-items:center;gap:2px;">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="${color}" style="transform:${isLeft ? 'scaleX(-1)' : 'none'}">
                   <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
                 </svg>
                 <span style="font-size:14px;font-weight:700;color:${color};">${curve.severity}</span>
               </div>
+              ${isHardest ? '<span style="font-size:7px;color:#ff3366;font-weight:700;">HARDEST</span>' : ''}
             </div>
           `
         }
         
-        const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-          .setLngLat(curve.position)
-          .addTo(mapInstance)
-        markersRef.current.push(marker)
+        el.onclick = () => handleCurveClick(curve)
+        markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(mapInstance))
       })
     }
-  }, [])
+  }, [hardestSection])
 
-  // Rebuild route (after reverse or style change)
+  // Rebuild route
   const rebuildRoute = useCallback((newRouteData) => {
     if (!mapRef.current) return
     const rd = newRouteData || routeData
@@ -380,20 +483,14 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     addRouteToMap(mapRef.current, rd.coordinates, rd.curves, false)
     addMarkersToMap(mapRef.current, rd.coordinates, rd.curves)
     
-    // Fit bounds
     const bounds = rd.coordinates.reduce((b, coord) => b.extend(coord), 
       new mapboxgl.LngLatBounds(rd.coordinates[0], rd.coordinates[0]))
-    mapRef.current.fitBounds(bounds, {
-      padding: { top: 100, bottom: 400, left: 50, right: 50 },
-      duration: 500
-    })
+    mapRef.current.fitBounds(bounds, { padding: { top: 100, bottom: 400, left: 50, right: 50 }, duration: 500 })
   }, [routeData, addRouteToMap, addMarkersToMap])
 
   // Initialize map
   useEffect(() => {
-    if (mapRef.current) return
-    if (!mapContainer) return
-    if (!routeData?.coordinates) return
+    if (mapRef.current || !mapContainer || !routeData?.coordinates) return
 
     mapRef.current = new mapboxgl.Map({
       container: mapContainer,
@@ -411,20 +508,17 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       addRouteToMap(mapRef.current, routeData.coordinates, routeData.curves, true)
       addMarkersToMap(mapRef.current, routeData.coordinates, routeData.curves)
 
-      // Fit bounds
       const bounds = routeData.coordinates.reduce((b, coord) => b.extend(coord), 
         new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
       
       setTimeout(() => {
-        mapRef.current?.fitBounds(bounds, {
-          padding: { top: 100, bottom: 400, left: 50, right: 50 },
-          duration: 1500
-        })
+        mapRef.current?.fitBounds(bounds, { padding: { top: 100, bottom: 400, left: 50, right: 50 }, duration: 1500 })
       }, 200)
     })
 
     return () => {
       markersRef.current.forEach(m => m.remove())
+      if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
       mapRef.current?.remove()
       mapRef.current = null
     }
@@ -435,11 +529,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     setMapStyle(newStyle)
     if (mapRef.current) {
       mapRef.current.setStyle(MAP_STYLES[newStyle])
-      
-      // Re-add route after style loads
-      mapRef.current.once('style.load', () => {
-        rebuildRoute()
-      })
+      mapRef.current.once('style.load', () => rebuildRoute())
     }
   }, [rebuildRoute])
 
@@ -463,7 +553,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     }
   }
 
-  // Loading state
+  // Loading states
   if (isLoadingRoute) {
     return (
       <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
@@ -480,9 +570,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
         <div className="text-center px-8">
           <p className="text-red-400 mb-4">{loadError}</p>
-          <button onClick={onBack} className="px-6 py-2 bg-white/10 rounded-lg text-white">
-            Go Back
-          </button>
+          <button onClick={onBack} className="px-6 py-2 bg-white/10 rounded-lg text-white">Go Back</button>
         </div>
       </div>
     )
@@ -495,63 +583,25 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
       {/* Top Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 p-4 pt-12 flex items-start justify-between">
-        {/* Left: Back + Map Style */}
         <div className="flex flex-col gap-2">
-          <button
-            onClick={onBack}
-            className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
-            </svg>
+          <button onClick={onBack} className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
           </button>
-          
-          <MapStyleButton 
-            currentStyle={mapStyle}
-            onStyleChange={handleStyleChange}
-          />
+          <MapStyleButton currentStyle={mapStyle} onStyleChange={handleStyleChange} />
         </div>
 
-        {/* Right: Favorite + Difficulty Badge */}
         <div className="flex flex-col items-end gap-2">
-          {/* Difficulty Badge */}
-          <div 
-            className="px-3 py-1.5 rounded-full backdrop-blur-xl border flex items-center gap-2"
-            style={{ 
-              background: `${difficultyRating.color}20`,
-              borderColor: `${difficultyRating.color}50`
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill={difficultyRating.color}>
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-            </svg>
-            <span className="text-xs font-bold" style={{ color: difficultyRating.color }}>
-              {difficultyRating.label}
-            </span>
+          <div className="px-3 py-1.5 rounded-full backdrop-blur-xl border flex items-center gap-2" style={{ background: `${difficultyRating.color}20`, borderColor: `${difficultyRating.color}50` }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill={difficultyRating.color}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <span className="text-xs font-bold" style={{ color: difficultyRating.color }}>{difficultyRating.label}</span>
           </div>
 
-          {/* Favorite Button */}
           {routeMode !== 'demo' && (
-            <button
-              onClick={handleToggleFavorite}
-              className={`w-10 h-10 rounded-full backdrop-blur-xl border flex items-center justify-center transition-all ${
-                isRouteFavorite 
-                  ? 'bg-amber-500/20 border-amber-500/30' 
-                  : 'bg-black/60 border-white/10'
-              }`}
-            >
-              <svg 
-                width="20" height="20" viewBox="0 0 24 24" 
-                fill={isRouteFavorite ? '#f59e0b' : 'none'} 
-                stroke={isRouteFavorite ? '#f59e0b' : 'white'} 
-                strokeWidth="2"
-              >
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-              </svg>
+            <button onClick={handleToggleFavorite} className={`w-10 h-10 rounded-full backdrop-blur-xl border flex items-center justify-center ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/60 border-white/10'}`}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
             </button>
           )}
 
-          {/* Demo badge */}
           {routeMode === 'demo' && (
             <div className="px-3 py-1.5 rounded-full bg-purple-500/20 border border-purple-500/30">
               <span className="text-purple-400 text-xs font-bold tracking-wider">DEMO</span>
@@ -560,27 +610,28 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
         </div>
       </div>
 
+      {/* Fly-through overlay */}
+      {isFlying && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+          <button onClick={stopFlyThrough} className="px-6 py-3 bg-red-500 rounded-xl text-white font-bold flex items-center gap-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+            Stop Preview
+          </button>
+        </div>
+      )}
+
       {/* Bottom Panel */}
       <div className="absolute bottom-0 left-0 right-0 z-20">
-        <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-20 pb-6 px-4">
+        <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-8 pb-6 px-4">
+          
+          {/* Elevation Profile */}
+          <ElevationProfile data={elevationProfile} curves={routeData?.curves} modeColor={modeColor} />
           
           {/* Mode Selector */}
-          <div className="flex justify-center mb-4">
+          <div className="flex justify-center mb-3">
             <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-1 border border-white/10">
-              {[
-                { id: 'cruise', label: 'Cruise', color: '#00d4ff' },
-                { id: 'fast', label: 'Fast', color: '#ffd500' },
-                { id: 'race', label: 'Race', color: '#ff3366' }
-              ].map(m => (
-                <button
-                  key={m.id}
-                  onClick={() => setMode(m.id)}
-                  className="px-5 py-1.5 rounded-full text-xs font-bold tracking-wider transition-all"
-                  style={{
-                    background: mode === m.id ? m.color : 'transparent',
-                    color: mode === m.id ? (m.id === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)'
-                  }}
-                >
+              {[{ id: 'cruise', label: 'Cruise', color: '#00d4ff' }, { id: 'fast', label: 'Fast', color: '#ffd500' }, { id: 'race', label: 'Race', color: '#ff3366' }].map(m => (
+                <button key={m.id} onClick={() => setMode(m.id)} className="px-4 py-1.5 rounded-full text-xs font-bold tracking-wider transition-all" style={{ background: mode === m.id ? m.color : 'transparent', color: mode === m.id ? (m.id === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)' }}>
                   {m.label.toUpperCase()}
                 </button>
               ))}
@@ -588,97 +639,83 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
           </div>
 
           {/* Route Stats */}
-          <div className="grid grid-cols-4 gap-2 mb-3">
+          <div className="grid grid-cols-4 gap-2 mb-2">
             <StatBox value={routeStats.distance} unit={settings.units === 'metric' ? 'KM' : 'MI'} />
             <StatBox value={routeStats.duration} unit="MIN" />
-            <StatBox value={routeStats.curves} unit="CURVES" />
+            <StatBox value={routeStats.curves} unit="CURVES" onClick={() => setShowCurveList(true)} />
             <StatBox value={routeStats.sharpCurves} unit="SHARP" highlight />
           </div>
 
-          {/* Severity Breakdown Bar */}
-          <div className="mb-3">
-            <div className="flex gap-1 h-2 rounded-full overflow-hidden bg-white/10">
-              <div 
-                className="h-full rounded-l-full transition-all" 
-                style={{ 
-                  width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%`,
-                  background: '#22c55e'
-                }} 
-              />
-              <div 
-                className="h-full transition-all" 
-                style={{ 
-                  width: `${(severityBreakdown.medium / routeStats.curves) * 100 || 0}%`,
-                  background: '#ffd500'
-                }} 
-              />
-              <div 
-                className="h-full rounded-r-full transition-all" 
-                style={{ 
-                  width: `${(severityBreakdown.hard / routeStats.curves) * 100 || 0}%`,
-                  background: '#ff3366'
-                }} 
-              />
-            </div>
-            <div className="flex justify-between text-[10px] text-white/40 mt-1">
-              <span>{severityBreakdown.easy} Easy</span>
-              <span>{severityBreakdown.medium} Medium</span>
-              <span>{severityBreakdown.hard} Hard</span>
-              {routeStats.chicanes > 0 && <span>{routeStats.chicanes} Chicanes</span>}
+          {/* Severity Bar */}
+          <div className="mb-2">
+            <div className="flex h-1.5 rounded-full overflow-hidden bg-white/10">
+              <div className="h-full" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%`, background: '#22c55e' }} />
+              <div className="h-full" style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100 || 0}%`, background: '#ffd500' }} />
+              <div className="h-full" style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100 || 0}%`, background: '#ff3366' }} />
             </div>
           </div>
 
-          {/* Action Buttons Row */}
-          <div className="flex gap-2 mb-3">
-            {/* Reverse Route */}
-            <button
-              onClick={handleReverseRoute}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/>
-              </svg>
-              <span className="text-white/70 text-sm font-medium">Reverse</span>
+          {/* Curve Sensitivity Slider */}
+          <div className="flex items-center gap-3 mb-3 px-1">
+            <span className="text-[10px] text-white/40">Sensitivity</span>
+            <div className="flex-1 flex bg-white/5 rounded-lg p-0.5">
+              {['relaxed', 'normal', 'sensitive'].map(s => (
+                <button key={s} onClick={() => updateSettings({ curveSensitivity: s })} className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${(settings.curveSensitivity || 'normal') === s ? 'bg-white/20 text-white' : 'text-white/40'}`}>
+                  {s === 'relaxed' ? 'Low' : s === 'normal' ? 'Med' : 'High'}
+                </button>
+              ))}
+            </div>
+            <button onClick={handleSampleCallout} className="px-2 py-1 bg-white/10 rounded text-[10px] text-white/60 flex items-center gap-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              Test
             </button>
+          </div>
 
-            {/* Download Voice */}
-            <button
-              onClick={handleDownload}
-              disabled={isDownloading || downloadComplete || !navigator.onLine}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98] transition-all"
-            >
-              {isDownloading ? (
-                <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-              ) : downloadComplete ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-              )}
-              <span className={`text-sm font-medium ${downloadComplete ? 'text-green-400' : 'text-white/70'}`}>
-                {downloadComplete ? 'Ready' : 'Voice'}
-              </span>
-            </button>
+          {/* Action Buttons */}
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            <ActionButton icon="reverse" label="Reverse" onClick={handleReverseRoute} />
+            <ActionButton icon="fly" label="Preview" onClick={handleFlyThrough} disabled={isFlying} />
+            <ActionButton icon="share" label="Share" onClick={handleShare} />
+            <ActionButton icon={downloadComplete ? 'check' : 'download'} label={downloadComplete ? 'Ready' : 'Voice'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} />
           </div>
 
           {/* Start Button */}
-          <button
-            onClick={handleStart}
-            className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
-            style={{ background: modeColor }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
+          <button onClick={handleStart} className="w-full py-4 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: modeColor }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             {routeMode === 'demo' ? 'START DEMO' : 'START NAVIGATION'}
           </button>
         </div>
       </div>
+
+      {/* Curve List Modal */}
+      {showCurveList && (
+        <CurveListModal 
+          curves={routeData?.curves || []} 
+          mode={mode}
+          settings={settings}
+          hardestId={hardestSection?.id}
+          onSelect={handleCurveClick}
+          onClose={() => setShowCurveList(false)} 
+        />
+      )}
+
+      {/* Curve Detail Popup */}
+      {selectedCurve && !showCurveList && (
+        <CurveDetailPopup 
+          curve={selectedCurve} 
+          mode={mode}
+          settings={settings}
+          onClose={() => setSelectedCurve(null)} 
+        />
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <ShareModal 
+          routeName={routeData?.name}
+          onClose={() => setShowShareModal(false)} 
+        />
+      )}
 
       {/* Loading Overlay */}
       {!mapLoaded && (
@@ -693,15 +730,78 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   )
 }
 
-// Stat Box Component
-function StatBox({ value, unit, highlight = false }) {
+// Elevation Profile Component
+function ElevationProfile({ data, curves, modeColor }) {
+  if (!data || data.length < 2) return null
+  
+  const maxElev = Math.max(...data.map(d => d.elevation))
+  const minElev = Math.min(...data.map(d => d.elevation))
+  const range = maxElev - minElev || 1
+  
+  const pathD = data.map((d, i) => {
+    const x = (i / (data.length - 1)) * 100
+    const y = 100 - ((d.elevation - minElev) / range) * 80
+    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+  }).join(' ')
+  
+  const areaD = pathD + ` L 100 100 L 0 100 Z`
+  
   return (
-    <div className="bg-white/5 rounded-xl p-3 text-center">
-      <div className={`text-xl font-bold ${highlight ? 'text-red-400' : 'text-white'}`}>
-        {value}
+    <div className="mb-3 bg-white/5 rounded-xl p-2">
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-[9px] text-white/40 uppercase tracking-wider">Elevation</span>
+        <span className="text-[9px] text-white/40">{Math.round(maxElev - minElev)}ft gain</span>
       </div>
-      <div className="text-[10px] text-white/40 tracking-wider">{unit}</div>
+      <svg viewBox="0 0 100 40" className="w-full h-10" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="elevGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
+            <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill="url(#elevGrad)" />
+        <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1" strokeLinecap="round" />
+        {/* Curve markers on elevation */}
+        {curves?.slice(0, 10).map((curve, i) => {
+          const progress = (curve.distanceFromStart || 0) / (data[data.length - 1]?.distance || 15000)
+          const x = progress * 100
+          const dataIndex = Math.floor(progress * (data.length - 1))
+          const elev = data[dataIndex]?.elevation || minElev
+          const y = 100 - ((elev - minElev) / range) * 80
+          return (
+            <circle key={i} cx={x} cy={y} r="2" fill={getCurveColor(curve.severity)} />
+          )
+        })}
+      </svg>
     </div>
+  )
+}
+
+// Stat Box Component
+function StatBox({ value, unit, highlight = false, onClick }) {
+  return (
+    <button onClick={onClick} disabled={!onClick} className={`bg-white/5 rounded-xl p-2 text-center ${onClick ? 'cursor-pointer active:bg-white/10' : ''}`}>
+      <div className={`text-lg font-bold ${highlight ? 'text-red-400' : 'text-white'}`}>{value}</div>
+      <div className="text-[9px] text-white/40 tracking-wider">{unit}</div>
+    </button>
+  )
+}
+
+// Action Button Component
+function ActionButton({ icon, label, onClick, disabled, success }) {
+  const icons = {
+    reverse: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
+    fly: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12h6l3-9 3 9h6"/><circle cx="12" cy="12" r="3"/></svg>,
+    share: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
+    download: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+    check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
+  }
+  
+  return (
+    <button onClick={onClick} disabled={disabled} className={`py-2 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center gap-1 disabled:opacity-50 active:scale-[0.98] transition-all ${success ? 'border-green-500/30' : ''}`}>
+      <span className={success ? 'text-green-400' : 'text-white/70'}>{icons[icon]}</span>
+      <span className={`text-[10px] font-medium ${success ? 'text-green-400' : 'text-white/50'}`}>{label}</span>
+    </button>
   )
 }
 
@@ -709,40 +809,172 @@ function StatBox({ value, unit, highlight = false }) {
 function MapStyleButton({ currentStyle, onStyleChange }) {
   const [isOpen, setIsOpen] = useState(false)
   
-  const styles = [
-    { id: 'dark', label: 'Dark' },
-    { id: 'satellite', label: 'Satellite' }
-  ]
-  
   if (!isOpen) {
     return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
-          <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
-        </svg>
+      <button onClick={() => setIsOpen(true)} className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
       </button>
     )
   }
   
   return (
     <div className="bg-black/80 backdrop-blur-xl rounded-xl border border-white/10 p-1">
-      {styles.map(style => (
-        <button
-          key={style.id}
-          onClick={() => { onStyleChange(style.id); setIsOpen(false) }}
-          className={`w-full px-3 py-2 rounded-lg text-xs font-medium text-left transition-all ${
-            currentStyle === style.id 
-              ? 'bg-cyan-500/20 text-cyan-400' 
-              : 'text-white/60 hover:bg-white/10'
-          }`}
-        >
+      {[{ id: 'dark', label: 'Dark' }, { id: 'satellite', label: 'Satellite' }].map(style => (
+        <button key={style.id} onClick={() => { onStyleChange(style.id); setIsOpen(false) }} className={`w-full px-3 py-2 rounded-lg text-xs font-medium text-left ${currentStyle === style.id ? 'bg-cyan-500/20 text-cyan-400' : 'text-white/60 hover:bg-white/10'}`}>
           {style.label}
         </button>
       ))}
+    </div>
+  )
+}
+
+// Curve List Modal
+function CurveListModal({ curves, mode, settings, hardestId, onSelect, onClose }) {
+  const getSpeed = (severity) => {
+    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }
+    const mult = { cruise: 1.0, fast: 1.15, race: 1.3 }
+    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 1.0))
+    if (settings.units === 'metric') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  return (
+    <div className="fixed inset-0 z-50 flex items-end">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full max-h-[70vh] bg-[#0d0d12] rounded-t-3xl border-t border-white/10 overflow-hidden">
+        <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <h3 className="text-white font-bold">All Curves ({curves.length})</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div className="overflow-auto max-h-[calc(70vh-60px)] p-2">
+          {curves.map((curve, i) => {
+            const color = getCurveColor(curve.severity)
+            const isHardest = curve.id === hardestId
+            return (
+              <button key={curve.id || i} onClick={() => { onSelect(curve); onClose() }} className={`w-full flex items-center gap-3 p-3 rounded-xl mb-1 transition-all ${isHardest ? 'bg-red-500/10 border border-red-500/30' : 'bg-white/5 hover:bg-white/10'}`}>
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: `${color}20`, border: `2px solid ${color}` }}>
+                  {curve.isChicane ? (
+                    <span className="text-xs font-bold" style={{ color }}>{curve.severitySequence}</span>
+                  ) : (
+                    <span className="text-lg font-bold" style={{ color }}>{curve.severity}</span>
+                  )}
+                </div>
+                <div className="flex-1 text-left">
+                  <div className="flex items-center gap-2">
+                    <span className="text-white font-medium">
+                      {curve.isChicane ? (curve.chicaneType === 'CHICANE' ? 'Chicane' : 'S-Curve') : `${curve.direction === 'LEFT' ? 'Left' : 'Right'} ${curve.severity}`}
+                    </span>
+                    {curve.modifier && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{curve.modifier}</span>}
+                    {isHardest && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">HARDEST</span>}
+                  </div>
+                  <div className="text-xs text-white/40">
+                    {Math.round((curve.distanceFromStart || 0) / (settings.units === 'metric' ? 1 : 3.28084))} {settings.units === 'metric' ? 'm' : 'ft'} from start
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold" style={{ color }}>{getSpeed(curve.severity)}</div>
+                  <div className="text-[10px] text-white/40">{settings.units === 'metric' ? 'km/h' : 'mph'}</div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Curve Detail Popup
+function CurveDetailPopup({ curve, mode, settings, onClose }) {
+  const color = getCurveColor(curve.severity)
+  const getSpeed = (severity) => {
+    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }
+    const mult = { cruise: 1.0, fast: 1.15, race: 1.3 }
+    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 1.0))
+    if (settings.units === 'metric') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  return (
+    <div className="absolute bottom-32 left-4 right-4 z-30">
+      <div className="bg-black/90 backdrop-blur-xl rounded-2xl border border-white/10 p-4" style={{ borderColor: `${color}50` }}>
+        <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+        
+        <div className="flex items-start gap-4">
+          <div className="w-16 h-16 rounded-xl flex items-center justify-center" style={{ background: `${color}20`, border: `2px solid ${color}` }}>
+            {curve.isChicane ? (
+              <div className="text-center">
+                <div className="text-[10px] font-bold" style={{ color }}>{curve.chicaneType}</div>
+                <div className="text-xl font-bold" style={{ color }}>{curve.severitySequence}</div>
+              </div>
+            ) : (
+              <div className="text-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill={color} style={{ transform: curve.direction === 'LEFT' ? 'scaleX(-1)' : 'none' }}>
+                  <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                </svg>
+                <div className="text-2xl font-bold" style={{ color }}>{curve.severity}</div>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex-1">
+            <h3 className="text-white font-bold text-lg">
+              {curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}
+            </h3>
+            {curve.modifier && <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded bg-white/10 text-white/70">{curve.modifier}</span>}
+            
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              <div className="bg-white/5 rounded-lg p-2 text-center">
+                <div className="text-xl font-bold" style={{ color }}>{getSpeed(curve.severity)}</div>
+                <div className="text-[9px] text-white/40">{settings.units === 'metric' ? 'KM/H' : 'MPH'}</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-2 text-center">
+                <div className="text-xl font-bold text-white">{curve.radius || '?'}</div>
+                <div className="text-[9px] text-white/40">RADIUS M</div>
+              </div>
+              <div className="bg-white/5 rounded-lg p-2 text-center">
+                <div className="text-xl font-bold text-white">{curve.totalAngle || '?'}</div>
+                <div className="text-[9px] text-white/40">DEGREES</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Share Modal
+function ShareModal({ routeName, onClose }) {
+  const [copied, setCopied] = useState(false)
+  const url = window.location.href
+  
+  const handleCopy = () => {
+    navigator.clipboard.writeText(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-[#0d0d12] rounded-2xl border border-white/10 p-6 w-full max-w-sm">
+        <h3 className="text-white font-bold text-lg mb-4">Share Route</h3>
+        <p className="text-white/60 text-sm mb-4">{routeName || 'Rally Co-Pilot Route'}</p>
+        
+        <div className="flex gap-2">
+          <input type="text" value={url} readOnly className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm" />
+          <button onClick={handleCopy} className={`px-4 py-2 rounded-lg font-medium text-sm ${copied ? 'bg-green-500 text-white' : 'bg-cyan-500 text-black'}`}>
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+        
+        <button onClick={onClose} className="w-full mt-4 py-2 bg-white/10 rounded-lg text-white/60 text-sm">Close</button>
+      </div>
     </div>
   )
 }
