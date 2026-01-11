@@ -3,16 +3,15 @@ import useStore from '../store'
 
 // ================================
 // Speech Hook - ElevenLabs + Offline Cache
-// Pre-downloads all callouts for offline use
+// With Audio Ducking for Spotify/Music compatibility
 // Voice ID: puLAe8o1npIDg374vYZp
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-// Global audio cache - persists across component remounts
+// Global audio cache
 const AUDIO_CACHE = new Map()
 
-// Track cache status
 let cacheStatus = {
   isPreloading: false,
   progress: 0,
@@ -23,28 +22,58 @@ let cacheStatus = {
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
   
-  const audioRef = useRef(null)
+  const audioContextRef = useRef(null)
+  const gainNodeRef = useRef(null)
+  const audioElementRef = useRef(null)
   const isPlayingRef = useRef(false)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
   const lastSpokenTimeRef = useRef(0)
 
-  // Initialize
+  // Initialize with Web Audio API for better audio mixing
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    audioRef.current = new Audio()
-    audioRef.current.onended = () => {
+    // Create audio context for mixing/ducking
+    try {
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
+      gainNodeRef.current = audioContextRef.current.createGain()
+      gainNodeRef.current.connect(audioContextRef.current.destination)
+    } catch (e) {
+      console.log('Web Audio API not available')
+    }
+
+    // Create audio element with special settings for notifications
+    audioElementRef.current = new Audio()
+    
+    // iOS: Request audio session for 'playback' with mixing
+    if ('audioSession' in navigator) {
+      try {
+        // @ts-ignore - experimental API
+        navigator.audioSession.type = 'play-and-record' // Allows mixing
+      } catch (e) {}
+    }
+    
+    // Set up audio element for notification-style playback
+    audioElementRef.current.setAttribute('playsinline', 'true')
+    audioElementRef.current.setAttribute('webkit-playsinline', 'true')
+    
+    audioElementRef.current.onended = () => {
       isPlayingRef.current = false
       setSpeaking(false, '')
+      // Resume audio context if suspended
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume()
+      }
     }
-    audioRef.current.onerror = () => {
+    
+    audioElementRef.current.onerror = () => {
       isPlayingRef.current = false
       setSpeaking(false, '')
     }
 
-    // Initialize native speech as fallback
+    // Initialize native speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -69,11 +98,30 @@ export function useSpeech() {
       synthRef.current.onvoiceschanged = loadVoices
     }
 
+    // Set up Media Session for system integration
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Rally Co-Pilot',
+        artist: 'Navigation',
+        album: 'Driving'
+      })
+    }
+
     return () => {
-      audioRef.current?.pause()
+      audioElementRef.current?.pause()
       synthRef.current?.cancel()
+      audioContextRef.current?.close()
     }
   }, [setSpeaking])
+
+  // Resume audio context (needed after user interaction on iOS)
+  const ensureAudioContext = useCallback(async () => {
+    if (audioContextRef.current?.state === 'suspended') {
+      try {
+        await audioContextRef.current.resume()
+      } catch (e) {}
+    }
+  }, [])
 
   // Fetch and cache a single callout
   const fetchAndCacheAudio = useCallback(async (text) => {
@@ -95,7 +143,6 @@ export function useSpeech() {
       AUDIO_CACHE.set(text, audioUrl)
       return true
     } catch (err) {
-      console.error('Failed to cache:', text, err)
       return false
     }
   }, [])
@@ -103,34 +150,27 @@ export function useSpeech() {
   // Pre-cache all callouts for a route
   const preloadRouteAudio = useCallback(async (curves, onProgress) => {
     if (!curves || curves.length === 0) {
-      console.log('🎤 No curves to preload')
       return { success: true, cached: 0, total: 0 }
     }
 
-    // Generate all unique callouts for the route
     const callouts = new Set()
 
     curves.forEach(curve => {
       if (curve.isChicane) {
         const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-        if (curve.chicaneType === 'CHICANE') {
-          callouts.add(`Chicane ${dir} ${curve.severitySequence}`)
-        } else {
-          callouts.add(`S ${dir} ${curve.severitySequence}`)
-        }
+        callouts.add(curve.chicaneType === 'CHICANE' 
+          ? `Chicane ${dir} ${curve.severitySequence}`
+          : `S ${dir} ${curve.severitySequence}`)
       } else {
         const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-        
-        // Base callout
         callouts.add(`${dir} ${curve.severity}`)
         
-        // With modifiers
         if (curve.modifier) {
           callouts.add(`${dir} ${curve.severity} ${curve.modifier.toLowerCase()}`)
         }
         
-        // Common combinations with "into" and "then"
-        for (let nextSev = 1; nextSev <= 6; nextSev++) {
+        // Common combinations
+        for (let nextSev = 2; nextSev <= 5; nextSev++) {
           callouts.add(`${dir} ${curve.severity} into left ${nextSev}`)
           callouts.add(`${dir} ${curve.severity} into right ${nextSev}`)
           callouts.add(`${dir} ${curve.severity} then left ${nextSev}`)
@@ -139,14 +179,11 @@ export function useSpeech() {
       }
     })
 
-    // Add common standalone callouts
-    const standalones = ['Caution', 'Tightens', 'Opens', 'Keep left', 'Keep right']
-    standalones.forEach(s => callouts.add(s))
+    // Add common callouts
+    ['Caution', 'Tightens', 'Opens'].forEach(s => callouts.add(s))
 
     const calloutList = Array.from(callouts)
     const total = calloutList.length
-
-    console.log(`🎤 Pre-loading ${total} callouts for offline use...`)
 
     cacheStatus = { isPreloading: true, progress: 0, total, ready: false }
     onProgress?.(0, total)
@@ -157,19 +194,13 @@ export function useSpeech() {
     for (let i = 0; i < calloutList.length; i++) {
       const text = calloutList[i]
       
-      // Skip if already cached
       if (AUDIO_CACHE.has(text)) {
         cached++
       } else {
         const success = await fetchAndCacheAudio(text)
-        if (success) {
-          cached++
-        } else {
-          failed++
-        }
-        
-        // Small delay to not overwhelm the API
-        await new Promise(r => setTimeout(r, 100))
+        if (success) cached++
+        else failed++
+        await new Promise(r => setTimeout(r, 80))
       }
 
       cacheStatus.progress = i + 1
@@ -178,43 +209,47 @@ export function useSpeech() {
 
     cacheStatus = { isPreloading: false, progress: total, total, ready: cached > 0 }
     
-    console.log(`🎤 Pre-loaded ${cached}/${total} callouts (${failed} failed)`)
-    
     return { success: failed < total * 0.5, cached, total, failed }
   }, [fetchAndCacheAudio])
 
-  // Play from cache (offline-safe)
-  const playFromCache = useCallback(async (text) => {
-    const audioUrl = AUDIO_CACHE.get(text)
-    if (!audioUrl) return false
-
+  // Play audio with ducking behavior
+  const playWithDucking = useCallback(async (audioUrl, text) => {
+    await ensureAudioContext()
+    
     try {
       isPlayingRef.current = true
       setSpeaking(true, text)
-      audioRef.current.src = audioUrl
-      await audioRef.current.play()
+      
+      // Set volume slightly higher to cut through music
+      audioElementRef.current.volume = Math.min(1.0, (settings.volume || 1.0) * 1.2)
+      audioElementRef.current.src = audioUrl
+      
+      // Use play() which should trigger audio ducking on iOS
+      await audioElementRef.current.play()
+      
       return true
     } catch (err) {
-      console.error('Cache playback error:', err)
+      console.error('Playback error:', err)
       isPlayingRef.current = false
       setSpeaking(false, '')
       return false
     }
-  }, [setSpeaking])
+  }, [ensureAudioContext, setSpeaking, settings.volume])
 
-  // Speak using ElevenLabs (live fetch)
+  // Play from cache
+  const playFromCache = useCallback(async (text) => {
+    const audioUrl = AUDIO_CACHE.get(text)
+    if (!audioUrl) return false
+    return playWithDucking(audioUrl, text)
+  }, [playWithDucking])
+
+  // Speak using ElevenLabs
   const speakElevenLabs = useCallback(async (text) => {
-    // First check cache
     if (AUDIO_CACHE.has(text)) {
-      console.log('🎤 Playing from cache:', text)
       return playFromCache(text)
     }
 
-    // If offline, can't fetch
-    if (!navigator.onLine) {
-      console.log('🎤 Offline, no cache for:', text)
-      return false
-    }
+    if (!navigator.onLine) return false
 
     try {
       const response = await fetch('/api/tts', {
@@ -229,23 +264,15 @@ export function useSpeech() {
       if (audioBlob.size < 500) return false
 
       const audioUrl = URL.createObjectURL(audioBlob)
-      
-      // Cache for future use
       AUDIO_CACHE.set(text, audioUrl)
       
-      isPlayingRef.current = true
-      setSpeaking(true, text)
-      audioRef.current.src = audioUrl
-      await audioRef.current.play()
-
-      return true
+      return playWithDucking(audioUrl, text)
     } catch (err) {
-      console.error('🎤 ElevenLabs error:', err)
       return false
     }
-  }, [setSpeaking, playFromCache])
+  }, [playFromCache, playWithDucking])
 
-  // Native speech fallback
+  // Native speech (also supports ducking on iOS)
   const speakNative = useCallback((text) => {
     if (!synthRef.current) return false
 
@@ -254,9 +281,10 @@ export function useSpeech() {
 
       const utterance = new SpeechSynthesisUtterance(text)
       if (voiceRef.current) utterance.voice = voiceRef.current
+      
       utterance.rate = 1.1
       utterance.pitch = 1.0
-      utterance.volume = settings.volume || 1.0
+      utterance.volume = Math.min(1.0, (settings.volume || 1.0))
 
       utterance.onstart = () => setSpeaking(true, text)
       utterance.onend = () => setSpeaking(false, '')
@@ -265,7 +293,6 @@ export function useSpeech() {
       synthRef.current.speak(utterance)
       return true
     } catch (err) {
-      console.error('🔊 Native speech error:', err)
       return false
     }
   }, [setSpeaking, settings.volume])
@@ -281,7 +308,7 @@ export function useSpeech() {
     }
 
     if (priority === 'high') {
-      audioRef.current?.pause()
+      audioElementRef.current?.pause()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current || synthRef.current?.speaking) {
@@ -291,11 +318,7 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Priority order:
-    // 1. Cached audio (works offline!)
-    // 2. Live ElevenLabs (if online)
-    // 3. Native speech (always works)
-
+    // Try cached first, then live, then native
     if (AUDIO_CACHE.has(text)) {
       const success = await playFromCache(text)
       if (success) return true
@@ -306,36 +329,44 @@ export function useSpeech() {
       if (success) return true
     }
 
-    // Last resort: native speech
-    console.log('🔊 Using native speech (offline or API failed)')
     return speakNative(text)
   }, [settings.voiceEnabled, playFromCache, speakElevenLabs, speakNative])
+
+  // Initialize audio on first user interaction (required for iOS)
+  const initAudio = useCallback(async () => {
+    await ensureAudioContext()
+    
+    // Play a silent audio to unlock audio playback
+    try {
+      const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
+      silentAudio.volume = 0.01
+      await silentAudio.play()
+      silentAudio.pause()
+    } catch (e) {}
+    
+    console.log('🔊 Audio initialized')
+  }, [ensureAudioContext])
 
   const isSpeaking = useCallback(() => {
     return isPlayingRef.current || (synthRef.current?.speaking ?? false)
   }, [])
 
   const stop = useCallback(() => {
-    audioRef.current?.pause()
+    audioElementRef.current?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
   }, [setSpeaking])
 
-  // Get cache status
-  const getCacheStatus = useCallback(() => {
-    return {
-      ...cacheStatus,
-      cachedCount: AUDIO_CACHE.size
-    }
-  }, [])
+  const getCacheStatus = useCallback(() => ({
+    ...cacheStatus,
+    cachedCount: AUDIO_CACHE.size
+  }), [])
 
-  // Clear cache (for memory management)
   const clearCache = useCallback(() => {
     AUDIO_CACHE.forEach(url => URL.revokeObjectURL(url))
     AUDIO_CACHE.clear()
     cacheStatus = { isPreloading: false, progress: 0, total: 0, ready: false }
-    console.log('🎤 Audio cache cleared')
   }, [])
 
   return { 
@@ -344,14 +375,12 @@ export function useSpeech() {
     isSpeaking, 
     preloadRouteAudio,
     getCacheStatus,
-    clearCache
+    clearCache,
+    initAudio
   }
 }
 
-// ================================
 // Generate Callout Text
-// ================================
-
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
   if (!curve) return ''
 
@@ -359,12 +388,9 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   
   if (curve.isChicane) {
     const dirWord = curve.startDirection === 'LEFT' ? 'left' : 'right'
-    
-    if (curve.chicaneType === 'CHICANE') {
-      parts.push(`Chicane ${dirWord} ${curve.severitySequence}`)
-    } else {
-      parts.push(`S ${dirWord} ${curve.severitySequence}`)
-    }
+    parts.push(curve.chicaneType === 'CHICANE' 
+      ? `Chicane ${dirWord} ${curve.severitySequence}`
+      : `S ${dirWord} ${curve.severitySequence}`)
   } else {
     const dirWord = curve.direction === 'LEFT' ? 'Left' : 'Right'
     parts.push(dirWord)
