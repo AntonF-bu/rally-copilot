@@ -14,7 +14,9 @@ export default function CalloutOverlay() {
     upcomingCurves, 
     mode, 
     settings, 
-    getRecommendedSpeed, 
+    getRecommendedSpeed,
+    getSpeedUnit,
+    formatDistance,
     simulationProgress,
     routeData,
     routeMode,
@@ -24,6 +26,11 @@ export default function CalloutOverlay() {
   } = useStore()
 
   const [isOnline, setIsOnline] = useState(true)
+  
+  // Derived values
+  const isMetric = settings.units === 'metric'
+  const speedUnit = isMetric ? 'KM/H' : 'MPH'
+  const distanceUnit = isMetric ? 'm' : 'ft'
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -49,31 +56,47 @@ export default function CalloutOverlay() {
     return { show: true, start: 40 }
   }
 
-  const currentElevationFt = altitude !== null ? Math.round(altitude * 3.28084) : null
+  // Get current speed in correct units
+  const currentSpeedDisplay = isMetric 
+    ? Math.round((speed || 0) * 1.609) 
+    : Math.round(speed || 0)
 
-  const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
-    const numPoints = 20
-    const points = []
-    const baseElev = altitude !== null ? altitude : 50
-    for (let i = 0; i < numPoints; i++) {
-      const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
-      points.push(baseElev + variation)
-    }
-    const minElev = Math.min(...points)
-    const maxElev = Math.max(...points)
-    const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
-    return {
-      elevationData: points,
-      totalElevation: Math.round((maxElev - minElev) * 3.28084),
-      elevationPosition: pos
-    }
-  }, [altitude, simulationProgress])
+  // Elevation in correct units
+  const currentElevationDisplay = altitude !== null 
+    ? (isMetric ? Math.round(altitude) : Math.round(altitude * 3.28084))
+    : null
+  const elevationUnit = isMetric ? 'm' : 'ft'
 
   if (!isRunning) return null
 
   const hasNetworkIssue = !isOnline
 
   if (!curve) {
+    // Minimal HUD when no curves
+    if (settings.hudStyle === 'minimal') {
+      return (
+        <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+          <div className="hud-glass rounded-2xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-white/40 text-xs">Clear ahead</span>
+              </div>
+              {settings.showSpeedometer !== false && (
+                <div className="text-right">
+                  <span className="text-2xl font-bold" style={{ color: modeColor }}>
+                    {currentSpeedDisplay}
+                  </span>
+                  <span className="text-[10px] text-white/40 ml-1">{speedUnit}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <style>{hudStyles}</style>
+        </div>
+      )
+    }
+
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
         {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
@@ -86,34 +109,39 @@ export default function CalloutOverlay() {
               </span>
               <span className="text-white/30 text-xs">• No curves ahead</span>
             </div>
-            <div className="text-right">
-              <span className="text-2xl font-bold" style={{ color: modeColor }}>
-                {Math.round(speed || 0)}
-              </span>
-              <span className="text-xs text-white/40 ml-1">
-                {settings.speedUnit?.toUpperCase() || 'MPH'}
-              </span>
-            </div>
+            {settings.showSpeedometer !== false && (
+              <div className="text-right">
+                <span className="text-2xl font-bold" style={{ color: modeColor }}>
+                  {currentSpeedDisplay}
+                </span>
+                <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
+              </div>
+            )}
           </div>
         </div>
-        <ElevationWidget 
-          elevationData={elevationData}
-          totalElevation={totalElevation}
-          currentElevation={currentElevationFt}
-          elevationPosition={elevationPosition}
-          modeColor={modeColor}
-        />
+        {settings.showElevation !== false && (
+          <ElevationWidget 
+            elevationData={elevationData}
+            totalElevation={totalElevation}
+            currentElevation={currentElevationDisplay}
+            elevationPosition={elevationPosition}
+            modeColor={modeColor}
+            unit={elevationUnit}
+          />
+        )}
         <style>{hudStyles}</style>
       </div>
     )
   }
 
   const recommendedSpeed = getRecommendedSpeed(curve)
-  const currentSpeedDisplay = settings.speedUnit === 'kmh' 
-    ? Math.round((speed || 0) * 1.609) 
-    : Math.round(speed || 0)
   const severityColor = getCurveColor(curve.severity)
   const brakingZone = getBrakingZone(curve.severity)
+  
+  // Convert distance to display units
+  const distanceDisplay = isMetric 
+    ? Math.round(curve.distance) 
+    : Math.round(curve.distance * 3.28084)
   
   const maxDistance = 400
   const progress = Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100))
@@ -122,6 +150,28 @@ export default function CalloutOverlay() {
   // FIXED: Use startDirection for chicanes, direction for regular curves
   const displayDirection = curve.isChicane ? curve.startDirection : curve.direction
   const isLeft = displayDirection === 'LEFT'
+  
+  // Elevation data
+  const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
+    const numPoints = 20
+    const points = []
+    const baseElev = altitude !== null ? altitude : 50
+    for (let i = 0; i < numPoints; i++) {
+      const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
+      points.push(baseElev + variation)
+    }
+    const minElev = Math.min(...points)
+    const maxElev = Math.max(...points)
+    const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
+    const elevRange = isMetric 
+      ? Math.round(maxElev - minElev)
+      : Math.round((maxElev - minElev) * 3.28084)
+    return {
+      elevationData: points,
+      totalElevation: elevRange,
+      elevationPosition: pos
+    }
+  }, [altitude, simulationProgress, isMetric])
 
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
@@ -145,7 +195,7 @@ export default function CalloutOverlay() {
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
                 <span className="text-lg font-bold tracking-tight" style={{ color: inBrakingZone ? '#ff3366' : 'white' }}>
-                  {Math.round(curve.distance)}<span className="text-xs text-white/40 ml-1">m</span>
+                  {distanceDisplay}<span className="text-xs text-white/40 ml-1">{distanceUnit}</span>
                 </span>
               </div>
               
@@ -192,7 +242,7 @@ export default function CalloutOverlay() {
                 >
                   {currentSpeedDisplay}
                 </div>
-                <span className="text-xs text-white/40">{settings.speedUnit?.toUpperCase() || 'MPH'}</span>
+                <span className="text-xs text-white/40">{speedUnit}</span>
               </div>
               {/* Recommended Speed (small, below) */}
               <div className="flex items-center gap-1 mt-0.5">
@@ -220,13 +270,16 @@ export default function CalloutOverlay() {
         </div>
       )}
 
-      <ElevationWidget 
-        elevationData={elevationData}
-        totalElevation={totalElevation}
-        currentElevation={currentElevationFt}
-        elevationPosition={elevationPosition}
-        modeColor={modeColor}
-      />
+      {settings.showElevation !== false && (
+        <ElevationWidget 
+          elevationData={elevationData}
+          totalElevation={totalElevation}
+          currentElevation={currentElevationDisplay}
+          elevationPosition={elevationPosition}
+          modeColor={modeColor}
+          unit={elevationUnit}
+        />
+      )}
 
       <style>{hudStyles}</style>
     </div>
@@ -390,7 +443,7 @@ function StatusWarnings({ hasNetworkIssue }) {
   )
 }
 
-function ElevationWidget({ elevationData, totalElevation, currentElevation, elevationPosition, modeColor }) {
+function ElevationWidget({ elevationData, totalElevation, currentElevation, elevationPosition, modeColor, unit = 'ft' }) {
   const minElev = Math.min(...elevationData)
   const maxElev = Math.max(...elevationData)
   const range = maxElev - minElev || 1
@@ -399,7 +452,7 @@ function ElevationWidget({ elevationData, totalElevation, currentElevation, elev
     <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
       <div className="flex items-center justify-between mb-1">
         <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-        <span className="text-[8px] text-white/40">Δ{totalElevation}ft</span>
+        <span className="text-[8px] text-white/40">Δ{totalElevation}{unit}</span>
       </div>
       <div className="h-8">
         <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
@@ -426,7 +479,7 @@ function ElevationWidget({ elevationData, totalElevation, currentElevation, elev
         </svg>
       </div>
       <div className="text-[9px] text-white/50 text-center mt-0.5">
-        {currentElevation !== null ? `${currentElevation}ft` : '-- ft'}
+        {currentElevation !== null ? `${currentElevation}${unit}` : `-- ${unit}`}
       </div>
     </div>
   )
