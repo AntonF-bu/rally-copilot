@@ -1,6 +1,6 @@
 // ================================
-// Zone Service v2 - Route Character Detection
-// Multi-factor: speed limits, traffic signals, city boundaries, curve density
+// Zone Service v3 - Census-Based Route Character Detection
+// Uses TIGERweb + Census Data API for reliable population density
 // ================================
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
@@ -53,56 +53,341 @@ export const CHARACTER_BEHAVIORS = {
   }
 }
 
-// Major urban area bounding boxes (rough approximations)
-// Format: [west, south, east, north]
-const URBAN_AREAS = {
-  'Boston Metro': [-71.19, 42.23, -70.95, 42.42],
-  'Cambridge': [-71.16, 42.35, -71.07, 42.40],
-  'Newton': [-71.27, 42.28, -71.15, 42.37],
-  'Brookline': [-71.18, 42.31, -71.10, 42.35],
-  'Somerville': [-71.13, 42.38, -71.07, 42.42],
-  // Add more as needed
+// Population density thresholds (people per square mile)
+const DENSITY_THRESHOLDS = {
+  HIGH: 10000,    // Urban: > 10k/sq mi (Boston, NYC density)
+  MEDIUM: 2000,   // Suburban: 2k - 10k/sq mi
+  LOW: 2000       // Rural: < 2k/sq mi
+}
+
+// ================================
+// CENSUS API INTEGRATION
+// ================================
+
+/**
+ * Fetch census tract data for a route corridor
+ * Called ONCE when route is loaded, returns cached tract data
+ */
+export async function fetchCensusCorridorData(routeCoordinates) {
+  if (!routeCoordinates?.length || routeCoordinates.length < 2) {
+    console.warn('⚠️ No route coordinates for census lookup')
+    return { tracts: [], success: false }
+  }
+
+  console.log('🏛️ Fetching Census corridor data...')
+
+  try {
+    // Step 1: Get tract geometries that intersect route buffer
+    const tractGeometries = await fetchTractGeometries(routeCoordinates)
+    
+    if (!tractGeometries.length) {
+      console.warn('⚠️ No census tracts found for route')
+      return { tracts: [], success: false }
+    }
+
+    console.log(`  Found ${tractGeometries.length} census tracts`)
+
+    // Step 2: Get population data for those tracts
+    const tractsWithPopulation = await fetchTractPopulations(tractGeometries)
+    
+    // Step 3: Calculate density for each tract
+    const tractsWithDensity = tractsWithPopulation.map(tract => ({
+      ...tract,
+      density: calculateDensity(tract.population, tract.areaLand),
+      densityCategory: categorizeDensity(calculateDensity(tract.population, tract.areaLand))
+    }))
+
+    console.log('✅ Census data loaded:', 
+      tractsWithDensity.map(t => `${t.geoid.slice(-4)}:${t.densityCategory}`).join(', '))
+
+    return { 
+      tracts: tractsWithDensity, 
+      success: true 
+    }
+
+  } catch (err) {
+    console.error('❌ Census data fetch error:', err)
+    return { tracts: [], success: false, error: err.message }
+  }
 }
 
 /**
+ * Step 1: Query TIGERweb for tract geometries intersecting route
+ */
+async function fetchTractGeometries(coordinates) {
+  // Convert route to Esri polyline format
+  const polyline = {
+    paths: [coordinates],
+    spatialReference: { wkid: 4326 }
+  }
+
+  const params = new URLSearchParams({
+    geometry: JSON.stringify(polyline),
+    geometryType: 'esriGeometryPolyline',
+    spatialRel: 'esriSpatialRelIntersects',
+    distance: 500,  // 500m buffer around route
+    units: 'esriSRUnit_Meter',
+    outFields: 'GEOID,STATE,COUNTY,TRACT,AREALAND',
+    returnGeometry: 'true',
+    f: 'geojson'
+  })
+
+  const url = `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/4/query?${params}`
+  
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    throw new Error(`TIGERweb error: ${response.status}`)
+  }
+
+  const data = await response.json()
+  
+  if (!data.features?.length) {
+    return []
+  }
+
+  return data.features.map(feature => ({
+    geoid: feature.properties.GEOID,
+    state: feature.properties.STATE,
+    county: feature.properties.COUNTY,
+    tract: feature.properties.TRACT,
+    areaLand: feature.properties.AREALAND, // Square meters
+    geometry: feature.geometry
+  }))
+}
+
+/**
+ * Step 2: Fetch population for tracts from Census Data API
+ */
+async function fetchTractPopulations(tracts) {
+  // Group tracts by state+county for efficient API calls
+  const byStateCounty = {}
+  
+  tracts.forEach(tract => {
+    const key = `${tract.state}-${tract.county}`
+    if (!byStateCounty[key]) {
+      byStateCounty[key] = {
+        state: tract.state,
+        county: tract.county,
+        tracts: []
+      }
+    }
+    byStateCounty[key].tracts.push(tract)
+  })
+
+  // Fetch population for each state+county group
+  const results = await Promise.all(
+    Object.values(byStateCounty).map(group => 
+      fetchPopulationForCounty(group.state, group.county, group.tracts)
+    )
+  )
+
+  return results.flat()
+}
+
+/**
+ * Fetch population for all tracts in a county
+ */
+async function fetchPopulationForCounty(state, county, tracts) {
+  // B01001_001E = Total Population from ACS 5-Year estimates
+  const url = `https://api.census.gov/data/2023/acs/acs5?get=B01001_001E&for=tract:*&in=state:${state}&in=county:${county}`
+  
+  try {
+    const response = await fetch(url)
+    
+    if (!response.ok) {
+      console.warn(`Census API error for ${state}-${county}: ${response.status}`)
+      return tracts.map(t => ({ ...t, population: null }))
+    }
+
+    const data = await response.json()
+    
+    // First row is headers: ["B01001_001E", "state", "county", "tract"]
+    // Subsequent rows are data
+    const populationMap = {}
+    for (let i = 1; i < data.length; i++) {
+      const [pop, st, co, tr] = data[i]
+      const geoid = `${st}${co}${tr}`
+      populationMap[geoid] = parseInt(pop) || 0
+    }
+
+    // Match populations to our tracts
+    return tracts.map(tract => ({
+      ...tract,
+      population: populationMap[tract.geoid] ?? null
+    }))
+
+  } catch (err) {
+    console.warn(`Census API error for ${state}-${county}:`, err.message)
+    return tracts.map(t => ({ ...t, population: null }))
+  }
+}
+
+/**
+ * Calculate population density (people per square mile)
+ */
+function calculateDensity(population, areaLandSqMeters) {
+  if (!population || !areaLandSqMeters || areaLandSqMeters === 0) {
+    return 0
+  }
+  // Convert sq meters to sq miles: 1 sq mile = 2,589,988 sq meters
+  const areaSquareMiles = areaLandSqMeters / 2589988
+  return Math.round(population / areaSquareMiles)
+}
+
+/**
+ * Categorize density into urban/suburban/rural
+ */
+function categorizeDensity(density) {
+  if (density >= DENSITY_THRESHOLDS.HIGH) return 'urban'
+  if (density >= DENSITY_THRESHOLDS.MEDIUM) return 'suburban'
+  return 'rural'
+}
+
+// ================================
+// ZONE DETECTION AT RUNTIME
+// ================================
+
+/**
+ * Get the zone/character at a specific position using cached census data
+ * Called during navigation - NO API calls, just point-in-polygon lookup
+ */
+export function getZoneAtPosition(position, cachedTracts, roadInfo = null) {
+  if (!position || !cachedTracts?.length) {
+    return {
+      character: ROUTE_CHARACTER.SPIRITED,
+      density: null,
+      densityCategory: 'unknown',
+      tractId: null
+    }
+  }
+
+  // Find which tract contains this position
+  const tract = cachedTracts.find(t => 
+    pointInPolygon(position, t.geometry)
+  )
+
+  if (!tract) {
+    // Position not in any cached tract - use road info fallback
+    return classifyByRoadInfo(roadInfo)
+  }
+
+  // Determine character based on density + road type
+  const character = determineCharacter(tract.densityCategory, roadInfo)
+
+  return {
+    character,
+    density: tract.density,
+    densityCategory: tract.densityCategory,
+    tractId: tract.geoid,
+    tractGeometry: tract.geometry
+  }
+}
+
+/**
+ * Determine route character based on density and road type
+ */
+function determineCharacter(densityCategory, roadInfo) {
+  const isHighway = roadInfo && 
+    (['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadInfo.roadClass) ||
+     roadInfo.speedLimit >= 55)
+
+  // Highways are TRANSIT even in urban areas
+  if (isHighway) {
+    return ROUTE_CHARACTER.TRANSIT
+  }
+
+  // Map density to character
+  switch (densityCategory) {
+    case 'urban':
+      return ROUTE_CHARACTER.URBAN
+    case 'suburban':
+      return ROUTE_CHARACTER.SPIRITED
+    case 'rural':
+    default:
+      return ROUTE_CHARACTER.TECHNICAL
+  }
+}
+
+/**
+ * Fallback classification when no census data available
+ */
+function classifyByRoadInfo(roadInfo) {
+  if (!roadInfo) {
+    return {
+      character: ROUTE_CHARACTER.SPIRITED,
+      density: null,
+      densityCategory: 'unknown',
+      tractId: null
+    }
+  }
+
+  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadInfo.roadClass)
+  
+  let character
+  if (isHighway || roadInfo.speedLimit >= 55) {
+    character = ROUTE_CHARACTER.TRANSIT
+  } else if (roadInfo.speedLimit <= 25) {
+    character = ROUTE_CHARACTER.URBAN
+  } else if (roadInfo.speedLimit >= 45) {
+    character = ROUTE_CHARACTER.SPIRITED
+  } else {
+    character = ROUTE_CHARACTER.SPIRITED
+  }
+
+  return {
+    character,
+    density: null,
+    densityCategory: 'unknown',
+    tractId: null
+  }
+}
+
+// ================================
+// MAIN ROUTE ANALYSIS
+// ================================
+
+/**
  * Main entry: Analyze route and return character segments
+ * Now uses Census data for density classification
  */
 export async function analyzeRouteCharacter(coordinates, curves = []) {
   if (!coordinates?.length || coordinates.length < 2) {
-    return { segments: [], summary: null }
+    return { segments: [], summary: null, censusTracts: [] }
   }
 
-  console.log('🛣️ Analyzing route character...')
+  console.log('🛣️ Analyzing route character with Census data...')
   
-  // Sample points along route (every ~300m for better resolution)
+  // Fetch census corridor data (one-time API call)
+  const { tracts: censusTracts, success } = await fetchCensusCorridorData(coordinates)
+
+  // Sample points along route
   const samplePoints = sampleRoute(coordinates, 300)
   console.log(`  Sampled ${samplePoints.length} points`)
 
-  // Fetch data for each sample point in parallel
+  // Fetch road info for each sample point (parallel)
   const pointData = await Promise.all(
     samplePoints.map(async (point) => {
-      const [roadInfo, signalCount, isUrban] = await Promise.all([
-        fetchRoadInfo(point.coord),
-        countNearbySignals(point.coord),
-        checkUrbanArea(point.coord)
-      ])
+      const roadInfo = await fetchRoadInfo(point.coord)
+      const zoneInfo = success 
+        ? getZoneAtPosition(point.coord, censusTracts, roadInfo)
+        : classifyByRoadInfo(roadInfo)
       
       return {
         ...point,
         ...roadInfo,
-        signalCount,
-        isUrban
+        ...zoneInfo
       }
     })
   )
 
-  // Calculate curve density for each segment
+  // Add curve density metrics
   const pointsWithCurveDensity = addCurveDensity(pointData, curves)
 
-  // Classify each point
+  // Final classification considering all factors
   const classifiedPoints = pointsWithCurveDensity.map(point => ({
     ...point,
-    character: classifyPoint(point)
+    character: finalClassifyPoint(point)
   }))
 
   // Segment into contiguous character zones
@@ -114,8 +399,52 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
   console.log(`  Found ${segments.length} segments:`, 
     segments.map(s => `${s.character}(${((s.endDistance - s.startDistance)/1609).toFixed(1)}mi)`).join(' → '))
 
-  return { segments, summary }
+  return { segments, summary, censusTracts }
 }
+
+/**
+ * Final classification considering census density + road characteristics + curves
+ */
+function finalClassifyPoint(point) {
+  const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity } = point
+  
+  // Highway override: always TRANSIT regardless of density
+  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
+  if (isHighway || speedLimit >= 55) {
+    // But if highway has lots of curves (mountain road), bump to SPIRITED
+    if (curveDensity >= 3) {
+      return ROUTE_CHARACTER.SPIRITED
+    }
+    return ROUTE_CHARACTER.TRANSIT
+  }
+
+  // High curve density in low-density area = TECHNICAL
+  if (densityCategory === 'rural' && curveDensity >= 2) {
+    return ROUTE_CHARACTER.TECHNICAL
+  }
+
+  // Suburban with good curves = SPIRITED
+  if (densityCategory === 'suburban') {
+    return ROUTE_CHARACTER.SPIRITED
+  }
+
+  // Urban density = URBAN (unless highway, handled above)
+  if (densityCategory === 'urban') {
+    return ROUTE_CHARACTER.URBAN
+  }
+
+  // Rural default
+  if (densityCategory === 'rural') {
+    return curveDensity >= 1 ? ROUTE_CHARACTER.TECHNICAL : ROUTE_CHARACTER.SPIRITED
+  }
+
+  // Fallback to density-based or SPIRITED
+  return point.character || ROUTE_CHARACTER.SPIRITED
+}
+
+// ================================
+// ROAD INFO (unchanged from v2)
+// ================================
 
 /**
  * Fetch road info (speed limit, road class) from Mapbox
@@ -134,13 +463,11 @@ async function fetchRoadInfo(coord) {
     if (data.features?.length > 0) {
       const props = data.features[0].properties || {}
       
-      // Extract speed limit (Mapbox stores as number or string)
       let speedLimit = props.maxspeed
       if (typeof speedLimit === 'string') {
         speedLimit = parseInt(speedLimit.replace(/[^0-9]/g, '')) || 35
       }
       if (!speedLimit || speedLimit < 5 || speedLimit > 85) {
-        // Estimate from road class if missing
         speedLimit = estimateSpeedFromClass(props.class)
       }
       
@@ -159,96 +486,78 @@ async function fetchRoadInfo(coord) {
   }
 }
 
-/**
- * Count traffic signals within radius of point
- */
-async function countNearbySignals(coord, radiusMeters = 400) {
-  if (!MAPBOX_TOKEN) return 0
-
-  try {
-    // Query for traffic_signal POIs
-    const response = await fetch(
-      `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${coord[0]},${coord[1]}.json?layers=poi_label&radius=${radiusMeters}&limit=50&access_token=${MAPBOX_TOKEN}`
-    )
-    const data = await response.json()
-    
-    if (data.features?.length > 0) {
-      // Count features that are traffic signals
-      const signals = data.features.filter(f => {
-        const type = f.properties?.type?.toLowerCase() || ''
-        const maki = f.properties?.maki || ''
-        return type.includes('signal') || type.includes('traffic') || 
-               maki === 'traffic-signal' || type.includes('stoplight')
-      })
-      return signals.length
-    }
-    
-    return 0
-  } catch (err) {
-    return 0
-  }
-}
+// ================================
+// GEOMETRY HELPERS
+// ================================
 
 /**
- * Check if point is in a known urban area
+ * Point-in-polygon test for GeoJSON geometry
  */
-async function checkUrbanArea(coord) {
-  // First check our predefined bounding boxes (fast)
-  for (const [name, bbox] of Object.entries(URBAN_AREAS)) {
-    if (coord[0] >= bbox[0] && coord[0] <= bbox[2] &&
-        coord[1] >= bbox[1] && coord[1] <= bbox[3]) {
-      return { isUrban: true, areaName: name }
-    }
-  }
+function pointInPolygon(point, geometry) {
+  if (!geometry) return false
   
-  // Fallback: query Mapbox for place type
-  if (MAPBOX_TOKEN) {
-    try {
-      const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${coord[0]},${coord[1]}.json?types=place,locality,neighborhood&access_token=${MAPBOX_TOKEN}`
-      )
-      const data = await response.json()
-      
-      if (data.features?.length > 0) {
-        const place = data.features[0]
-        const placeType = place.place_type?.[0]
-        const population = place.properties?.population
-        
-        // Urban if it's a city/town with decent population or specific place types
-        if (placeType === 'place' && population > 20000) {
-          return { isUrban: true, areaName: place.text }
-        }
-        if (placeType === 'neighborhood' || placeType === 'locality') {
-          return { isUrban: true, areaName: place.text }
+  const [lng, lat] = point
+  
+  // Handle both Polygon and MultiPolygon
+  const polygons = geometry.type === 'MultiPolygon' 
+    ? geometry.coordinates 
+    : [geometry.coordinates]
+  
+  for (const polygon of polygons) {
+    // First ring is exterior, rest are holes
+    const exterior = polygon[0]
+    if (isPointInRing(lng, lat, exterior)) {
+      // Check if inside any hole
+      let inHole = false
+      for (let i = 1; i < polygon.length; i++) {
+        if (isPointInRing(lng, lat, polygon[i])) {
+          inHole = true
+          break
         }
       }
-    } catch (err) {
-      // Ignore errors, default to non-urban
+      if (!inHole) return true
     }
   }
   
-  return { isUrban: false, areaName: null }
+  return false
 }
 
 /**
- * Add curve density metric to each point
+ * Ray casting algorithm for point in ring
  */
+function isPointInRing(x, y, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1]
+    const xj = ring[j][0], yj = ring[j][1]
+    
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+    
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+// ================================
+// SEGMENTATION HELPERS
+// ================================
+
 function addCurveDensity(points, curves) {
   if (!curves?.length) {
     return points.map(p => ({ ...p, curveDensity: 0, curveAvgSeverity: 0 }))
   }
 
-  // For each point, count curves within 1 mile (1609m) window
   return points.map(point => {
-    const windowStart = point.distance - 804  // 0.5mi before
-    const windowEnd = point.distance + 804    // 0.5mi after
+    const windowStart = point.distance - 804
+    const windowEnd = point.distance + 804
     
     const nearbyCurves = curves.filter(c => {
       const curveDist = c.distanceFromStart || 0
       return curveDist >= windowStart && curveDist <= windowEnd
     })
     
-    const curveDensity = nearbyCurves.length  // curves per mile
+    const curveDensity = nearbyCurves.length
     const curveAvgSeverity = nearbyCurves.length > 0
       ? nearbyCurves.reduce((sum, c) => sum + c.severity, 0) / nearbyCurves.length
       : 0
@@ -257,67 +566,6 @@ function addCurveDensity(points, curves) {
   })
 }
 
-/**
- * Classify a single point based on all factors
- */
-function classifyPoint(point) {
-  const { speedLimit, roadClass, signalCount, isUrban, curveDensity, curveAvgSeverity } = point
-  
-  // Signals per mile (our sample is ~0.5mi window, so multiply by 2)
-  const signalsPerMile = signalCount * 2
-  
-  // Highway classification
-  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
-  
-  // Decision tree for route character
-  
-  // TECHNICAL: Twisty roads with few interruptions
-  if (curveDensity >= 3 && signalsPerMile < 1 && !isUrban?.isUrban) {
-    return ROUTE_CHARACTER.TECHNICAL
-  }
-  
-  // TECHNICAL: High curve severity even with fewer curves
-  if (curveAvgSeverity >= 4 && signalsPerMile < 2) {
-    return ROUTE_CHARACTER.TECHNICAL
-  }
-  
-  // URBAN: City driving conditions
-  if (isUrban?.isUrban && signalsPerMile >= 3) {
-    return ROUTE_CHARACTER.URBAN
-  }
-  if (speedLimit <= 30 && signalsPerMile >= 2) {
-    return ROUTE_CHARACTER.URBAN
-  }
-  if (signalsPerMile >= 4) {
-    return ROUTE_CHARACTER.URBAN
-  }
-  
-  // TRANSIT: Highway cruising
-  if (isHighway && curveDensity < 2) {
-    return ROUTE_CHARACTER.TRANSIT
-  }
-  if (speedLimit >= 55 && curveDensity < 2 && signalsPerMile < 1) {
-    return ROUTE_CHARACTER.TRANSIT
-  }
-  
-  // SPIRITED: Fun roads with some urban elements OR faster roads in/near cities
-  if (speedLimit >= 40 && signalsPerMile < 2) {
-    return ROUTE_CHARACTER.SPIRITED
-  }
-  if (curveDensity >= 2 && !isUrban?.isUrban) {
-    return ROUTE_CHARACTER.SPIRITED
-  }
-  
-  // Default based on speed limit
-  if (speedLimit >= 45) return ROUTE_CHARACTER.SPIRITED
-  if (speedLimit <= 30) return ROUTE_CHARACTER.URBAN
-  
-  return ROUTE_CHARACTER.SPIRITED
-}
-
-/**
- * Segment route into contiguous character zones
- */
 function segmentByCharacter(classifiedPoints, fullCoordinates) {
   if (!classifiedPoints?.length) return []
 
@@ -326,7 +574,6 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
 
   classifiedPoints.forEach((point, i) => {
     if (!currentSegment || currentSegment.character !== point.character) {
-      // Close previous segment
       if (currentSegment) {
         currentSegment.endIndex = point.index
         currentSegment.endDistance = point.distance
@@ -337,7 +584,6 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
         segments.push(currentSegment)
       }
       
-      // Start new segment
       currentSegment = {
         id: `seg-${segments.length}`,
         character: point.character,
@@ -346,10 +592,9 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
         behavior: CHARACTER_BEHAVIORS[point.character],
         details: {
           avgSpeedLimit: point.speedLimit,
-          avgSignalDensity: point.signalCount * 2,
-          avgCurveDensity: point.curveDensity,
-          isUrban: point.isUrban?.isUrban || false,
-          areaName: point.isUrban?.areaName || null
+          density: point.density,
+          densityCategory: point.densityCategory,
+          avgCurveDensity: point.curveDensity
         }
       }
     } else {
@@ -357,14 +602,11 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
       const count = i - classifiedPoints.findIndex(p => p.index === currentSegment.startIndex) + 1
       currentSegment.details.avgSpeedLimit = 
         (currentSegment.details.avgSpeedLimit * (count - 1) + point.speedLimit) / count
-      currentSegment.details.avgSignalDensity = 
-        (currentSegment.details.avgSignalDensity * (count - 1) + point.signalCount * 2) / count
       currentSegment.details.avgCurveDensity = 
         (currentSegment.details.avgCurveDensity * (count - 1) + point.curveDensity) / count
     }
   })
 
-  // Close final segment
   if (currentSegment) {
     const lastPoint = classifiedPoints[classifiedPoints.length - 1]
     currentSegment.endIndex = lastPoint.index
@@ -376,13 +618,9 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
     segments.push(currentSegment)
   }
 
-  // Merge very short segments (< 0.3 miles) into neighbors
   return mergeShortSegments(segments, 500)
 }
 
-/**
- * Merge segments shorter than minLength into adjacent segments
- */
 function mergeShortSegments(segments, minLengthMeters) {
   if (segments.length <= 1) return segments
 
@@ -393,13 +631,11 @@ function mergeShortSegments(segments, minLengthMeters) {
     const segLength = seg.endDistance - seg.startDistance
     
     if (segLength < minLengthMeters && merged.length > 0) {
-      // Merge into previous segment
       const prev = merged[merged.length - 1]
       prev.endIndex = seg.endIndex
       prev.endDistance = seg.endDistance
       prev.coordinates = [...prev.coordinates, ...seg.coordinates.slice(1)]
     } else if (segLength < minLengthMeters && i < segments.length - 1) {
-      // Merge into next segment
       segments[i + 1].startIndex = seg.startIndex
       segments[i + 1].startDistance = seg.startDistance
       segments[i + 1].coordinates = [...seg.coordinates, ...segments[i + 1].coordinates.slice(1)]
@@ -411,9 +647,6 @@ function mergeShortSegments(segments, minLengthMeters) {
   return merged
 }
 
-/**
- * Generate summary statistics
- */
 function generateSummary(segments, coordinates) {
   if (!segments?.length) return null
 
@@ -430,7 +663,6 @@ function generateSummary(segments, coordinates) {
     }
   }
 
-  // Find "best" section (longest technical or spirited segment)
   const funSegments = segments.filter(s => 
     s.character === ROUTE_CHARACTER.TECHNICAL || s.character === ROUTE_CHARACTER.SPIRITED
   )
@@ -453,32 +685,8 @@ function generateSummary(segments, coordinates) {
   }
 }
 
-/**
- * Get behavior for a specific curve based on route character
- */
-export function getBehaviorForCurve(segments, curve) {
-  if (!segments?.length || !curve) {
-    return CHARACTER_BEHAVIORS.spirited
-  }
-
-  const curveDistance = curve.distanceFromStart || 0
-  const segment = segments.find(s => 
-    curveDistance >= s.startDistance && curveDistance <= s.endDistance
-  )
-
-  return segment?.behavior || CHARACTER_BEHAVIORS.spirited
-}
-
-/**
- * Check if a curve should be announced based on current segment
- */
-export function shouldAnnounceCurve(segments, curve) {
-  const behavior = getBehaviorForCurve(segments, curve)
-  return curve.severity >= behavior.minSeverity
-}
-
 // ================================
-// Helper functions
+// HELPER FUNCTIONS
 // ================================
 
 function sampleRoute(coordinates, intervalMeters) {
@@ -498,7 +706,6 @@ function sampleRoute(coordinates, intervalMeters) {
     }
   }
   
-  // Always include last point
   if (samples[samples.length - 1].index !== coordinates.length - 1) {
     samples.push({ 
       coord: coordinates[coordinates.length - 1], 
@@ -512,20 +719,13 @@ function sampleRoute(coordinates, intervalMeters) {
 
 function estimateSpeedFromClass(roadClass) {
   const speeds = {
-    'motorway': 65,
-    'motorway_link': 45,
-    'trunk': 55,
-    'trunk_link': 40,
-    'primary': 45,
-    'primary_link': 35,
-    'secondary': 40,
-    'secondary_link': 30,
-    'tertiary': 35,
-    'tertiary_link': 25,
-    'residential': 25,
-    'service': 20,
-    'living_street': 15,
-    'unclassified': 35
+    'motorway': 65, 'motorway_link': 45,
+    'trunk': 55, 'trunk_link': 40,
+    'primary': 45, 'primary_link': 35,
+    'secondary': 40, 'secondary_link': 30,
+    'tertiary': 35, 'tertiary_link': 25,
+    'residential': 25, 'service': 20,
+    'living_street': 15, 'unclassified': 35
   }
   return speeds[roadClass] || 35
 }
@@ -545,8 +745,32 @@ function getDistance(coord1, coord2) {
   return R * c
 }
 
+// ================================
+// PUBLIC API
+// ================================
+
+export function getBehaviorForCurve(segments, curve) {
+  if (!segments?.length || !curve) {
+    return CHARACTER_BEHAVIORS.spirited
+  }
+
+  const curveDistance = curve.distanceFromStart || 0
+  const segment = segments.find(s => 
+    curveDistance >= s.startDistance && curveDistance <= s.endDistance
+  )
+
+  return segment?.behavior || CHARACTER_BEHAVIORS.spirited
+}
+
+export function shouldAnnounceCurve(segments, curve) {
+  const behavior = getBehaviorForCurve(segments, curve)
+  return curve.severity >= behavior.minSeverity
+}
+
 export default {
   analyzeRouteCharacter,
+  fetchCensusCorridorData,
+  getZoneAtPosition,
   getBehaviorForCurve,
   shouldAnnounceCurve,
   ROUTE_CHARACTER,
