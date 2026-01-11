@@ -218,12 +218,12 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try native speech (most reliable on iOS)
-    const nativeSuccess = speakNative(text)
-    if (nativeSuccess) return true
+    // Try ElevenLabs first (better voice)
+    const success = await speakElevenLabs(text)
+    if (success) return true
     
-    // Fallback to ElevenLabs
-    return await speakElevenLabs(text)
+    // Fallback to native speech
+    return speakNative(text)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   // Initialize audio (call from user interaction)
