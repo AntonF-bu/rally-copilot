@@ -193,7 +193,9 @@ export default function App() {
   // ================================
   
   useEffect(() => {
-    if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) return
+    if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
+      return
+    }
 
     const now = Date.now()
     const nextCurve = upcomingCurves[0]
@@ -203,24 +205,37 @@ export default function App() {
     const distances = getWarningDistances(currentDrivingMode, currentSpeed, currentSpeed)
     const voiceParams = getVoiceParamsForMode(currentDrivingMode)
     
+    // Log timing info periodically
+    if (now % 5000 < 100) {
+      console.log(`📊 Callout check: mode=${currentDrivingMode}, distance=${Math.round(nextCurve.distance)}m, earlyDist=${Math.round(distances.early)}m, mainDist=${Math.round(distances.main)}m, minPause=${voiceParams.minPause}ms`)
+    }
+    
     // Respect minimum pause between callouts
-    if (now - lastCalloutTimeRef.current < voiceParams.minPause) return
+    const timeSinceLastCallout = now - lastCalloutTimeRef.current
+    if (timeSinceLastCallout < voiceParams.minPause) {
+      return
+    }
     
     // Get behavior for this curve based on route character
     const behavior = getBehaviorForCurve(routeZones, nextCurve)
     
     // Check if curve should be announced based on character behavior
-    if (!shouldAnnounceCurve(routeZones, nextCurve)) {
+    const shouldAnnounce = shouldAnnounceCurve(routeZones, nextCurve)
+    
+    if (!shouldAnnounce) {
       // Still allow chicanes through if they have any severity 3+ curve
       if (nextCurve.isChicane) {
         const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
         const maxSev = Math.max(...severities)
         if (maxSev < behavior.minSeverity) {
-          // Check for clear callout in technical mode
           checkClearCallout(now, nextCurve.distance)
           return
         }
       } else {
+        // Log why we're skipping this curve
+        if (now % 3000 < 100) {
+          console.log(`⏭️ Skipping curve ${nextCurve.id}: severity ${nextCurve.severity} < minSeverity ${behavior.minSeverity}`)
+        }
         checkClearCallout(now, nextCurve.distance)
         return
       }
