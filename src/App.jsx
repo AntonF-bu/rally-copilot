@@ -84,6 +84,7 @@ export default function App() {
   const finalWarningsRef = useRef(new Set())
   const clearCalledRef = useRef(new Set())
   const lastCalloutTimeRef = useRef(0)
+  const lastZoneCalloutTimeRef = useRef(0) // Separate timer for zone transitions
   const lastTripUpdateRef = useRef(0)
   const announcedCurvesRef = useRef(new Set())
   
@@ -175,11 +176,11 @@ export default function App() {
     if (currentZoneRef.current !== zoneId && !zoneTransitionAnnouncedRef.current.has(zoneId)) {
       // New zone entered - announce it
       const now = Date.now()
-      if (now - lastCalloutTimeRef.current > 2000) { // Don't interrupt recent callouts
+      if (now - lastZoneCalloutTimeRef.current > 2000) { // Don't spam zone callouts
         const transitionCallout = getZoneTransitionCallout(currentZone.character)
         if (transitionCallout && settings.voiceEnabled) {
           speak(transitionCallout, 'normal')
-          lastCalloutTimeRef.current = now
+          lastZoneCalloutTimeRef.current = now // Use separate timer - don't block curve callouts
           console.log(`📢 Zone transition: ${transitionCallout}`)
         }
         zoneTransitionAnnouncedRef.current.add(zoneId)
