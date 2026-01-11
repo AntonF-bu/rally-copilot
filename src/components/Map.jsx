@@ -101,54 +101,68 @@ export default function Map() {
     if (!map.current || !mapLoaded) return
     if (!routeData?.coordinates?.length) return
 
-    try {
-      const routeGeoJSON = {
-        type: 'Feature',
-        properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: routeData.coordinates
+    const addRoute = () => {
+      try {
+        const routeGeoJSON = {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: routeData.coordinates
+          }
         }
+
+        // Check if source already exists
+        const existingSource = map.current.getSource('route')
+        
+        if (existingSource) {
+          // Update existing source
+          existingSource.setData(routeGeoJSON)
+          console.log('📍 Route updated')
+        } else {
+          // Add new source and layers
+          map.current.addSource('route', {
+            type: 'geojson',
+            data: routeGeoJSON
+          })
+
+          map.current.addLayer({
+            id: 'route-glow',
+            type: 'line',
+            source: 'route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': modeColor,
+              'line-width': 14,
+              'line-blur': 10,
+              'line-opacity': 0.4
+            }
+          })
+
+          map.current.addLayer({
+            id: 'route-line',
+            type: 'line',
+            source: 'route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: {
+              'line-color': modeColor,
+              'line-width': 5,
+              'line-opacity': 0.9
+            }
+          })
+          
+          console.log('📍 Route added with', routeData.coordinates.length, 'points')
+        }
+      } catch (e) {
+        console.log('Route add/update error:', e.message)
       }
+    }
 
-      // Check if source already exists
-      if (map.current.getSource('route')) {
-        // Update existing source
-        map.current.getSource('route').setData(routeGeoJSON)
-      } else {
-        // Add new source and layers
-        map.current.addSource('route', {
-          type: 'geojson',
-          data: routeGeoJSON
-        })
-
-        map.current.addLayer({
-          id: 'route-glow',
-          type: 'line',
-          source: 'route',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': modeColor,
-            'line-width': 14,
-            'line-blur': 10,
-            'line-opacity': 0.4
-          }
-        })
-
-        map.current.addLayer({
-          id: 'route-line',
-          type: 'line',
-          source: 'route',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': modeColor,
-            'line-width': 5,
-            'line-opacity': 0.9
-          }
-        })
-      }
-    } catch (e) {
-      console.log('Route update error:', e)
+    // Wait for style to be fully loaded
+    if (map.current.isStyleLoaded()) {
+      addRoute()
+    } else {
+      map.current.once('styledata', addRoute)
     }
   }, [mapLoaded, routeData, modeColor])
 
