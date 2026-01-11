@@ -6,10 +6,11 @@ import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
+import CopilotLoader from './CopilotLoader'
 
 // ================================
-// Route Preview - v13
-// With Census-based route character detection + sleeve visualization
+// Route Preview - v14
+// With Census-based route character detection + sleeve visualization + Copilot loader
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -352,7 +353,48 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     catch {} finally { setIsDownloading(false) }
   }
 
-  const handleStart = async () => { await initAudio(); onStartNavigation() }
+  // Loading state for copilot
+  const [isPreparingCopilot, setIsPreparingCopilot] = useState(false)
+  const [copilotProgress, setCopilotProgress] = useState(0)
+  const [copilotReady, setCopilotReady] = useState(false)
+
+  const handleStart = async () => { 
+    await initAudio()
+    
+    // Show loader and start pre-caching
+    setIsPreparingCopilot(true)
+    setCopilotProgress(0)
+    
+    try {
+      // Dynamic import to avoid circular dependency
+      const { preloadCopilotVoices } = await import('../hooks/useSpeech')
+      
+      await preloadCopilotVoices(
+        routeData?.curves || [],
+        routeCharacter.segments || [],
+        ({ percent }) => {
+          setCopilotProgress(Math.min(percent, 99))
+        }
+      )
+      
+      // Complete!
+      setCopilotProgress(100)
+      setCopilotReady(true)
+      
+    } catch (err) {
+      console.error('Copilot prep error:', err)
+      // Still proceed even if caching fails
+      setCopilotProgress(100)
+      setCopilotReady(true)
+    }
+  }
+  
+  const handleCopilotReady = () => {
+    setIsPreparingCopilot(false)
+    setCopilotReady(false)
+    setCopilotProgress(0)
+    onStartNavigation()
+  }
 
   // Build SLEEVE as continuous segments - NO transitions, clean hard cuts
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
@@ -653,6 +695,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   if (isLoadingRoute) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center"><div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>
   if (loadError) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4"><p className="text-red-400">{loadError}</p><button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button></div>
+  
+  // Show copilot loader when preparing
+  if (isPreparingCopilot) {
+    return (
+      <CopilotLoader 
+        progress={copilotProgress} 
+        isComplete={copilotReady}
+        onComplete={handleCopilotReady}
+      />
+    )
+  }
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
