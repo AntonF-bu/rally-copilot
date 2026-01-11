@@ -655,10 +655,11 @@ function TripBuilderModal({ position, onClose, onStartRoute }) {
     { id: 1, type: 'start', name: 'Current Location', coordinates: position },
   ])
   const [showAddStop, setShowAddStop] = useState(false)
-  const [editingIndex, setEditingIndex] = useState(null) // Which waypoint we're editing
+  const [editingIndex, setEditingIndex] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     if (!searchQuery || searchQuery.length < 3) {
@@ -716,10 +717,12 @@ function TripBuilderModal({ position, onClose, onStartRoute }) {
 
   const handleStartRoute = async () => {
     if (waypoints.length < 2) return
+    setIsLoading(true)
     const coords = waypoints.map(w => w.coordinates).filter(Boolean)
     if (coords.length >= 2) {
       onStartRoute(coords)
     }
+    setIsLoading(false)
   }
 
   const canStartRoute = waypoints.length >= 2 && waypoints.every(w => w.coordinates)
