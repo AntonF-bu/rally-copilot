@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
-import { detectZones, ZONE_TYPES, ZONE_COLORS, ZONE_BEHAVIORS, createZoneOverride } from '../services/zoneService'
+import { analyzeRouteCharacter, ROUTE_CHARACTER, CHARACTER_COLORS, CHARACTER_BEHAVIORS } from '../services/zoneService'
 
 // ================================
 // Route Editor - Mission Customization
-// Edit curves, zones, add custom callouts
+// Edit curves, character zones, add custom callouts
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -56,22 +56,21 @@ export default function RouteEditor({ onBack, onSave }) {
     }).filter(Boolean)
   }, [routeData?.curves, editedCurves])
 
-  // Load zones on mount
+  // Load route character on mount
   useEffect(() => {
     if (routeData?.coordinates && routeZones.length === 0) {
-      loadZones()
+      loadCharacter()
     }
   }, [routeData?.coordinates])
 
-  const loadZones = async () => {
+  const loadCharacter = async () => {
     if (!routeData?.coordinates) return
     setIsLoadingZones(true)
     try {
-      const allOverrides = [...globalZoneOverrides, ...routeZoneOverrides]
-      const zones = await detectZones(routeData.coordinates, allOverrides)
-      setRouteZones(zones)
+      const analysis = await analyzeRouteCharacter(routeData.coordinates, routeData.curves || [])
+      setRouteZones(analysis.segments)
     } catch (err) {
-      console.error('Zone detection error:', err)
+      console.error('Character analysis error:', err)
     } finally {
       setIsLoadingZones(false)
     }
@@ -181,45 +180,52 @@ export default function RouteEditor({ onBack, onSave }) {
     
     // Remove old zone layers
     zoneLayersRef.current.forEach(id => {
-      if (mapRef.current.getLayer(id)) mapRef.current.removeLayer(id)
-      if (mapRef.current.getSource(id)) mapRef.current.removeSource(id)
+      try {
+        if (mapRef.current.getLayer(id)) mapRef.current.removeLayer(id)
+        if (mapRef.current.getSource(id)) mapRef.current.removeSource(id)
+      } catch (e) {}
     })
     zoneLayersRef.current = []
     
-    // Add zone overlays
-    routeZones.forEach((zone, i) => {
-      if (!zone.coordinates?.length) return
+    // Add character segment overlays
+    routeZones.forEach((segment, i) => {
+      if (!segment.coordinates?.length) return
       
-      const colors = ZONE_COLORS[zone.type] || ZONE_COLORS.rural
+      const colors = CHARACTER_COLORS[segment.character] || CHARACTER_COLORS.spirited
       const sourceId = `zone-${i}`
       const fillId = `zone-fill-${i}`
       const lineId = `zone-line-${i}`
       
-      // Create a buffer around the route for this zone
-      const bufferCoords = createRouteBuffer(zone.coordinates, 0.0008) // ~80m buffer
+      // Create a buffer around the route for this segment
+      const bufferCoords = createRouteBuffer(segment.coordinates, 0.0008)
+      if (bufferCoords.length < 4) return
       
-      mapRef.current.addSource(sourceId, {
-        type: 'geojson',
-        data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [bufferCoords] } }
-      })
-      
-      // Fill layer
-      mapRef.current.addLayer({
-        id: fillId,
-        type: 'fill',
-        source: sourceId,
-        paint: { 'fill-color': colors.fill.replace('rgba', 'rgb').replace(/,[^,]+\)/, ')'), 'fill-opacity': 0.15 }
-      }, 'route-line')
-      
-      // Border line
-      mapRef.current.addLayer({
-        id: lineId,
-        type: 'line',
-        source: sourceId,
-        paint: { 'line-color': colors.border, 'line-width': 2, 'line-dasharray': [2, 2] }
-      }, 'route-line')
-      
-      zoneLayersRef.current.push(sourceId, fillId, lineId)
+      try {
+        mapRef.current.addSource(sourceId, {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [bufferCoords] } }
+        })
+        
+        // Fill layer
+        mapRef.current.addLayer({
+          id: fillId,
+          type: 'fill',
+          source: sourceId,
+          paint: { 'fill-color': colors.primary, 'fill-opacity': 0.12 }
+        })
+        
+        // Border line
+        mapRef.current.addLayer({
+          id: lineId,
+          type: 'line',
+          source: sourceId,
+          paint: { 'line-color': colors.primary, 'line-width': 2, 'line-dasharray': [2, 2], 'line-opacity': 0.5 }
+        })
+        
+        zoneLayersRef.current.push(sourceId, fillId, lineId)
+      } catch (e) {
+        console.log('Zone layer error:', e.message)
+      }
     })
   }
 
@@ -286,38 +292,30 @@ export default function RouteEditor({ onBack, onSave }) {
     })
     
     // Add zone labels
-    routeZones.forEach(zone => {
-      if (!zone.coordinates?.length) return
-      const midIdx = Math.floor(zone.coordinates.length / 2)
-      const midPoint = zone.coordinates[midIdx]
-      const colors = ZONE_COLORS[zone.type]
+    routeZones.forEach(segment => {
+      if (!segment.coordinates?.length) return
+      const midIdx = Math.floor(segment.coordinates.length / 2)
+      const midPoint = segment.coordinates[midIdx]
+      const colors = CHARACTER_COLORS[segment.character] || CHARACTER_COLORS.spirited
       
       const el = document.createElement('div')
-      el.innerHTML = `<div style="background:${colors.label}20;border:1px solid ${colors.label};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;color:${colors.label};text-transform:uppercase;">${zone.isOverride ? '⭐ ' : ''}${zone.type}</div>`
+      el.innerHTML = `<div style="background:${colors.primary}20;border:1px solid ${colors.primary};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;color:${colors.primary};">${colors.label}</div>`
       el.style.cursor = 'pointer'
-      el.onclick = () => setSelectedItem({ type: 'zone', data: zone })
+      el.onclick = () => setSelectedItem({ type: 'zone', data: segment })
       markersRef.current.push(new mapboxgl.Marker({ element: el }).setLngLat(midPoint).addTo(mapRef.current))
     })
   }
 
-  const handleZoneTypeChange = (zone, newType) => {
-    const override = createZoneOverride(zone, newType)
-    addRouteZoneOverride(override)
-    
-    // Update local zones
-    setRouteZones(routeZones.map(z => 
-      z.id === zone.id 
-        ? { ...z, type: newType, behavior: ZONE_BEHAVIORS[newType], isOverride: true }
-        : z
-    ))
+  // Character editing is read-only for now - show info only
+  const handleZoneTypeChange = (segment, newCharacter) => {
+    // Future: allow manual override of character classification
+    console.log('Character override not yet implemented:', segment.character, '->', newCharacter)
     setSelectedItem(null)
   }
 
-  const handleMakeGlobal = (zone) => {
-    const override = createZoneOverride(zone, zone.type)
-    override.name = `${zone.type} zone` // User can rename
-    override.isGlobal = true
-    addGlobalZoneOverride(override)
+  const handleMakeGlobal = (segment) => {
+    // Future: save character override as global rule
+    console.log('Global character override not yet implemented')
     setSelectedItem(null)
   }
 
@@ -448,32 +446,40 @@ export default function RouteEditor({ onBack, onSave }) {
           </div>
         )}
 
-        {/* Zone List (when tab is zones) */}
+        {/* Character Segments (when tab is zones) */}
         {activeTab === 'zones' && !selectedItem && (
           <div>
-            <p className="text-white/50 text-xs mb-2">Route zones ({routeZones.length}):</p>
+            <p className="text-white/50 text-xs mb-2">Route character segments ({routeZones.length}):</p>
             <div className="flex gap-2 overflow-x-auto pb-2">
-              {routeZones.map((zone, i) => {
-                const colors = ZONE_COLORS[zone.type]
+              {routeZones.map((segment, i) => {
+                const colors = CHARACTER_COLORS[segment.character] || CHARACTER_COLORS.spirited
                 const dist = settings.units === 'metric' 
-                  ? `${((zone.endDistance - zone.startDistance) / 1000).toFixed(1)}km`
-                  : `${((zone.endDistance - zone.startDistance) / 1609).toFixed(1)}mi`
+                  ? `${((segment.endDistance - segment.startDistance) / 1000).toFixed(1)}km`
+                  : `${((segment.endDistance - segment.startDistance) / 1609).toFixed(1)}mi`
                 return (
                   <button
-                    key={zone.id}
-                    onClick={() => setSelectedItem({ type: 'zone', data: zone })}
+                    key={segment.id}
+                    onClick={() => setSelectedItem({ type: 'zone', data: segment })}
                     className="flex-shrink-0 p-2 rounded-lg border text-left"
-                    style={{ background: `${colors.label}15`, borderColor: `${colors.label}40` }}
+                    style={{ background: `${colors.primary}15`, borderColor: `${colors.primary}40` }}
                   >
                     <div className="flex items-center gap-1 mb-1">
-                      {zone.isOverride && <span className="text-xs">⭐</span>}
-                      <span className="text-xs font-bold uppercase" style={{ color: colors.label }}>{zone.type}</span>
+                      <span className="text-xs font-bold" style={{ color: colors.primary }}>{colors.label}</span>
                     </div>
                     <p className="text-white/50 text-[10px]">{dist}</p>
                   </button>
                 )
               })}
             </div>
+            {routeZones.length === 0 && !isLoadingZones && (
+              <p className="text-white/30 text-xs">No character data - analyzing route...</p>
+            )}
+            {isLoadingZones && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-white/40 text-xs">Analyzing route character...</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -626,61 +632,51 @@ function SelectedItemEditor({ item, onClose, onUpdateCurve, onDeleteCurve, onRes
   }
 
   if (type === 'zone') {
-    const colors = ZONE_COLORS[data.type]
+    const colors = CHARACTER_COLORS[data.character] || CHARACTER_COLORS.spirited
     const dist = settings.units === 'metric' 
       ? `${((data.endDistance - data.startDistance) / 1000).toFixed(1)}km`
       : `${((data.endDistance - data.startDistance) / 1609).toFixed(1)}mi`
+    const behavior = CHARACTER_BEHAVIORS[data.character] || CHARACTER_BEHAVIORS.spirited
 
     return (
-      <div className="bg-black/90 rounded-xl border p-3" style={{ borderColor: `${colors.label}50` }}>
+      <div className="bg-black/90 rounded-xl border p-3" style={{ borderColor: `${colors.primary}50` }}>
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="flex items-center gap-2">
-              {data.isOverride && <span className="text-amber-400">⭐</span>}
-              <p className="text-white font-medium uppercase">{data.type} Zone</p>
+              <p className="text-white font-medium">{colors.label}</p>
             </div>
-            <p className="text-white/50 text-xs">{dist} • {data.roadClass || 'Mixed roads'}</p>
+            <p className="text-white/50 text-xs">{dist}</p>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
 
-        {/* Zone Type Selector */}
-        <div className="mb-3">
-          <p className="text-white/50 text-xs mb-1">Change Zone Type:</p>
-          <div className="grid grid-cols-4 gap-1">
-            {Object.entries(ZONE_TYPES).map(([key, value]) => {
-              const zColors = ZONE_COLORS[value]
-              return (
-                <button
-                  key={value}
-                  onClick={() => onZoneTypeChange(data, value)}
-                  className={`py-2 rounded text-[10px] font-bold uppercase transition-all ${data.type === value ? 'ring-2 ring-white' : ''}`}
-                  style={{ background: `${zColors.label}30`, color: zColors.label }}
-                >
-                  {value}
-                </button>
-              )
-            })}
+        {/* Analysis Details */}
+        {data.details && (
+          <div className="bg-white/5 rounded-lg p-2 mb-3">
+            <p className="text-white/50 text-[10px] mb-1.5">Analysis Factors:</p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-white/40">Avg Speed Limit:</span> <span className="text-white">{Math.round(data.details.avgSpeedLimit || 35)} mph</span></div>
+              <div><span className="text-white/40">Signals/mi:</span> <span className="text-white">{(data.details.avgSignalDensity || 0).toFixed(1)}</span></div>
+              <div><span className="text-white/40">Curves/mi:</span> <span className="text-white">{(data.details.avgCurveDensity || 0).toFixed(1)}</span></div>
+              <div><span className="text-white/40">Urban:</span> <span className="text-white">{data.details.isUrban ? 'Yes' : 'No'}</span></div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Behavior Preview */}
         <div className="bg-white/5 rounded-lg p-2 mb-3">
-          <p className="text-white/50 text-[10px] mb-1">Zone Behavior:</p>
+          <p className="text-white/50 text-[10px] mb-1.5">Callout Behavior:</p>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <div><span className="text-white/40">Min Severity:</span> <span className="text-white">{data.behavior?.minSeverity}+</span></div>
-            <div><span className="text-white/40">Speed:</span> <span className="text-white">{Math.round((data.behavior?.speedMultiplier || 1) * 100)}%</span></div>
+            <div><span className="text-white/40">Min Severity:</span> <span className="text-white">{behavior.minSeverity}+</span></div>
+            <div><span className="text-white/40">Speed Adj:</span> <span className="text-white">{Math.round((behavior.speedMultiplier || 1) * 100)}%</span></div>
+            <div><span className="text-white/40">Style:</span> <span className="text-white capitalize">{behavior.calloutStyle?.replace('_', ' ')}</span></div>
+            <div><span className="text-white/40">Haptic:</span> <span className="text-white">{behavior.hapticOnHard ? 'Yes' : 'No'}</span></div>
           </div>
         </div>
 
-        {/* Make Global */}
-        {!data.isOverride && (
-          <button onClick={() => onMakeGlobal(data)} className="w-full py-2 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium">
-            ⭐ Save as Global Exception
-          </button>
-        )}
+        <p className="text-white/30 text-[10px] text-center">Character is auto-detected based on road conditions</p>
       </div>
     )
   }
