@@ -2,12 +2,50 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v2 - Technical Sections
-// Native speech with timeout fallback
+// Speech Hook v3 - Multi-Voice Pre-caching
+// Supports relaxed/normal/urgent voice styles
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
+
+// Voice style configurations
+export const VOICE_STYLES = {
+  relaxed: {
+    stability: 0.90,
+    similarity_boost: 0.80,
+    style: 0.10,
+    playbackRate: 0.95,
+    label: 'Highway'
+  },
+  normal: {
+    stability: 0.75,
+    similarity_boost: 0.80,
+    style: 0.15,
+    playbackRate: 1.0,
+    label: 'Spirited'
+  },
+  urgent: {
+    stability: 0.60,
+    similarity_boost: 0.75,
+    style: 0.25,
+    playbackRate: 1.1,
+    label: 'Technical'
+  }
+}
+
+// Map route character to voice style
+export const CHARACTER_TO_VOICE = {
+  transit: 'relaxed',
+  spirited: 'normal',
+  technical: 'urgent',
+  urban: 'normal'
+}
+
+// Multi-voice cache: Map<"text:style", audioUrl>
 const AUDIO_CACHE = new Map()
+
+// Get cache key
+const getCacheKey = (text, style = 'normal') => `${text}:${style}`
 
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
@@ -19,6 +57,7 @@ export function useSpeech() {
   const lastSpokenTimeRef = useRef(0)
   const isPlayingRef = useRef(false)
   const timeoutRef = useRef(null)
+  const currentStyleRef = useRef('normal')
 
   // Initialize on mount
   useEffect(() => {
@@ -52,7 +91,6 @@ export function useSpeech() {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
             voiceRef.current = found
-            console.log('🔊 Voice selected:', found.name)
             break
           }
         }
@@ -64,7 +102,6 @@ export function useSpeech() {
       loadVoices()
       synthRef.current.onvoiceschanged = loadVoices
       setTimeout(loadVoices, 100)
-      setTimeout(loadVoices, 500)
     }
 
     return () => {
@@ -86,11 +123,8 @@ export function useSpeech() {
     }
   }, [setSpeaking])
 
-  const speakNative = useCallback((text) => {
-    if (!synthRef.current) {
-      console.log('🔊 No speech synthesis available')
-      return false
-    }
+  const speakNative = useCallback((text, style = 'normal') => {
+    if (!synthRef.current) return false
 
     try {
       synthRef.current.cancel()
@@ -101,22 +135,20 @@ export function useSpeech() {
         if (voiceRef.current) {
           utterance.voice = voiceRef.current
         }
-        utterance.rate = 1.0
+        
+        // Adjust rate based on style
+        const voiceConfig = VOICE_STYLES[style] || VOICE_STYLES.normal
+        utterance.rate = voiceConfig.playbackRate
         utterance.pitch = 1.0
         utterance.volume = settings.volume || 1.0
 
-        utterance.onstart = () => {
-          console.log('🔊 Speaking:', text)
-        }
-        
         utterance.onend = () => {
           clearTimeout(timeoutRef.current)
           isPlayingRef.current = false
           setSpeaking(false, '')
         }
         
-        utterance.onerror = (e) => {
-          console.log('🔊 Speech error:', e.error)
+        utterance.onerror = () => {
           clearTimeout(timeoutRef.current)
           isPlayingRef.current = false
           setSpeaking(false, '')
@@ -134,11 +166,16 @@ export function useSpeech() {
     }
   }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
-  const speakElevenLabs = useCallback(async (text) => {
-    if (AUDIO_CACHE.has(text)) {
+  const speakElevenLabs = useCallback(async (text, style = 'normal') => {
+    const cacheKey = getCacheKey(text, style)
+    const voiceConfig = VOICE_STYLES[style] || VOICE_STYLES.normal
+    
+    // Check cache first
+    if (AUDIO_CACHE.has(cacheKey)) {
       try {
-        audioRef.current.src = AUDIO_CACHE.get(text)
+        audioRef.current.src = AUDIO_CACHE.get(cacheKey)
         audioRef.current.volume = settings.volume || 1.0
+        audioRef.current.playbackRate = voiceConfig.playbackRate
         isPlayingRef.current = true
         setSpeakingWithTimeout(true, text, 5000)
         await audioRef.current.play()
@@ -156,7 +193,16 @@ export function useSpeech() {
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: ELEVENLABS_VOICE_ID }),
+        body: JSON.stringify({ 
+          text, 
+          voiceId: ELEVENLABS_VOICE_ID,
+          voiceSettings: {
+            stability: voiceConfig.stability,
+            similarity_boost: voiceConfig.similarity_boost,
+            style: voiceConfig.style,
+            use_speaker_boost: true
+          }
+        }),
       })
 
       if (!response.ok) return false
@@ -165,10 +211,11 @@ export function useSpeech() {
       if (blob.size < 500) return false
 
       const audioUrl = URL.createObjectURL(blob)
-      AUDIO_CACHE.set(text, audioUrl)
+      AUDIO_CACHE.set(cacheKey, audioUrl)
       
       audioRef.current.src = audioUrl
       audioRef.current.volume = settings.volume || 1.0
+      audioRef.current.playbackRate = voiceConfig.playbackRate
       
       isPlayingRef.current = true
       setSpeakingWithTimeout(true, text, 5000)
@@ -183,10 +230,19 @@ export function useSpeech() {
     }
   }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
-  const speak = useCallback(async (text, priority = 'normal') => {
+  // Set current voice style (for route character)
+  const setVoiceStyle = useCallback((style) => {
+    if (VOICE_STYLES[style]) {
+      currentStyleRef.current = style
+    }
+  }, [])
+
+  // Main speak function
+  const speak = useCallback(async (text, priority = 'normal', styleOverride = null) => {
     if (!settings.voiceEnabled || !text) return false
 
     const now = Date.now()
+    const style = styleOverride || currentStyleRef.current
     
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 2000) {
       return false
@@ -204,10 +260,10 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    const success = await speakElevenLabs(text)
+    const success = await speakElevenLabs(text, style)
     if (success) return true
     
-    return speakNative(text)
+    return speakNative(text, style)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const initAudio = useCallback(async () => {
@@ -218,9 +274,7 @@ export function useSpeech() {
         try {
           await audioRef.current.play()
           audioRef.current.pause()
-        } catch (playErr) {
-          console.log('Audio unlock skipped:', playErr.message)
-        }
+        } catch (e) {}
       }
       
       if (synthRef.current) {
@@ -229,15 +283,12 @@ export function useSpeech() {
           u.volume = 0
           synthRef.current.speak(u)
           setTimeout(() => synthRef.current?.cancel(), 10)
-        } catch (speechErr) {
-          console.log('Speech unlock skipped:', speechErr.message)
-        }
+        } catch (e) {}
       }
       
       console.log('🔊 Audio initialized')
       return true
     } catch (e) {
-      console.log('Audio init error:', e.message)
       return true
     }
   }, [])
@@ -252,68 +303,171 @@ export function useSpeech() {
 
   const isSpeaking = useCallback(() => isPlayingRef.current, [])
 
-  return { speak, stop, isSpeaking, initAudio, preloadRouteAudio }
-}
+  // Check if a callout is cached
+  const isCached = useCallback((text, style = 'normal') => {
+    return AUDIO_CACHE.has(getCacheKey(text, style))
+  }, [])
 
-// Preload for offline
-async function preloadRouteAudio(curves) {
-  if (!curves?.length || !navigator.onLine) {
-    return { success: true, cached: 0, total: 0 }
-  }
-
-  const callouts = new Set()
-  curves.forEach(curve => {
-    if (curve.isTechnicalSection) {
-      callouts.add(`Technical section ahead`)
-      callouts.add(`${curve.sectionCharacter} section, ${curve.curveCount} curves`)
-    } else if (curve.isChicane) {
-      const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-      callouts.add(`Chicane ${dir} ${curve.severitySequence}`)
-    } else {
-      const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-      callouts.add(`${dir} ${curve.severity}`)
-      if (curve.modifier) {
-        callouts.add(`${dir} ${curve.severity} ${curve.modifier.toLowerCase()}`)
-      }
+  // Get cache stats
+  const getCacheStats = useCallback(() => {
+    return {
+      size: AUDIO_CACHE.size,
+      keys: Array.from(AUDIO_CACHE.keys())
     }
-  })
+  }, [])
 
-  const list = Array.from(callouts)
-  let cached = 0
-
-  for (const text of list) {
-    if (AUDIO_CACHE.has(text)) { cached++; continue }
-    
-    try {
-      const res = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voiceId: ELEVENLABS_VOICE_ID }),
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        if (blob.size > 500) {
-          AUDIO_CACHE.set(text, URL.createObjectURL(blob))
-          cached++
-        }
-      }
-    } catch (e) {}
-    await new Promise(r => setTimeout(r, 100))
+  return { 
+    speak, 
+    stop, 
+    isSpeaking, 
+    initAudio, 
+    setVoiceStyle,
+    isCached,
+    getCacheStats,
+    preloadCopilotVoices  // Export the preload function
   }
-
-  return { success: cached > 0, cached, total: list.length }
 }
 
 /**
- * Generate callout for a curve, chicane, or technical section
+ * Pre-cache essential callouts in all voice styles
+ * Returns progress updates via callback
  */
-export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main', options = {}) {
-  if (!curve) return ''
-
-  // Handle technical sections
-  if (curve.isTechnicalSection) {
-    return generateTechnicalSectionCallout(curve, mode, speedUnit, phase)
+export async function preloadCopilotVoices(curves, segments, onProgress) {
+  if (!navigator.onLine) {
+    return { success: false, cached: 0, total: 0, error: 'offline' }
   }
+
+  // Build list of callouts to cache
+  const callouts = new Set()
+  
+  // Basic direction + severity callouts
+  const directions = ['Left', 'Right']
+  const severities = [1, 2, 3, 4, 5, 6]
+  
+  directions.forEach(dir => {
+    severities.forEach(sev => {
+      callouts.add(`${dir} ${sev}`)
+    })
+  })
+  
+  // Common modifiers
+  callouts.add('tightens')
+  callouts.add('opens')
+  callouts.add('long')
+  callouts.add('hairpin')
+  
+  // Zone transitions
+  callouts.add('Technical section ahead')
+  callouts.add('Highway ahead, relax')
+  callouts.add('Urban zone')
+  callouts.add('Back to spirited')
+  
+  // Clear callouts
+  callouts.add('Clear ahead')
+  callouts.add('Clear')
+  
+  // Add curve-specific callouts from route
+  if (curves?.length) {
+    curves.forEach(curve => {
+      if (curve.isChicane && curve.severitySequence) {
+        const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+        callouts.add(`Chicane ${dir} ${curve.severitySequence}`)
+      }
+    })
+  }
+
+  const calloutList = Array.from(callouts)
+  
+  // Determine which styles to cache based on route segments
+  const stylesToCache = new Set(['normal']) // Always cache normal
+  
+  if (segments?.length) {
+    segments.forEach(seg => {
+      const style = CHARACTER_TO_VOICE[seg.character]
+      if (style) stylesToCache.add(style)
+    })
+  } else {
+    // Cache all styles if no segments info
+    stylesToCache.add('relaxed')
+    stylesToCache.add('urgent')
+  }
+  
+  const styles = Array.from(stylesToCache)
+  const totalItems = calloutList.length * styles.length
+  let cached = 0
+  let failed = 0
+
+  console.log(`🔊 Pre-caching ${totalItems} callouts (${calloutList.length} phrases × ${styles.length} styles)`)
+
+  for (const style of styles) {
+    const voiceConfig = VOICE_STYLES[style]
+    
+    for (const text of calloutList) {
+      const cacheKey = getCacheKey(text, style)
+      
+      // Skip if already cached
+      if (AUDIO_CACHE.has(cacheKey)) {
+        cached++
+        onProgress?.({ cached, total: totalItems, percent: (cached / totalItems) * 100 })
+        continue
+      }
+      
+      try {
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            text, 
+            voiceId: ELEVENLABS_VOICE_ID,
+            voiceSettings: {
+              stability: voiceConfig.stability,
+              similarity_boost: voiceConfig.similarity_boost,
+              style: voiceConfig.style,
+              use_speaker_boost: true
+            }
+          }),
+        })
+        
+        if (response.ok) {
+          const blob = await response.blob()
+          if (blob.size > 500) {
+            AUDIO_CACHE.set(cacheKey, URL.createObjectURL(blob))
+            cached++
+          } else {
+            failed++
+          }
+        } else {
+          failed++
+        }
+      } catch (e) {
+        failed++
+      }
+      
+      onProgress?.({ cached, failed, total: totalItems, percent: (cached / totalItems) * 100 })
+      
+      // Small delay to avoid rate limiting
+      await new Promise(r => setTimeout(r, 80))
+    }
+  }
+
+  console.log(`🔊 Pre-cache complete: ${cached}/${totalItems} cached, ${failed} failed`)
+  
+  return { 
+    success: cached > 0, 
+    cached, 
+    failed,
+    total: totalItems 
+  }
+}
+
+// Legacy export for compatibility
+export async function preloadRouteAudio(curves) {
+  return preloadCopilotVoices(curves, null, null)
+}
+
+// Callout generation functions (unchanged)
+export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main') {
+  if (!curve) return ''
 
   const getSpeed = (severity) => {
     const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
@@ -323,320 +477,75 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     return speed
   }
 
-  // FIXED: Always use startDirection for chicanes, direction for regular curves
   const dir = curve.isChicane 
     ? (curve.startDirection === 'LEFT' ? 'left' : 'right')
     : (curve.direction === 'LEFT' ? 'left' : 'right')
   const Dir = dir.charAt(0).toUpperCase() + dir.slice(1)
   
   const speed = curve.isChicane 
-    ? getSpeed(Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity])))
+    ? getSpeed(Math.max(...curve.severitySequence.split('-').map(Number)))
     : getSpeed(curve.severity)
-  
-  const isHard = curve.severity >= 4
-  const isVeryHard = curve.severity >= 5
-  const isGentle = curve.severity <= 2
-  
-  const distText = getDistanceText(curve.distance, speedUnit)
-  
-  // Calculate gap to next curve - use relative distances if available, fall back to absolute
-  let gapToNext = 999
-  if (nextCurve) {
-    // If we have relative distances (from upcoming curves), use the difference
-    if (nextCurve.distance !== undefined && curve.distance !== undefined) {
-      gapToNext = nextCurve.distance - curve.distance
-    } else if (nextCurve.distanceFromStart !== undefined && curve.distanceFromStart !== undefined) {
-      // Fall back to absolute distances
-      gapToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
-    }
-  }
-  const hasTimeForDetail = gapToNext > 150
-  
-  const curveCharacter = getCurveCharacter(curve)
-  
-  // PHASE: EARLY WARNING
-  if (phase === 'early') {
-    if (curve.isChicane) {
-      return `Chicane ahead starting ${dir}. Severity ${curve.severitySequence}. Prepare for ${speed}.`
-    }
-    if (isVeryHard) {
-      return `Caution ahead. ${curveCharacter} ${dir} ${curve.severity} in ${distText}. Prepare to slow to ${speed}.`
-    }
-    if (isHard) {
-      return `${curveCharacter} ${dir} ${curve.severity} coming in ${distText}. Target ${speed}.`
-    }
-    return `${curveCharacter} ${dir} ${curve.severity} ahead in ${distText}.`
-  }
-  
-  // PHASE: FINAL WARNING
-  if (phase === 'final') {
-    if (curve.isChicane) {
-      return `Chicane now! ${Dir} first, ${speed}!`
-    }
-    if (isVeryHard) {
-      return `${Dir} ${curve.severity} now! ${speed}!`
-    }
-    return `${Dir} ${curve.severity} now.`
-  }
-  
-  // PHASE: MAIN CALLOUT
-  const sentences = []
-  
+
   if (curve.isChicane) {
-    sentences.push(`In ${distText}, chicane starting ${dir}.`)
-    sentences.push(`Severity ${curve.severitySequence}, take at ${speed}.`)
-    
-  } else {
-    if (isVeryHard) {
-      sentences.push(`Slow to ${speed}.`)
-      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}.`)
-    } else if (isHard) {
-      sentences.push(`Brake ahead.`)
-      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}. Target ${speed}.`)
-    } else if (isGentle) {
-      sentences.push(`In ${distText}, gentle ${dir} ${curve.severity}. ${speed}.`)
-    } else {
-      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}. Target ${speed}.`)
-    }
-    
-    if (hasTimeForDetail) {
-      if (curve.modifier) {
-        switch (curve.modifier) {
-          case 'HAIRPIN': 
-            sentences.push(`Hairpin turn. Slow to ${getSpeed(6)} at apex.`)
-            break
-          case 'SHARP': 
-            sentences.push(`Sharp turn.`)
-            break
-          case 'LONG': 
-            sentences.push(`Long curve, hold your line.`)
-            break
-          case 'TIGHTENS':
-            sentences.push(`Tightens through. Exit at ${getSpeed(Math.min(6, curve.severity + 1))}.`)
-            break
-          case 'OPENS':
-            sentences.push(`Opens on exit. Accelerate to ${getSpeed(Math.max(1, curve.severity - 1))}.`)
-            break
-        }
-      }
-      
-      if (curve.length > 150) {
-        const lengthText = speedUnit === 'kmh' 
-          ? `${Math.round(curve.length)} meters long`
-          : `${Math.round(curve.length * 3.28084 / 50) * 50} feet long`
-        sentences.push(lengthText + '.')
-      }
-    }
+    if (phase === 'final') return `Chicane ${dir} now!`
+    return `Chicane ${dir} ${curve.severitySequence}`
+  }
+
+  if (phase === 'early') {
+    return `${Dir} ${curve.severity} ahead`
   }
   
-  // Next curve preview
-  if (nextCurve && !curve.isChicane && !nextCurve.isTechnicalSection) {
+  if (phase === 'final') {
+    return curve.severity >= 5 ? `${Dir} ${curve.severity} now!` : `${Dir} now`
+  }
+
+  // Main callout
+  let callout = `${Dir} ${curve.severity}`
+  if (curve.modifier) {
+    callout += ` ${curve.modifier.toLowerCase()}`
+  }
+  
+  return callout
+}
+
+export function generateEarlyWarning(curve, mode = 'cruise', speedUnit = 'mph') {
+  return generateCallout(curve, mode, speedUnit, null, 'early')
+}
+
+export function generateFinalWarning(curve, mode = 'cruise', speedUnit = 'mph') {
+  return generateCallout(curve, mode, speedUnit, null, 'final')
+}
+
+export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+  if (nextCurve) {
     const nextDir = nextCurve.isChicane 
       ? (nextCurve.startDirection === 'LEFT' ? 'left' : 'right')
       : (nextCurve.direction === 'LEFT' ? 'left' : 'right')
-    const nextSpeed = getSpeed(nextCurve.severity)
-    const nextCharacter = getCurveCharacter(nextCurve)
-    
-    if (gapToNext < 50) {
-      if (nextCurve.isChicane) {
-        sentences.push(`Immediately into chicane ${nextDir}.`)
-      } else {
-        sentences.push(`Immediately into ${nextDir} ${nextCurve.severity}.`)
-      }
-    } else if (gapToNext < 150) {
-      if (nextCurve.isChicane) {
-        sentences.push(`Then chicane ${nextDir} at ${nextSpeed}.`)
-      } else {
-        sentences.push(`Then ${nextDir} ${nextCurve.severity} at ${nextSpeed}.`)
-      }
-    } else if (gapToNext < 300 && hasTimeForDetail) {
-      sentences.push(`${nextCharacter} ${nextDir} ${nextCurve.severity} follows.`)
-    }
+    return `Clear. ${nextDir.charAt(0).toUpperCase() + nextDir.slice(1)} ${nextCurve.severity} ahead.`
   }
-  
-  return sentences.join(' ')
+  return `Clear ahead`
 }
 
-/**
- * Generate callout for technical section (sustained windy stretch)
- */
-function generateTechnicalSectionCallout(section, mode, speedUnit, phase) {
-  const getSpeed = (severity) => {
-    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
-    const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
-    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 0.92))
-    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
-    return speed
-  }
-  
-  const dir = section.direction === 'LEFT' ? 'left' : 'right'
-  const speed = getSpeed(section.severity)
-  const distText = getDistanceText(section.distance, speedUnit)
-  const lengthText = getLengthText(section.length, speedUnit)
-  
-  // Character descriptions
-  const characterDesc = {
-    'switchbacks': 'switchback section',
-    'sweeping': 'sweeping curves',
-    'technical': 'technical section',
-    'windy': 'windy stretch'
-  }
-  const character = characterDesc[section.sectionCharacter] || 'windy section'
-  
-  if (phase === 'early') {
-    return `${character} ahead. ${section.curveCount} curves over ${lengthText}. Max severity ${section.severity}. Hold ${speed}.`
-  }
-  
-  if (phase === 'final') {
-    return `${character} now! Starting ${dir}. Hold ${speed}.`
-  }
-  
-  // Main callout - comprehensive summary
-  const sentences = []
-  
-  sentences.push(`In ${distText}, ${character}.`)
-  sentences.push(`${section.curveCount} curves over ${lengthText}, starting ${dir}.`)
-  sentences.push(`Max severity ${section.severity}. Maintain ${speed} through.`)
-  
-  // Add direction sequence hint for complex sections
-  if (section.directionChanges >= 3) {
-    const seqHint = section.directionSequence.slice(0, 5) // First 5 directions
-    const readable = seqHint.split('').map(d => d === 'L' ? 'left' : 'right').join(', ')
-    sentences.push(`Pattern: ${readable}.`)
-  }
-  
-  return sentences.join(' ')
-}
-
-/**
- * Generate abbreviated callout for curves WITHIN a technical section
- * Used after the initial section announcement
- */
 export function generateInSectionCallout(curve, mode, speedUnit) {
   const dir = curve.direction === 'LEFT' ? 'left' : 'right'
   const Dir = dir.charAt(0).toUpperCase() + dir.slice(1)
   
-  // Very short callouts within section
   if (curve.severity >= 5) {
     return `${Dir} ${curve.severity}!`
   }
   return `${Dir} ${curve.severity}`
 }
 
-// Get curve character description
-function getCurveCharacter(curve) {
-  if (!curve) return ''
-  if (curve.isChicane) return 'chicane'
-  if (curve.isTechnicalSection) return curve.sectionCharacter || 'technical'
-  
-  const severity = curve.severity
-  const length = curve.length || 0
-  
-  if (severity <= 2 && length > 150) return 'sweeping'
-  if (severity <= 1) return 'gentle'
-  if (severity === 2) return 'easy'
-  if (severity === 3) return 'moderate'
-  if (severity === 4) return 'tight'
-  if (severity === 5) return 'sharp'
-  return 'very sharp'
-}
-
-// Convert distance to natural speech
-function getDistanceText(distanceMeters, speedUnit = 'mph') {
-  if (!distanceMeters || distanceMeters < 0) return 'ahead'
-  
-  if (speedUnit === 'kmh') {
-    if (distanceMeters >= 1000) {
-      const km = Math.round(distanceMeters / 100) / 10
-      return `${km} kilometers`
-    } else if (distanceMeters >= 200) {
-      return `${Math.round(distanceMeters / 50) * 50} meters`
-    } else if (distanceMeters >= 50) {
-      return `${Math.round(distanceMeters / 25) * 25} meters`
-    }
-    return `${Math.round(distanceMeters)} meters`
-  } else {
-    const feet = distanceMeters * 3.28084
-    if (feet >= 2640) {
-      const miles = Math.round(feet / 528) / 10
-      return `${miles} miles`
-    } else if (feet >= 800) {
-      // Round to nearest 100 feet for clarity
-      return `${Math.round(feet / 100) * 100} feet`
-    } else if (feet >= 300) {
-      // Use simpler terms for closer distances
-      return `${Math.round(feet / 100) * 100} feet`
-    } else if (feet >= 150) {
-      return `200 feet`
-    }
-    // Very close - don't give specific distance
-    return `ahead`
+// Zone transition callouts
+export function generateZoneTransitionCallout(fromCharacter, toCharacter) {
+  const transitions = {
+    'technical': 'Technical section ahead',
+    'transit': 'Highway ahead, relax',
+    'urban': 'Urban zone',
+    'spirited': 'Back to spirited'
   }
-}
-
-// Convert length to natural speech (for section lengths)
-function getLengthText(lengthMeters, speedUnit = 'mph') {
-  if (speedUnit === 'kmh') {
-    if (lengthMeters >= 1000) {
-      const km = Math.round(lengthMeters / 100) / 10
-      return `${km} km`
-    }
-    return `${Math.round(lengthMeters / 50) * 50} meters`
-  } else {
-    const feet = lengthMeters * 3.28084
-    if (feet >= 2640) {
-      const miles = Math.round(feet / 528) / 10
-      return `${miles} miles`
-    } else if (feet >= 1320) {
-      return 'quarter mile'
-    }
-    return `${Math.round(feet / 100) * 100} feet`
-  }
-}
-
-// Generate early warning callout
-export function generateEarlyWarning(curve, mode = 'cruise', speedUnit = 'mph') {
-  return generateCallout(curve, mode, speedUnit, null, 'early')
-}
-
-// Generate final "NOW" callout
-export function generateFinalWarning(curve, mode = 'cruise', speedUnit = 'mph') {
-  return generateCallout(curve, mode, speedUnit, null, 'final')
-}
-
-// Generate straight section callout
-export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const distText = getDistanceText(distanceMeters, speedUnit)
   
-  if (nextCurve) {
-    const nextDir = nextCurve.isChicane 
-      ? (nextCurve.startDirection === 'LEFT' ? 'left' : 'right')
-      : (nextCurve.direction === 'LEFT' ? 'left' : 'right')
-    
-    if (nextCurve.isTechnicalSection) {
-      return `Clear. ${nextCurve.sectionCharacter} section in ${distText}.`
-    }
-    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
-  }
-  return `Clear for ${distText}.`
-}
-
-// Generate post-curve callout
-export function generatePostCurveCallout(straightDistance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  return generateStraightCallout(straightDistance, mode, speedUnit, nextCurve)
-}
-
-export function generateShortCallout(curve, mode = 'cruise') {
-  if (!curve) return ''
-  const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
-  const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
-  const speed = Math.round((speeds[curve.severity] || 40) * (mult[mode] || 0.92))
-  
-  const dir = curve.isChicane 
-    ? (curve.startDirection === 'LEFT' ? 'Left' : 'Right')
-    : (curve.direction === 'LEFT' ? 'Left' : 'Right')
-  
-  return `${dir} ${curve.severity}, ${speed}`
+  return transitions[toCharacter] || null
 }
 
 export default useSpeech
