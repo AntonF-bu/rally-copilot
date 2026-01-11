@@ -224,10 +224,11 @@ export default function App() {
     const voiceParams = getVoiceParamsForMode(currentDrivingMode)
     
     const distance = nextCurve.distance
+    const actualDist = nextCurve.actualDistance ?? distance
     const curveId = nextCurve.id
     
-    // Log on every check
-    console.log(`📊 Mode: ${currentDrivingMode} | Curve ${curveId}: ${Math.round(distance)}m | Early: ${Math.round(distances.early)}m | Main: ${Math.round(distances.main)}m | Already announced: ${mainCalloutsRef.current.has(curveId)}`)
+    // Log on every check - include actual distance
+    console.log(`📊 Mode: ${currentDrivingMode} | Curve ${curveId}: dist=${Math.round(distance)}m actual=${Math.round(actualDist)}m | Early: ${Math.round(distances.early)}m | Main: ${Math.round(distances.main)}m | Announced: ${mainCalloutsRef.current.has(curveId)}`)
     
     // Respect minimum pause between callouts
     const timeSinceLastCallout = now - lastCalloutTimeRef.current
