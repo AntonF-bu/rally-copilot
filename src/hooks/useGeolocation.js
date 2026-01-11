@@ -11,6 +11,7 @@ export function useGeolocation(enabled = false) {
     setPosition,
     setHeading,
     setSpeed,
+    setAltitude,
     setGpsAccuracy,
     isRunning
   } = useStore()
@@ -42,7 +43,7 @@ export function useGeolocation(enabled = false) {
 
   // Handle position update
   const handlePosition = useCallback((position) => {
-    const { latitude, longitude, accuracy, speed, heading } = position.coords
+    const { latitude, longitude, accuracy, speed, heading, altitude } = position.coords
     const now = Date.now()
 
     // *** ACCURACY FILTER ***
@@ -88,6 +89,11 @@ export function useGeolocation(enabled = false) {
     // Set GPS accuracy
     setGpsAccuracy(accuracy)
 
+    // Set altitude (GPS altitude in meters, convert to feet if valid)
+    if (altitude !== null && !isNaN(altitude)) {
+      setAltitude(altitude) // Store in meters
+    }
+
     // Set speed (convert m/s to mph)
     if (speed !== null && speed >= 0) {
       const speedMph = speed * 2.237
@@ -102,9 +108,9 @@ export function useGeolocation(enabled = false) {
       setHeading(heading)
     }
 
-    console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${(speed * 2.237).toFixed(0)} mph`)
+    console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${altitude ? altitude.toFixed(0) + 'm alt' : 'no alt'}`)
 
-  }, [setPosition, setHeading, setSpeed, setGpsAccuracy, calculateHeading])
+  }, [setPosition, setHeading, setSpeed, setAltitude, setGpsAccuracy, calculateHeading])
 
   // Handle errors
   const handleError = useCallback((error) => {
