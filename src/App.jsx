@@ -104,28 +104,35 @@ export default function App() {
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
     
-    // Skip severity 1 curves - they're basically straight road
-    // Also skip chicanes where all curves are severity 1
-    if (nextCurve.severity <= 1) {
-      if (nextCurve.isChicane) {
-        const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
-        const maxSev = Math.max(...severities)
-        if (maxSev <= 1) {
-          // All severity 1, skip this chicane entirely
+    // For severity 1 curves, only announce if there's space (no other curves within 400m)
+    // This avoids cluttering callouts on twisty roads but announces gentle curves on highways
+    if (nextCurve.severity <= 1 && !nextCurve.isChicane && !nextCurve.isTechnicalSection) {
+      const secondCurve = upcomingCurves[1]
+      // If there's another curve coming soon, skip the severity 1
+      if (secondCurve && secondCurve.distance < 500) {
+        return
+      }
+    }
+    
+    // For chicanes, skip only if ALL curves are severity 1 AND curves are bunched
+    if (nextCurve.isChicane) {
+      const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
+      const maxSev = Math.max(...severities)
+      if (maxSev <= 1) {
+        const secondCurve = upcomingCurves[1]
+        if (secondCurve && secondCurve.distance < 500) {
           return
         }
-      } else {
-        // Regular severity 1 curve, skip
-        return
       }
     }
 
     const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 8)
     const distance = nextCurve.distance
     
-    const earlyDistance = Math.max(400, speedMps * 10)
-    const mainDistance = Math.max(200, speedMps * 5)
-    const finalDistance = Math.max(50, speedMps * 1.5)
+    // Tighter timing - announce closer to the curve
+    const earlyDistance = Math.max(350, speedMps * 8)
+    const mainDistance = Math.max(150, speedMps * 4)
+    const finalDistance = Math.max(40, speedMps * 1.2)
 
     const isHardCurve = nextCurve.severity >= 4
     const curveId = nextCurve.id
