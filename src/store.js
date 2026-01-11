@@ -20,7 +20,7 @@ const useStore = create(
       destination: null,
       
       // Multi-stop trip planning
-      tripWaypoints: [], // Array of { id, name, coordinates, type: 'start'|'stop'|'end' }
+      tripWaypoints: [],
       
       activeCurve: null,
       upcomingCurves: [],
@@ -47,37 +47,41 @@ const useStore = create(
       // Favorite routes (persisted)
       favoriteRoutes: [],
       
+      // Zone overrides (persisted) - global exceptions like "Storrow Drive = highway"
+      globalZoneOverrides: [],
+      
+      // Current route zones (not persisted - computed per route)
+      routeZones: [],
+      
+      // Per-route zone overrides (stored with saved routes)
+      routeZoneOverrides: [],
+      
+      // Route editor state
+      showRouteEditor: false,
+      editedCurves: [],
+      customCallouts: [],
+      
       mode: 'cruise',
       showSettings: false,
       isSpeaking: false,
       currentCallout: '',
       
       settings: {
-        // Voice
         voiceEnabled: true,
         volume: 1.0,
         calloutTiming: 'normal',
-        
-        // Units
         units: 'imperial',
-        
-        // Display
         keepScreenOn: true,
         showSpeedometer: true,
         showElevation: true,
         hudStyle: 'full',
-        
-        // Curve detection
-        curveSensitivity: 'normal', // 'relaxed', 'normal', 'sensitive'
-        
-        // Feedback
+        curveSensitivity: 'normal',
         hapticFeedback: false,
       },
       
       // ========== Recent Routes Actions ==========
       addRecentRoute: (route) => {
         const { recentRoutes } = get()
-        // Don't add duplicates (check by destination name)
         const filtered = recentRoutes.filter(r => r.name !== route.name)
         const updated = [
           {
@@ -85,14 +89,14 @@ const useStore = create(
             name: route.name,
             destination: route.destination,
             origin: route.origin,
-            coordinates: route.coordinates?.slice(0, 2), // Just start/end for storage
+            coordinates: route.coordinates?.slice(0, 2),
             distance: route.distance,
             duration: route.duration,
             curveCount: route.curves?.length || 0,
             timestamp: Date.now(),
           },
           ...filtered
-        ].slice(0, 10) // Keep max 10
+        ].slice(0, 10)
         set({ recentRoutes: updated })
       },
       
@@ -106,7 +110,7 @@ const useStore = create(
       // ========== Favorite Routes Actions ==========
       addFavoriteRoute: (route) => {
         const { favoriteRoutes } = get()
-        if (favoriteRoutes.some(r => r.name === route.name)) return // Already exists
+        if (favoriteRoutes.some(r => r.name === route.name)) return
         
         const favorite = {
           id: Date.now(),
@@ -143,6 +147,80 @@ const useStore = create(
         }
       },
       
+      // ========== Zone Actions ==========
+      setRouteZones: (zones) => set({ routeZones: zones }),
+      
+      addGlobalZoneOverride: (override) => {
+        const { globalZoneOverrides } = get()
+        const filtered = globalZoneOverrides.filter(o => o.id !== override.id)
+        set({ globalZoneOverrides: [...filtered, { ...override, id: override.id || Date.now() }] })
+      },
+      
+      removeGlobalZoneOverride: (id) => {
+        const { globalZoneOverrides } = get()
+        set({ globalZoneOverrides: globalZoneOverrides.filter(o => o.id !== id) })
+      },
+      
+      setRouteZoneOverrides: (overrides) => set({ routeZoneOverrides: overrides }),
+      
+      addRouteZoneOverride: (override) => {
+        const { routeZoneOverrides } = get()
+        const filtered = routeZoneOverrides.filter(o => o.zoneId !== override.zoneId)
+        set({ routeZoneOverrides: [...filtered, override] })
+      },
+      
+      removeRouteZoneOverride: (zoneId) => {
+        const { routeZoneOverrides } = get()
+        set({ routeZoneOverrides: routeZoneOverrides.filter(o => o.zoneId !== zoneId) })
+      },
+      
+      clearRouteZones: () => set({ routeZones: [], routeZoneOverrides: [] }),
+      
+      // ========== Route Editor Actions ==========
+      setShowRouteEditor: (show) => set({ showRouteEditor: show }),
+      
+      setEditedCurves: (curves) => set({ editedCurves: curves }),
+      
+      updateEditedCurve: (curveId, updates) => {
+        const { editedCurves, routeData } = get()
+        const existing = editedCurves.find(c => c.id === curveId)
+        if (existing) {
+          set({ editedCurves: editedCurves.map(c => c.id === curveId ? { ...c, ...updates } : c) })
+        } else {
+          const original = routeData?.curves?.find(c => c.id === curveId)
+          if (original) {
+            set({ editedCurves: [...editedCurves, { ...original, ...updates, isEdited: true }] })
+          }
+        }
+      },
+      
+      deleteCurve: (curveId) => {
+        const { editedCurves } = get()
+        const existing = editedCurves.find(c => c.id === curveId)
+        if (existing) {
+          set({ editedCurves: editedCurves.map(c => c.id === curveId ? { ...c, isDeleted: true } : c) })
+        } else {
+          set({ editedCurves: [...editedCurves, { id: curveId, isDeleted: true }] })
+        }
+      },
+      
+      restoreCurve: (curveId) => {
+        const { editedCurves } = get()
+        set({ editedCurves: editedCurves.filter(c => c.id !== curveId) })
+      },
+      
+      addCustomCallout: (callout) => {
+        const { customCallouts } = get()
+        set({ customCallouts: [...customCallouts, { ...callout, id: Date.now() }] })
+      },
+      
+      removeCustomCallout: (id) => {
+        const { customCallouts } = get()
+        set({ customCallouts: customCallouts.filter(c => c.id !== id) })
+      },
+      
+      clearRouteEdits: () => set({ editedCurves: [], customCallouts: [] }),
+      
       // ========== Multi-stop Trip Actions ==========
       setTripWaypoints: (waypoints) => set({ tripWaypoints: waypoints }),
       
@@ -167,11 +245,11 @@ const useStore = create(
       clearTripWaypoints: () => set({ tripWaypoints: [] }),
       
       // ========== Navigation Actions ==========
-      
       goToMenu: () => {
         set({ 
           showRouteSelector: true, 
           showRoutePreview: false,
+          showTripSummary: false,
           isRunning: false,
           simulationProgress: 0,
           activeCurve: null,
@@ -184,6 +262,7 @@ const useStore = create(
         set({ 
           showRouteSelector: false, 
           showRoutePreview: true,
+          showTripSummary: false,
           isRunning: false,
           simulationProgress: 0,
           activeCurve: null,
@@ -234,7 +313,6 @@ const useStore = create(
         })
       },
       
-      // End trip and show summary
       endTrip: () => {
         set({
           isRunning: false,
@@ -244,34 +322,29 @@ const useStore = create(
         })
       },
       
-      // Update trip stats (call periodically during drive)
       updateTripStats: (newPosition, currentSpeed, passedCurve = null) => {
         const { tripStats } = get()
         const updates = { ...tripStats }
         
-        // Track max speed
         if (currentSpeed > updates.maxSpeed) {
           updates.maxSpeed = currentSpeed
         }
         
-        // Sample speed for average (every call)
         if (currentSpeed > 0) {
-          updates.speedSamples = [...updates.speedSamples.slice(-500), currentSpeed] // Keep last 500
+          updates.speedSamples = [...updates.speedSamples.slice(-500), currentSpeed]
         }
         
-        // Calculate distance from position history
         if (newPosition && updates.positionHistory.length > 0) {
           const lastPos = updates.positionHistory[updates.positionHistory.length - 1]
           const dist = getDistanceBetween(lastPos, newPosition)
-          if (dist > 2 && dist < 500) { // Filter out GPS jumps
+          if (dist > 2 && dist < 500) {
             updates.distance += dist
           }
         }
         if (newPosition) {
-          updates.positionHistory = [...updates.positionHistory.slice(-100), newPosition] // Keep last 100
+          updates.positionHistory = [...updates.positionHistory.slice(-100), newPosition]
         }
         
-        // Track curves passed
         if (passedCurve) {
           updates.curvesCompleted += 1
           if (!updates.sharpestCurve || passedCurve.severity > updates.sharpestCurve) {
@@ -337,7 +410,6 @@ const useStore = create(
         return settings.units === 'metric' ? 'm' : 'ft'
       },
       
-      // Convert meters to display unit
       formatDistance: (meters) => {
         const { settings } = get()
         if (settings.units === 'metric') {
@@ -359,7 +431,6 @@ const useStore = create(
         return speed
       },
       
-      // Get computed trip statistics
       getTripSummary: () => {
         const { tripStats, settings, routeData } = get()
         if (!tripStats.startTime) return null
@@ -369,7 +440,6 @@ const useStore = create(
           ? tripStats.speedSamples.reduce((a, b) => a + b, 0) / tripStats.speedSamples.length
           : 0
         
-        // Convert units if needed
         const distanceMiles = tripStats.distance / 1609.34
         const distanceKm = tripStats.distance / 1000
         const isMetric = settings.units === 'metric'
@@ -395,12 +465,12 @@ const useStore = create(
         mode: state.mode,
         recentRoutes: state.recentRoutes,
         favoriteRoutes: state.favoriteRoutes,
+        globalZoneOverrides: state.globalZoneOverrides,
       }),
     }
   )
 )
 
-// Helper: Distance between two coordinates in meters
 function getDistanceBetween(pos1, pos2) {
   const R = 6371e3
   const φ1 = pos1[1] * Math.PI / 180
@@ -413,7 +483,6 @@ function getDistanceBetween(pos1, pos2) {
   return R * c
 }
 
-// Helper: Format duration
 function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000)
   const minutes = Math.floor(seconds / 60)
