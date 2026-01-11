@@ -4,8 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v10
-// Fixed recenter button position
+// Map Component - v11
+// Fixed curve marker directions + Smoother camera
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -24,6 +24,7 @@ export default function Map() {
   const {
     position,
     heading,
+    speed,
     isRunning,
     upcomingCurves,
     activeCurve,
@@ -77,11 +78,8 @@ export default function Map() {
       }
     })
 
-    // User interaction = show recenter button
-    // Only trigger on drag - the clearest signal user wants manual control
     map.current.on('dragstart', () => {
       console.log('📍 User dragged map - following disabled')
-      // We'll handle this via a custom event since we can't access setState here
       window.dispatchEvent(new CustomEvent('map-user-drag'))
     })
 
@@ -107,15 +105,11 @@ export default function Map() {
           }
         }
 
-        // Check if source already exists
         const existingSource = map.current.getSource('route')
         
         if (existingSource) {
-          // Update existing source
           existingSource.setData(routeGeoJSON)
-          console.log('📍 Route updated')
         } else {
-          // Add new source and layers
           map.current.addSource('route', {
             type: 'geojson',
             data: routeGeoJSON
@@ -145,15 +139,12 @@ export default function Map() {
               'line-opacity': 0.9
             }
           })
-          
-          console.log('📍 Route added with', routeData.coordinates.length, 'points')
         }
       } catch (e) {
         console.log('Route add/update error:', e.message)
       }
     }
 
-    // Wait for style to be fully loaded
     if (map.current.isStyleLoaded()) {
       addRoute()
     } else {
@@ -174,7 +165,6 @@ export default function Map() {
       }
     } catch (e) {}
     
-    // Update marker color
     if (userMarkerEl.current) {
       const divs = userMarkerEl.current.querySelectorAll('div')
       const arrow = userMarkerEl.current.querySelector('#heading-arrow')
@@ -225,7 +215,7 @@ export default function Map() {
     return () => window.removeEventListener('map-user-drag', handleUserDrag)
   }, [])
 
-  // Update position and camera
+  // Update position and camera - IMPROVED smoothness
   useEffect(() => {
     if (!map.current || !mapLoaded || !userMarker.current) return
     
@@ -239,28 +229,28 @@ export default function Map() {
         }
       }
 
-      // Always follow when running (unless user has manually dragged)
       if (isRunning && isFollowing) {
-        // Use flyTo for smoother animation with longer duration
+        // Adjust camera smoothness based on speed
+        // Faster speed = shorter duration for snappier response
+        const currentSpeed = speed || 0
+        const duration = currentSpeed > 50 ? 400 : currentSpeed > 30 ? 600 : 800
+        const zoom = currentSpeed > 50 ? 15.5 : currentSpeed > 30 ? 16 : 16.5
+        
         map.current.easeTo({
           center: position,
           bearing: heading || 0,
           pitch: 60,
-          zoom: 16.5,
-          duration: 800,  // Longer duration for smoothness
-          easing: (t) => {
-            // Smooth easing function (ease-out cubic)
-            return 1 - Math.pow(1 - t, 3)
-          }
+          zoom: zoom,
+          duration: duration,
+          easing: (t) => 1 - Math.pow(1 - t, 3) // ease-out cubic
         })
       }
     }
-  }, [position, heading, isRunning, mapLoaded, isFollowing])
+  }, [position, heading, isRunning, mapLoaded, isFollowing, speed])
 
   // Reset following when navigation starts
   useEffect(() => {
     if (isRunning) {
-      console.log('📍 Navigation started - enabling follow mode')
       setIsFollowing(true)
       setShowRecenter(false)
     }
@@ -285,20 +275,16 @@ export default function Map() {
     })
   }, [position, heading, routeData])
 
-  // Update curve markers - show ALL route curves
+  // Update curve markers - FIXED directions
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
 
-    // Use route curves (all curves on route), not just upcoming
     const curvesToShow = routeData?.curves || []
     
-    if (curvesToShow.length === 0) {
-      console.log('📍 No curves to display')
-      return
-    }
+    if (curvesToShow.length === 0) return
 
     curvesToShow.forEach((curve) => {
       if (!curve.position) return
@@ -306,10 +292,22 @@ export default function Map() {
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
       const color = getCurveColor(curve.severity)
-      const isLeft = curve.direction === 'LEFT'
       
-      if (curve.isChicane) {
-        const dirChar = curve.startDirection === 'LEFT' ? '←' : '→'
+      // FIXED: Use startDirection for chicanes
+      const direction = curve.isChicane ? curve.startDirection : curve.direction
+      const isLeft = direction === 'LEFT'
+      
+      if (curve.isTechnicalSection) {
+        // Technical section marker
+        const dirChar = isLeft ? '←' : '→'
+        el.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.9)'}; padding: 6px 10px; border-radius: 10px; border: 2px solid ${color}; box-shadow: 0 4px 15px ${color}50; transform: scale(${isActive ? 1.15 : 1});">
+            <span style="font-size: 8px; font-weight: 700; color: ${isActive ? 'white' : color}; letter-spacing: 0.5px;">TECH</span>
+            <span style="font-size: 11px; font-weight: 700; color: ${isActive ? 'white' : color};">${dirChar}${curve.curveCount}c</span>
+          </div>
+        `
+      } else if (curve.isChicane) {
+        const dirChar = isLeft ? '←' : '→'
         const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
         
         el.innerHTML = `
@@ -345,8 +343,6 @@ export default function Map() {
 
       curveMarkers.current.push(marker)
     })
-    
-    console.log('📍 Added', curveMarkers.current.length, 'curve markers')
   }, [routeData, activeCurve, mapLoaded])
 
   // Keep screen awake
@@ -370,7 +366,6 @@ export default function Map() {
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Recenter Button - positioned in center-right to avoid overlaps */}
       {showRecenter && (
         <button
           onClick={handleRecenter}
@@ -384,7 +379,6 @@ export default function Map() {
         </button>
       )}
 
-      {/* Loading state */}
       {!mapLoaded && (
         <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
           <div className="text-center">
