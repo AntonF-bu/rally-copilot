@@ -23,18 +23,24 @@ export function useSpeech() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create audio element
-    audioRef.current = new Audio()
+    // Create audio element with iOS-friendly settings
+    const audio = new Audio()
+    audio.playsInline = true
+    audio.setAttribute('playsinline', 'true')
+    audio.setAttribute('webkit-playsinline', 'true')
     
-    audioRef.current.addEventListener('ended', () => {
+    audio.addEventListener('ended', () => {
       isPlayingRef.current = false
       setSpeaking(false, '')
     })
     
-    audioRef.current.addEventListener('error', () => {
+    audio.addEventListener('error', (e) => {
+      console.error('Audio error:', e)
       isPlayingRef.current = false
       setSpeaking(false, '')
     })
+    
+    audioRef.current = audio
 
     // Native speech synthesis fallback
     if ('speechSynthesis' in window) {
@@ -191,12 +197,25 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try ElevenLabs first, fall back to native
-    const success = await speakElevenLabs(text)
-    if (success) return true
+    // Detect iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    
+    if (isIOS) {
+      // On iOS, native speech is more reliable
+      // Try native first, ElevenLabs as backup
+      const nativeSuccess = speakNative(text)
+      if (nativeSuccess) return true
+      
+      // Fallback to ElevenLabs if native fails
+      return await speakElevenLabs(text)
+    } else {
+      // On desktop/Android, try ElevenLabs first for better voice
+      const success = await speakElevenLabs(text)
+      if (success) return true
 
-    // Fallback to native
-    return speakNative(text)
+      // Fallback to native
+      return speakNative(text)
+    }
   }, [settings.voiceEnabled, speakElevenLabs, speakNative])
 
   const stop = useCallback(() => {
@@ -210,15 +229,31 @@ export function useSpeech() {
     return isPlayingRef.current || (synthRef.current?.speaking ?? false)
   }, [])
 
-  // Simple init for iOS - just play/pause to unlock audio
+  // Initialize audio on user tap (REQUIRED for iOS)
+  // Must be called from a user interaction like button tap
   const initAudio = useCallback(async () => {
+    if (!audioRef.current) return
+    
     try {
-      audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV////////////////////////////////////////////AAAAAExhdmM1OC4xMwAAAAAAAAAAAAAAACQAAAAAAAAAAQGwSRPuNgAAAAAAAAAAAAAAAAD/4xjEAAV0A0AgAAANI2hG4ow/8uD/Lw/ygP8oGP/E4Bh/5c/+XP/l4f5QH+UB/lz/5eH//5cP/Lhj/8uGP/y4f//+Mf/lz//w/8uH/lwx/+XDH/y5/8vD'
+      // iOS requires playing audio from a user gesture to unlock
+      // Create a short silent audio and play it
+      audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
       audioRef.current.volume = 0.01
       await audioRef.current.play()
       audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current.volume = 1.0
+      console.log('🔊 iOS audio unlocked')
+      
+      // Also try to unlock speech synthesis
+      if (synthRef.current) {
+        const utterance = new SpeechSynthesisUtterance('')
+        utterance.volume = 0
+        synthRef.current.speak(utterance)
+        synthRef.current.cancel()
+      }
     } catch (e) {
-      // Ignore - just trying to unlock
+      console.log('Audio init error (may be ok):', e.message)
     }
   }, [])
 
