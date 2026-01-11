@@ -51,7 +51,8 @@ export default function App() {
   // Reset announced curves when route changes
   useEffect(() => {
     announcedCurvesRef.current = new Set()
-  }, [routeMode])
+    lastCalloutTimeRef.current = Date.now() // Prevent immediate callout after route change
+  }, [routeMode, routeData])
 
   // Callout Logic
   useEffect(() => {
