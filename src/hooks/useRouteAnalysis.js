@@ -5,8 +5,7 @@ import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWit
 
 // ================================
 // Route Analysis Hook
-// With rerouting support
-// Fixed: Also handles demo mode curves
+// Manual reroute only - no auto rerouting
 // ================================
 
 export function useRouteAnalysis() {
@@ -25,8 +24,6 @@ export function useRouteAnalysis() {
   const lastFetchPositionRef = useRef(null)
   const isFetchingRef = useRef(false)
   const destinationRef = useRef(null)
-  const lastRerouteTimeRef = useRef(0)
-  const offRouteCountRef = useRef(0)
 
   // Process route and detect curves
   const processRoute = useCallback((coordinates) => {
@@ -42,40 +39,22 @@ export function useRouteAnalysis() {
     return curves
   }, [])
 
-  // Calculate distance from point to nearest point on route
-  const getDistanceFromRoute = useCallback((position, routeCoords) => {
-    if (!position || !routeCoords || routeCoords.length < 2) return Infinity
-
-    let minDistance = Infinity
-    
-    for (let i = 0; i < routeCoords.length; i++) {
-      const dist = getDistance(position, routeCoords[i])
-      if (dist < minDistance) {
-        minDistance = dist
-      }
-    }
-    
-    return minDistance
-  }, [])
-
-  // Reroute from current position to destination
+  // Manual reroute - call this from UI button
   const reroute = useCallback(async () => {
     const currentPosition = useStore.getState().position
     const destination = destinationRef.current
     
-    if (!currentPosition || !destination) {
-      console.log('Cannot reroute: missing position or destination')
+    if (!currentPosition) {
+      console.log('Cannot reroute: no current position')
       return false
     }
 
-    const now = Date.now()
-    if (now - lastRerouteTimeRef.current < 10000) {
-      console.log('Reroute throttled')
+    if (!destination) {
+      console.log('Cannot reroute: no destination saved')
       return false
     }
-    lastRerouteTimeRef.current = now
 
-    console.log('🔄 Rerouting from', currentPosition, 'to', destination)
+    console.log('🔄 Manual reroute from', currentPosition, 'to', destination.name)
 
     try {
       const route = await getRoute(currentPosition, destination.coordinates)
@@ -97,13 +76,20 @@ export function useRouteAnalysis() {
         rerouted: true
       })
 
-      offRouteCountRef.current = 0
+      // Set initial upcoming curves
+      if (curves.length > 0) {
+        setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
+          ...c,
+          distance: c.distanceFromStart || (i * 200 + 100)
+        })))
+      }
+
       return true
     } catch (error) {
       console.error('Reroute error:', error)
       return false
     }
-  }, [processRoute, setRouteData])
+  }, [processRoute, setRouteData, setUpcomingCurves])
 
   // Initialize route for destination mode
   const initDestinationRoute = useCallback(async (destinationQuery) => {
@@ -114,7 +100,7 @@ export function useRouteAnalysis() {
       return false
     }
 
-    console.log('Initializing destination route from', currentPosition, 'to', destinationQuery)
+    console.log('Initializing destination route to', destinationQuery)
 
     try {
       const results = await geocodeAddress(destinationQuery)
@@ -124,8 +110,8 @@ export function useRouteAnalysis() {
       }
 
       const destCoords = results[0].coordinates
-      console.log('Destination coordinates:', destCoords)
 
+      // Save destination for manual rerouting
       destinationRef.current = {
         name: results[0].name,
         coordinates: destCoords
@@ -137,8 +123,6 @@ export function useRouteAnalysis() {
         return false
       }
 
-      console.log('Route received with', route.coordinates.length, 'points')
-
       const curves = processRoute(route.coordinates)
       
       setRouteData({
@@ -149,7 +133,6 @@ export function useRouteAnalysis() {
         duration: route.duration
       })
 
-      // Set initial upcoming curves
       if (curves.length > 0) {
         setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
           ...c,
@@ -157,7 +140,6 @@ export function useRouteAnalysis() {
         })))
       }
 
-      console.log('Route data set successfully')
       return true
     } catch (error) {
       console.error('Error initializing destination route:', error)
@@ -174,18 +156,14 @@ export function useRouteAnalysis() {
       
       let fullUrl = url
       if (url.includes('goo.gl') || url.includes('maps.app.goo.gl')) {
-        console.log('Short URL detected, expanding...')
         const expanded = await expandShortUrl(url)
         if (expanded) {
           fullUrl = expanded
-          console.log('Expanded URL:', fullUrl)
         } else {
-          console.error('Could not expand short URL')
-          return { error: 'SHORT_URL', message: 'Please paste the full URL (open the short link in your browser first, then copy the full URL from the address bar)' }
+          return { error: 'SHORT_URL', message: 'Please paste the full URL from your browser address bar' }
         }
       }
 
-      console.log('Parsing Google Maps URL...')
       const parsed = parseGoogleMapsUrl(fullUrl)
       
       if (!parsed) {
@@ -197,60 +175,57 @@ export function useRouteAnalysis() {
 
       let waypoints = []
 
-      // NEW: Handle multi-stop routes with waypoints array
+      // Handle multi-stop routes
       if (parsed.waypoints && parsed.waypoints.length >= 2) {
-        console.log('Processing multi-stop route with', parsed.waypoints.length, 'waypoints')
+        console.log('Processing multi-stop route')
         
         for (const wp of parsed.waypoints) {
           if (wp.coords) {
             waypoints.push(wp.coords)
           } else if (wp.name) {
-            console.log('Geocoding waypoint:', wp.name)
-            const results = await geocodeAddress(wp.name)
-            if (results?.length) {
-              waypoints.push(results[0].coordinates)
+            // Check for "your location" type strings
+            if (wp.name.toLowerCase().includes('your location') || 
+                wp.name.toLowerCase().includes('my location')) {
+              if (currentPosition) {
+                waypoints.push(currentPosition)
+              }
             } else {
-              console.error('Could not geocode:', wp.name)
+              const results = await geocodeAddress(wp.name)
+              if (results?.length) {
+                waypoints.push(results[0].coordinates)
+              }
             }
           }
         }
         
-        // If first waypoint failed geocoding but we have current position, use it
-        if (waypoints.length < parsed.waypoints.length && currentPosition) {
-          const firstWp = parsed.waypoints[0]
-          if (!firstWp.coords && firstWp.name) {
-            // First waypoint might be "Your location" - use current position
-            if (firstWp.name.toLowerCase().includes('your location') || 
-                firstWp.name.toLowerCase().includes('my location') ||
-                firstWp.name.toLowerCase().includes('current location')) {
-              waypoints.unshift(currentPosition)
-              console.log('Using current position for origin')
-            }
-          }
-        }
-        
-        // Store final destination for rerouting
         if (waypoints.length >= 2) {
+          const lastWp = parsed.waypoints[parsed.waypoints.length - 1]
           destinationRef.current = {
-            name: parsed.waypoints[parsed.waypoints.length - 1].name || 'Destination',
+            name: lastWp.name || 'Destination',
             coordinates: waypoints[waypoints.length - 1]
           }
         }
       }
-      // Handle direct coordinates
+      // Direct coordinates
       else if (parsed.coordinates && parsed.coordinates.length >= 2) {
         waypoints = parsed.coordinates
+        destinationRef.current = {
+          name: 'Destination',
+          coordinates: waypoints[waypoints.length - 1]
+        }
       }
+      // Single coordinate, need origin
       else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
         if (currentPosition) {
           waypoints = [currentPosition, parsed.coordinates[0]]
-        } else {
-          console.error('Need current position for route origin')
-          return false
+          destinationRef.current = {
+            name: 'Destination',
+            coordinates: parsed.coordinates[0]
+          }
         }
       }
+      // Origin coords + destination name
       else if (parsed.originCoordinates && parsed.destination) {
-        console.log('Geocoding destination:', parsed.destination)
         const destResults = await geocodeAddress(parsed.destination)
         if (destResults?.length) {
           waypoints = [parsed.originCoordinates, destResults[0].coordinates]
@@ -260,21 +235,8 @@ export function useRouteAnalysis() {
           }
         }
       }
-      else if (parsed.destinationCoordinates && parsed.origin) {
-        console.log('Geocoding origin:', parsed.origin)
-        const originResults = await geocodeAddress(parsed.origin)
-        if (originResults?.length) {
-          waypoints = [originResults[0].coordinates, parsed.destinationCoordinates]
-          destinationRef.current = {
-            name: 'Destination',
-            coordinates: parsed.destinationCoordinates
-          }
-        }
-      }
+      // Both need geocoding
       else if (parsed.needsGeocoding) {
-        console.log('Geocoding needed...')
-        
-        // Handle legacy format with origin/destination strings
         if (parsed.origin && parsed.destination) {
           const originResults = await geocodeAddress(parsed.origin)
           const destResults = await geocodeAddress(parsed.destination)
@@ -286,9 +248,9 @@ export function useRouteAnalysis() {
               coordinates: destResults[0].coordinates
             }
           }
-        } else if (parsed.destination) {
+        } else if (parsed.destination && currentPosition) {
           const destResults = await geocodeAddress(parsed.destination)
-          if (destResults?.length && currentPosition) {
+          if (destResults?.length) {
             waypoints = [currentPosition, destResults[0].coordinates]
             destinationRef.current = {
               name: destResults[0].name,
@@ -298,28 +260,18 @@ export function useRouteAnalysis() {
         }
       }
 
-      console.log('Final waypoints:', waypoints)
-
       if (waypoints.length < 2) {
         console.error('Could not extract enough waypoints')
         return false
       }
 
-      if (!destinationRef.current) {
-        destinationRef.current = {
-          name: 'Destination',
-          coordinates: waypoints[waypoints.length - 1]
-        }
-      }
+      console.log('Final waypoints:', waypoints.length)
 
-      console.log('Getting route from Mapbox...')
       const route = await getRouteWithWaypoints(waypoints)
       if (!route) {
         console.error('Could not get route from Mapbox')
         return false
       }
-
-      console.log('Route received with', route.coordinates.length, 'points')
 
       const curves = processRoute(route.coordinates)
       
@@ -331,7 +283,6 @@ export function useRouteAnalysis() {
         imported: true
       })
 
-      // Set initial upcoming curves
       if (curves.length > 0) {
         setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
           ...c,
@@ -339,7 +290,6 @@ export function useRouteAnalysis() {
         })))
       }
 
-      console.log('Imported route set successfully')
       return true
     } catch (error) {
       console.error('Error importing route:', error)
@@ -360,12 +310,10 @@ export function useRouteAnalysis() {
     }
 
     isFetchingRef.current = true
-    console.log('Fetching road ahead from', currentPosition)
 
     try {
       const route = await getRoadAhead(currentPosition, currentHeading || 0, 2000)
       if (route) {
-        console.log('Look-ahead route received with', route.coordinates.length, 'points')
         const curves = processRoute(route.coordinates)
         setRouteData({
           coordinates: route.coordinates,
@@ -375,42 +323,19 @@ export function useRouteAnalysis() {
         lastFetchPositionRef.current = currentPosition
       }
     } catch (error) {
-      console.error('Look-ahead fetch error:', error)
+      console.error('Look-ahead error:', error)
     } finally {
       isFetchingRef.current = false
     }
   }, [processRoute, setRouteData])
 
-  // Check if off route and trigger reroute
+  // Update upcoming curves based on position (non-demo modes)
   useEffect(() => {
-    if (!isRunning || !position || routeMode === 'demo' || routeMode === 'lookahead') return
-    if (!routeData?.coordinates || routeData.coordinates.length < 2) return
-
-    const distanceFromRoute = getDistanceFromRoute(position, routeData.coordinates)
-    
-    if (distanceFromRoute > 50) {
-      offRouteCountRef.current++
-      console.log(`Off route: ${Math.round(distanceFromRoute)}m (count: ${offRouteCountRef.current})`)
-      
-      if (offRouteCountRef.current >= 3) {
-        console.log('🚨 Off route detected, initiating reroute...')
-        reroute()
-      }
-    } else {
-      offRouteCountRef.current = 0
-    }
-  }, [position, isRunning, routeMode, routeData, getDistanceFromRoute, reroute])
-
-  // Update upcoming curves based on position (for ALL modes including demo)
-  useEffect(() => {
-    if (!isRunning || !position) return
+    if (!isRunning || !position || routeMode === 'demo') return
     if (allCurvesRef.current.length === 0 && routeData?.curves?.length > 0) {
       allCurvesRef.current = routeData.curves
     }
     if (allCurvesRef.current.length === 0) return
-
-    // For demo mode, useSimulation handles curves - skip here
-    if (routeMode === 'demo') return
 
     const upcoming = getUpcomingCurves(
       allCurvesRef.current,
@@ -428,7 +353,7 @@ export function useRouteAnalysis() {
     }
   }, [position, heading, isRunning, routeMode, routeData, setUpcomingCurves, setActiveCurve])
 
-  // Look-ahead mode: periodically fetch
+  // Look-ahead mode: periodic fetch
   useEffect(() => {
     if (routeMode !== 'lookahead' || !isRunning) return
 
@@ -441,7 +366,6 @@ export function useRouteAnalysis() {
   useEffect(() => {
     if (routeData?.curves) {
       allCurvesRef.current = routeData.curves
-      console.log('Synced', routeData.curves.length, 'curves from route data')
     }
   }, [routeData])
 
@@ -450,7 +374,7 @@ export function useRouteAnalysis() {
     initImportedRoute,
     fetchRoadAhead,
     processRoute,
-    reroute
+    reroute // Manual reroute function
   }
 }
 
