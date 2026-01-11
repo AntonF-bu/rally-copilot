@@ -25,6 +25,7 @@ const useStore = create(
       // ========== Route State ==========
       routeData: null,
       routeMode: null, // 'destination', 'lookahead', 'import', 'demo'
+      destination: null, // { name, coordinates } for rerouting
       
       // ========== Curve State ==========
       activeCurve: null,
@@ -139,9 +140,11 @@ const useStore = create(
       // ========== Route Actions ==========
       setRouteData: (routeData) => set({ routeData }),
       setRouteMode: (routeMode) => set({ routeMode }),
+      setDestination: (destination) => set({ destination }),
       clearRouteData: () => set({ 
         routeData: null, 
         routeMode: null,
+        destination: null,
         upcomingCurves: [],
         activeCurve: null
       }),
