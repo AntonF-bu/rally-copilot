@@ -66,31 +66,14 @@ export default function App() {
 
   // Progressive Callout Logic
   useEffect(() => {
-    // Always log state for debugging
-    console.log('🔊 Callout check:', {
-      isRunning,
-      voiceEnabled: settings.voiceEnabled,
-      curvesCount: upcomingCurves.length,
-      nextCurve: upcomingCurves[0] ? {
-        id: upcomingCurves[0].id,
-        distance: upcomingCurves[0].distance,
-        severity: upcomingCurves[0].severity
-      } : null,
-      currentSpeed,
-      earlySet: Array.from(earlyWarningsRef.current),
-      mainSet: Array.from(mainCalloutsRef.current)
-    })
-
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
-      console.log('🔊 Skipping - isRunning:', isRunning, 'voiceEnabled:', settings.voiceEnabled, 'curves:', upcomingCurves.length)
       return
     }
 
     const now = Date.now()
-    const MIN_CALLOUT_INTERVAL = 1500 // Reduced for progressive warnings
+    const MIN_CALLOUT_INTERVAL = 1000 // 1 second minimum between callouts
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
-      console.log('🔊 Skipping - too soon, wait', MIN_CALLOUT_INTERVAL - (now - lastCalloutTimeRef.current), 'ms')
       return
     }
 
@@ -196,69 +179,21 @@ export default function App() {
       }
     }
 
-    // STRAIGHT SECTION CALLOUTS - Frequent nudges for continuous awareness
-    // More nudge points for constant communication
-    if (distance > 150) {
-      const straightDistance = distance
+    // STRAIGHT SECTION CALLOUTS - Minimal, only for very long straights
+    // Priority is curve callouts - don't interrupt those
+    if (distance > 600 && !straightCalledRef.current.has(`straight-${curveId}`)) {
+      const nextCharacter = nextCurve ? getCurveCharacter(nextCurve) : ''
+      const nextDir = nextCurve?.direction === 'LEFT' ? 'left' : 'right'
+      const distText = getDistanceText(distance, settings.speedUnit)
       
-      // Define many nudge points for continuous updates
-      const nudgePoints = [
-        { dist: 1200, key: 'very-far' },  // Very long straight
-        { dist: 800, key: 'far' },         // Long straight
-        { dist: 500, key: 'mid' },         // Mid point
-        { dist: 350, key: 'approaching' }, // Getting closer
-        { dist: 250, key: 'near' },        // Almost there
-        { dist: 180, key: 'soon' }         // Very close
-      ]
+      const callout = nextCurve 
+        ? `Clear ahead. ${nextCharacter} ${nextDir} in ${distText}.`
+        : `Clear ahead for ${distText}.`
       
-      for (const nudge of nudgePoints) {
-        const nudgeKey = `straight-${curveId}-${nudge.key}`
-        
-        // Check if we're in the right distance band and haven't called this nudge yet
-        if (straightDistance >= nudge.dist && !straightCalledRef.current.has(nudgeKey)) {
-          let callout = ''
-          const distText = getDistanceText(straightDistance, settings.speedUnit)
-          const nextCharacter = nextCurve ? getCurveCharacter(nextCurve) : ''
-          const nextDir = nextCurve?.direction === 'LEFT' ? 'left' : 'right'
-          
-          if (nudge.key === 'very-far' && straightDistance >= 1200) {
-            // Very long straight
-            callout = `Long clear stretch ahead. Cruise at ${getStraightSpeed(mode, settings.speedUnit)}. ${nextCharacter} ${nextDir} in ${distText}.`
-          } else if (nudge.key === 'far' && straightDistance >= 800 && straightDistance < 1200) {
-            // Long straight
-            callout = generateStraightCallout(straightDistance, mode, settings.speedUnit, nextCurve)
-          } else if (nudge.key === 'mid' && straightDistance >= 500 && straightDistance < 800) {
-            // Mid-straight reminder
-            callout = nextCurve 
-              ? `Still clear. ${nextCharacter} ${nextDir} in ${distText}.`
-              : `Clear for ${distText}. Hold your speed.`
-          } else if (nudge.key === 'approaching' && straightDistance >= 350 && straightDistance < 500) {
-            // Approaching curve
-            if (nextCurve) {
-              const targetSpeed = getSpeedForSeverity(nextCurve.severity, mode, settings.speedUnit)
-              callout = `${nextCharacter} ${nextDir} ahead in ${distText}. Target ${targetSpeed}.`
-            }
-          } else if (nudge.key === 'near' && straightDistance >= 250 && straightDistance < 350) {
-            // Getting close
-            if (nextCurve) {
-              callout = `${nextCharacter} ${nextDir} coming up. ${distText}.`
-            }
-          } else if (nudge.key === 'soon' && straightDistance >= 180 && straightDistance < 250) {
-            // Almost at the curve
-            if (nextCurve && nextCurve.severity >= 3) {
-              callout = `Get ready. ${nextCharacter} ${nextDir} soon.`
-            }
-          }
-          
-          if (callout) {
-            console.log(`🔊 STRAIGHT (${nudge.key}):`, callout)
-            speak(callout, nudge.key === 'soon' || nudge.key === 'near' ? 'high' : 'normal')
-            straightCalledRef.current.add(nudgeKey)
-            lastCalloutTimeRef.current = now
-            return // Exit after speaking
-          }
-        }
-      }
+      console.log(`🔊 STRAIGHT:`, callout)
+      speak(callout, 'normal')
+      straightCalledRef.current.add(`straight-${curveId}`)
+      lastCalloutTimeRef.current = now
     }
 
   }, [isRunning, upcomingCurves, currentSpeed, mode, settings, setLastAnnouncedCurveId, speak])
