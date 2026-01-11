@@ -234,6 +234,7 @@ export default function Map() {
         }
       }
 
+      // Always follow when running (unless user has manually dragged)
       if (isRunning && isFollowingRef.current) {
         map.current.easeTo({
           center: position,
@@ -246,6 +247,14 @@ export default function Map() {
       }
     }
   }, [position, heading, isRunning, mapLoaded])
+
+  // Reset following when navigation starts
+  useEffect(() => {
+    if (isRunning) {
+      isFollowingRef.current = true
+      setShowRecenter(false)
+    }
+  }, [isRunning])
 
   // Recenter handler
   const handleRecenter = useCallback(() => {
