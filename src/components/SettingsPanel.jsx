@@ -3,53 +3,57 @@ import useStore from '../store'
 import { useSpeech } from '../hooks/useSpeech'
 
 // ================================
-// Settings Panel - Complete Overhaul
+// Settings Panel - Overhauled
+// Clean sections, proper unit handling
 // ================================
 
 export default function SettingsPanel() {
-  const { 
-    showSettings, 
-    toggleSettings, 
-    settings, 
-    updateSettings,
-    mode,
-    setMode
-  } = useStore()
-  
+  const { showSettings, toggleSettings, settings, updateSettings, mode, setMode } = useStore()
   const { speak } = useSpeech()
   const [testPlaying, setTestPlaying] = useState(false)
 
   if (!showSettings) return null
 
+  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+  const modeColor = modeColors[mode] || modeColors.cruise
+
   const handleTestVoice = async () => {
     setTestPlaying(true)
-    await speak('Left 4 tightens into right 3', 'high')
-    setTimeout(() => setTestPlaying(false), 2000)
+    const isMetric = settings.units === 'metric'
+    const testPhrase = isMetric 
+      ? 'Left 4 tightens, 50 kilometers per hour'
+      : 'Left 4 tightens, 35 miles per hour'
+    await speak(testPhrase, 'high')
+    setTimeout(() => setTestPlaying(false), 2500)
   }
-
-  const timingOptions = [
-    { value: 4, label: '4s (Early)' },
-    { value: 6, label: '6s (Normal)' },
-    { value: 8, label: '8s (Late)' },
-    { value: 10, label: '10s (Very Early)' },
-  ]
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={toggleSettings}
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm" 
+        onClick={toggleSettings} 
       />
       
       {/* Panel */}
-      <div className="relative w-full max-w-lg bg-[#0d0d12] rounded-t-3xl border-t border-white/10 overflow-hidden safe-bottom">
+      <div className="relative w-full max-w-lg bg-[#0c0c10] rounded-t-3xl border-t border-white/10 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
-          <h2 className="text-lg font-bold text-white">Settings</h2>
+          <div className="flex items-center gap-3">
+            <div 
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: `${modeColor}20` }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v4m0 14v4M1 12h4m14 0h4"/>
+              </svg>
+            </div>
+            <h2 className="text-lg font-semibold text-white">Settings</h2>
+          </div>
           <button 
-            onClick={toggleSettings}
-            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+            onClick={toggleSettings} 
+            className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -58,240 +62,313 @@ export default function SettingsPanel() {
         </div>
 
         {/* Content */}
-        <div className="px-5 py-4 max-h-[60vh] overflow-y-auto">
+        <div className="px-5 py-4 max-h-[65vh] overflow-y-auto">
           
+          {/* Units Section */}
+          <Section title="UNITS" icon="📐">
+            <div className="grid grid-cols-2 gap-2">
+              <UnitButton
+                active={settings.units === 'imperial'}
+                onClick={() => updateSettings({ units: 'imperial' })}
+                color={modeColor}
+                title="Imperial"
+                subtitle="MPH, feet"
+              />
+              <UnitButton
+                active={settings.units === 'metric'}
+                onClick={() => updateSettings({ units: 'metric' })}
+                color={modeColor}
+                title="Metric"
+                subtitle="KM/H, meters"
+              />
+            </div>
+            <p className="text-white/30 text-xs mt-2">
+              Affects speedometer, callouts, and all distances
+            </p>
+          </Section>
+
           {/* Voice Section */}
-          <div className="mb-6">
-            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">VOICE</div>
-            
-            {/* Voice Enabled */}
+          <Section title="VOICE CALLOUTS" icon="🔊">
             <SettingRow 
-              label="Voice Callouts"
+              label="Enable Voice" 
               description="Announce upcoming curves"
             >
               <Toggle 
                 enabled={settings.voiceEnabled} 
                 onChange={(v) => updateSettings({ voiceEnabled: v })}
+                color={modeColor}
               />
             </SettingRow>
 
-            {/* Volume Slider */}
             {settings.voiceEnabled && (
-              <SettingRow label="Volume">
-                <div className="flex items-center gap-3 w-40">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={settings.volume || 1}
-                    onChange={(e) => updateSettings({ volume: parseFloat(e.target.value) })}
-                    className="flex-1 accent-cyan-500"
-                  />
-                  <span className="text-white/60 text-sm w-8">
-                    {Math.round((settings.volume || 1) * 100)}%
-                  </span>
-                </div>
-              </SettingRow>
-            )}
+              <>
+                <SettingRow label="Volume">
+                  <div className="flex items-center gap-3 w-36">
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="1" 
+                      step="0.1" 
+                      value={settings.volume || 1}
+                      onChange={(e) => updateSettings({ volume: parseFloat(e.target.value) })}
+                      className="flex-1 h-1.5 bg-white/20 rounded-full appearance-none cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, ${modeColor} 0%, ${modeColor} ${(settings.volume || 1) * 100}%, rgba(255,255,255,0.2) ${(settings.volume || 1) * 100}%, rgba(255,255,255,0.2) 100%)`
+                      }}
+                    />
+                    <span className="text-white/50 text-xs w-8 text-right">
+                      {Math.round((settings.volume || 1) * 100)}%
+                    </span>
+                  </div>
+                </SettingRow>
 
-            {/* Test Voice */}
-            {settings.voiceEnabled && (
-              <SettingRow label="Test Voice">
-                <button
-                  onClick={handleTestVoice}
-                  disabled={testPlaying}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    testPlaying 
-                      ? 'bg-cyan-500/20 text-cyan-400' 
-                      : 'bg-white/10 text-white hover:bg-white/20'
-                  }`}
-                >
-                  {testPlaying ? 'Playing...' : 'Play Sample'}
-                </button>
-              </SettingRow>
-            )}
-          </div>
+                <SettingRow label="Timing" description="When to announce curves">
+                  <div className="flex bg-white/5 rounded-lg p-0.5">
+                    {[
+                      { value: 'early', label: 'Early' },
+                      { value: 'normal', label: 'Normal' },
+                      { value: 'late', label: 'Late' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => updateSettings({ calloutTiming: opt.value })}
+                        className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                          settings.calloutTiming === opt.value 
+                            ? 'text-black' 
+                            : 'text-white/50 hover:text-white/70'
+                        }`}
+                        style={{
+                          background: settings.calloutTiming === opt.value ? modeColor : 'transparent'
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </SettingRow>
 
-          {/* Timing Section */}
-          <div className="mb-6">
-            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">TIMING</div>
-            
-            <SettingRow 
-              label="Callout Timing"
-              description="How far ahead to announce curves"
-            >
-              <select
-                value={settings.calloutTiming || 6}
-                onChange={(e) => updateSettings({ calloutTiming: parseInt(e.target.value) })}
-                className="bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-cyan-500"
-              >
-                {timingOptions.map(opt => (
-                  <option key={opt.value} value={opt.value} className="bg-[#1a1a1f]">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </SettingRow>
-          </div>
+                <SettingRow label="Test Voice">
+                  <button
+                    onClick={handleTestVoice}
+                    disabled={testPlaying}
+                    className="px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-2"
+                    style={{
+                      background: testPlaying ? `${modeColor}30` : 'rgba(255,255,255,0.1)',
+                      color: testPlaying ? modeColor : 'white'
+                    }}
+                  >
+                    {testPlaying ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        Playing...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Play Sample
+                      </>
+                    )}
+                  </button>
+                </SettingRow>
+              </>
+            )}
+          </Section>
 
           {/* Display Section */}
-          <div className="mb-6">
-            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">DISPLAY</div>
-            
-            {/* Speed Unit */}
-            <SettingRow label="Speed Unit">
-              <div className="flex bg-white/10 rounded-lg p-1">
-                <button
-                  onClick={() => updateSettings({ speedUnit: 'mph' })}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    settings.speedUnit === 'mph' 
-                      ? 'bg-cyan-500 text-black' 
-                      : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  MPH
-                </button>
-                <button
-                  onClick={() => updateSettings({ speedUnit: 'kmh' })}
-                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    settings.speedUnit === 'kmh' 
-                      ? 'bg-cyan-500 text-black' 
-                      : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  KMH
-                </button>
-              </div>
-            </SettingRow>
-
-            {/* Map Style */}
-            <SettingRow label="Map Style">
-              <div className="flex bg-white/10 rounded-lg p-1">
-                <button
-                  onClick={() => updateSettings({ mapStyle: 'dark' })}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    (settings.mapStyle || 'dark') === 'dark' 
-                      ? 'bg-cyan-500 text-black' 
-                      : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  Dark
-                </button>
-                <button
-                  onClick={() => updateSettings({ mapStyle: 'satellite' })}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    settings.mapStyle === 'satellite' 
-                      ? 'bg-cyan-500 text-black' 
-                      : 'text-white/60 hover:text-white'
-                  }`}
-                >
-                  Satellite
-                </button>
-              </div>
-            </SettingRow>
-
-            {/* Keep Screen On */}
+          <Section title="DISPLAY" icon="📱">
             <SettingRow 
-              label="Keep Screen On"
+              label="HUD Style"
+              description="Amount of info on screen"
+            >
+              <div className="flex bg-white/5 rounded-lg p-0.5">
+                {[
+                  { value: 'full', label: 'Full' },
+                  { value: 'minimal', label: 'Minimal' },
+                ].map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => updateSettings({ hudStyle: opt.value })}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      (settings.hudStyle || 'full') === opt.value 
+                        ? 'text-black' 
+                        : 'text-white/50 hover:text-white/70'
+                    }`}
+                    style={{
+                      background: (settings.hudStyle || 'full') === opt.value ? modeColor : 'transparent'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </SettingRow>
+
+            <SettingRow 
+              label="Show Speedometer" 
+              description="Display current speed"
+            >
+              <Toggle 
+                enabled={settings.showSpeedometer !== false} 
+                onChange={(v) => updateSettings({ showSpeedometer: v })}
+                color={modeColor}
+              />
+            </SettingRow>
+
+            <SettingRow 
+              label="Show Elevation" 
+              description="Display altitude profile"
+            >
+              <Toggle 
+                enabled={settings.showElevation !== false} 
+                onChange={(v) => updateSettings({ showElevation: v })}
+                color={modeColor}
+              />
+            </SettingRow>
+
+            <SettingRow 
+              label="Keep Screen On" 
               description="Prevent display from sleeping"
             >
               <Toggle 
                 enabled={settings.keepScreenOn !== false} 
                 onChange={(v) => updateSettings({ keepScreenOn: v })}
+                color={modeColor}
               />
             </SettingRow>
-          </div>
+          </Section>
 
           {/* Feedback Section */}
-          <div className="mb-6">
-            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">FEEDBACK</div>
-            
-            {/* Haptic Feedback */}
+          <Section title="FEEDBACK" icon="📳">
             <SettingRow 
-              label="Haptic Feedback"
-              description="Vibrate on curve callouts"
+              label="Haptic Feedback" 
+              description="Vibrate on curve warnings"
             >
               <Toggle 
                 enabled={settings.hapticFeedback || false} 
                 onChange={(v) => updateSettings({ hapticFeedback: v })}
+                color={modeColor}
               />
             </SettingRow>
-          </div>
+          </Section>
 
           {/* Driving Mode Section */}
-          <div className="mb-6">
-            <div className="text-[11px] font-semibold text-white/40 tracking-wider mb-3">DRIVING MODE</div>
-            
+          <Section title="DRIVING MODE" icon="🚗">
             <div className="grid grid-cols-3 gap-2">
-              <ModeButton 
-                mode="cruise" 
-                currentMode={mode} 
-                setMode={setMode}
-                icon="🛣️"
-                label="Cruise"
-                color="#00d4ff"
-              />
-              <ModeButton 
-                mode="fast" 
-                currentMode={mode} 
-                setMode={setMode}
-                icon="🏁"
-                label="Fast"
-                color="#ffd500"
-              />
-              <ModeButton 
-                mode="race" 
-                currentMode={mode} 
-                setMode={setMode}
-                icon="🔥"
-                label="Race"
-                color="#ff3366"
-              />
+              {[
+                { m: 'cruise', label: 'Cruise', desc: 'Relaxed', color: '#00d4ff' },
+                { m: 'fast', label: 'Fast', desc: 'Spirited', color: '#ffd500' },
+                { m: 'race', label: 'Race', desc: 'Aggressive', color: '#ff3366' },
+              ].map(({ m, label, desc, color }) => (
+                <button
+                  key={m}
+                  onClick={() => setMode(m)}
+                  className={`flex flex-col items-center gap-1 py-3 px-2 rounded-xl transition-all ${
+                    mode === m ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+                  }`}
+                  style={{
+                    border: mode === m ? `2px solid ${color}` : '2px solid transparent',
+                    boxShadow: mode === m ? `0 0 20px ${color}30` : 'none'
+                  }}
+                >
+                  <div 
+                    className="w-8 h-8 rounded-full flex items-center justify-center mb-1"
+                    style={{ background: `${color}20` }}
+                  >
+                    <div 
+                      className="w-3 h-3 rounded-full"
+                      style={{ background: color }}
+                    />
+                  </div>
+                  <span 
+                    className="text-sm font-semibold"
+                    style={{ color: mode === m ? color : 'rgba(255,255,255,0.6)' }}
+                  >
+                    {label}
+                  </span>
+                  <span className="text-[10px] text-white/30">{desc}</span>
+                </button>
+              ))}
             </div>
-            <p className="text-white/30 text-xs mt-2">
-              {mode === 'cruise' && 'Relaxed driving with conservative speed recommendations'}
-              {mode === 'fast' && 'Spirited driving with moderate speed recommendations'}
-              {mode === 'race' && 'Aggressive driving with maximum speed recommendations'}
+            <p className="text-white/30 text-xs mt-3 text-center">
+              {mode === 'cruise' && 'Conservative speed targets for comfortable driving'}
+              {mode === 'fast' && 'Moderate speed targets for spirited driving'}
+              {mode === 'race' && 'Aggressive speed targets for experienced drivers'}
             </p>
-          </div>
+          </Section>
 
-          {/* Info */}
-          <div className="text-center text-white/20 text-xs py-4 border-t border-white/5">
-            Rally Co-Pilot v1.0 • Use responsibly
+          {/* Footer */}
+          <div className="text-center text-white/20 text-xs py-4 mt-2 border-t border-white/5">
+            Rally Co-Pilot v1.0
           </div>
         </div>
+
+        {/* Safe area padding */}
+        <div className="h-safe-bottom" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} />
       </div>
+
+      <style>{`
+        input[type="range"]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 16px;
+          background: white;
+          border-radius: 50%;
+          cursor: pointer;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        input[type="range"]::-moz-range-thumb {
+          width: 16px;
+          height: 16px;
+          background: white;
+          border-radius: 50%;
+          cursor: pointer;
+          border: none;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+      `}</style>
     </div>
   )
 }
 
-// Setting Row Component
-function SettingRow({ label, description, children }) {
+// Section component
+function Section({ title, icon, children }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
-      <div className="flex-1 mr-4">
-        <div className="text-white text-sm font-medium">{label}</div>
-        {description && (
-          <div className="text-white/40 text-xs mt-0.5">{description}</div>
-        )}
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm">{icon}</span>
+        <span className="text-[11px] font-semibold text-white/40 tracking-wider">{title}</span>
       </div>
       {children}
     </div>
   )
 }
 
-// Toggle Component
-function Toggle({ enabled, onChange }) {
+// Setting row component
+function SettingRow({ label, description, children }) {
   return (
-    <button
-      onClick={() => onChange(!enabled)}
-      className={`relative w-12 h-7 rounded-full transition-colors ${
-        enabled ? 'bg-cyan-500' : 'bg-white/20'
-      }`}
+    <div className="flex items-center justify-between py-3 border-b border-white/5 last:border-0">
+      <div className="flex-1 mr-4">
+        <div className="text-white text-sm font-medium">{label}</div>
+        {description && <div className="text-white/40 text-xs mt-0.5">{description}</div>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// Toggle component
+function Toggle({ enabled, onChange, color = '#00d4ff' }) {
+  return (
+    <button 
+      onClick={() => onChange(!enabled)} 
+      className="relative w-11 h-6 rounded-full transition-colors"
+      style={{ background: enabled ? color : 'rgba(255,255,255,0.2)' }}
     >
       <div 
-        className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-transform ${
+        className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-transform ${
           enabled ? 'left-6' : 'left-1'
         }`}
       />
@@ -299,30 +376,25 @@ function Toggle({ enabled, onChange }) {
   )
 }
 
-// Mode Button Component
-function ModeButton({ mode, currentMode, setMode, icon, label, color }) {
-  const isActive = currentMode === mode
-  
+// Unit selection button
+function UnitButton({ active, onClick, color, title, subtitle }) {
   return (
     <button
-      onClick={() => setMode(mode)}
-      className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 transition-all ${
-        isActive 
-          ? 'bg-white/10' 
-          : 'bg-transparent border-transparent hover:bg-white/5'
+      onClick={onClick}
+      className={`flex flex-col items-center py-4 px-3 rounded-xl transition-all ${
+        active ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
       }`}
-      style={{ 
-        borderColor: isActive ? color : 'transparent',
-        boxShadow: isActive ? `0 0 20px ${color}30` : 'none'
+      style={{
+        border: active ? `2px solid ${color}` : '2px solid transparent',
       }}
     >
-      <span className="text-xl">{icon}</span>
       <span 
-        className="text-xs font-semibold"
-        style={{ color: isActive ? color : 'rgba(255,255,255,0.5)' }}
+        className="text-lg font-bold"
+        style={{ color: active ? color : 'rgba(255,255,255,0.6)' }}
       >
-        {label}
+        {title}
       </span>
+      <span className="text-xs text-white/40 mt-1">{subtitle}</span>
     </button>
   )
 }
