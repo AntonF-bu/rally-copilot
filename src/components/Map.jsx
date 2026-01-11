@@ -352,15 +352,25 @@ export default function Map() {
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
+    console.log(`🗺️ Map: Updating curve markers - routeData.curves: ${routeData?.curves?.length || 0}`)
+
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
 
     const curvesToShow = routeData?.curves || []
     
-    if (curvesToShow.length === 0) return
+    if (curvesToShow.length === 0) {
+      console.log('🗺️ Map: No curves to show')
+      return
+    }
+
+    console.log(`🗺️ Map: Adding ${curvesToShow.length} curve markers`)
 
     curvesToShow.forEach((curve) => {
-      if (!curve.position) return
+      if (!curve.position) {
+        console.log(`🗺️ Map: Curve ${curve.id} has no position, skipping`)
+        return
+      }
       
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
