@@ -231,9 +231,16 @@ export default function App() {
     console.log(`📊 Mode: ${currentDrivingMode} | Curve ${curveId}: dist=${Math.round(distance)}m actual=${Math.round(actualDist)}m | Early: ${Math.round(distances.early)}m | Main: ${Math.round(distances.main)}m | Announced: ${mainCalloutsRef.current.has(curveId)}`)
     
     // Respect minimum pause between callouts
+    // Scale minPause by simulation speed (at 4x speed, divide pause by 4)
+    const simulationSpeed = useStore.getState().simulationSpeed || 1
+    const effectiveMinPause = voiceParams.minPause / simulationSpeed
+    
     const timeSinceLastCallout = now - lastCalloutTimeRef.current
-    if (timeSinceLastCallout < voiceParams.minPause) {
-      console.log(`⏳ Waiting: ${Math.round(timeSinceLastCallout)}ms < ${voiceParams.minPause}ms minPause`)
+    if (timeSinceLastCallout < effectiveMinPause) {
+      // Only log occasionally to reduce spam
+      if (Math.random() < 0.05) {
+        console.log(`⏳ Waiting: ${Math.round(timeSinceLastCallout)}ms < ${Math.round(effectiveMinPause)}ms (${voiceParams.minPause}/${simulationSpeed}x)`)
+      }
       return
     }
     
