@@ -6,10 +6,11 @@ import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
+import { addCensusSleeveAsCollection, removeCensusSleeve, getCensusLegendItems } from '../services/censusSleeveLayer'
 
 // ================================
-// Route Preview - v12
-// With smart route character detection
+// Route Preview - v13
+// With Census-based route character detection + sleeve visualization
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -26,6 +27,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const zoneLayersRef = useRef([])
+  const sleeveLayerIdsRef = useRef([])  // NEW: Track census sleeve layers
   const [mapContainer, setMapContainer] = useState(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [mapStyle, setMapStyle] = useState('dark')
@@ -36,6 +38,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [selectedCurve, setSelectedCurve] = useState(null)
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
+  const [showSleeve, setShowSleeve] = useState(true)  // NEW: Toggle sleeve visibility
   
   // Fly-through state
   const [isFlying, setIsFlying] = useState(false)
@@ -53,7 +56,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const characterFetchedRef = useRef(false)
   
   // Route character state (replaces zones)
-  const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null })
+  const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null, censusTracts: [] })
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
   
   const { 
@@ -166,7 +169,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData?.coordinates, fetchElevationData])
 
-  // Fetch route character analysis
+  // Fetch route character analysis - UPDATED to capture census tracts
   const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
     if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
     characterFetchedRef.current = true
@@ -175,19 +178,52 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     try {
       const analysis = await analyzeRouteCharacter(coordinates, curves || [])
       setRouteCharacter(analysis)
-      setRouteZones(analysis.segments) // Store in global state too
+      setRouteZones(analysis.segments)
+      
+      // NEW: Add census sleeve to map if tracts are available
+      if (analysis.censusTracts?.length && mapRef.current && mapLoaded) {
+        sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
+          mapRef.current, 
+          analysis.censusTracts,
+          'census-sleeve'
+        )
+      }
     } catch (err) {
       console.error('Route character analysis error:', err)
     } finally {
       setIsLoadingCharacter(false)
     }
-  }, [setRouteZones])
+  }, [setRouteZones, mapLoaded])
 
   useEffect(() => {
     if (routeData?.coordinates?.length > 0 && !characterFetchedRef.current) {
       fetchRouteCharacter(routeData.coordinates, routeData.curves)
     }
   }, [routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
+
+  // NEW: Add census sleeve when map loads after character analysis
+  useEffect(() => {
+    if (mapLoaded && routeCharacter.censusTracts?.length && sleeveLayerIdsRef.current.length === 0) {
+      sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
+        mapRef.current,
+        routeCharacter.censusTracts,
+        'census-sleeve'
+      )
+    }
+  }, [mapLoaded, routeCharacter.censusTracts])
+
+  // NEW: Toggle sleeve visibility
+  const toggleSleeveVisibility = useCallback(() => {
+    if (!mapRef.current) return
+    const newVisibility = !showSleeve
+    setShowSleeve(newVisibility)
+    
+    sleeveLayerIdsRef.current.forEach(id => {
+      if (mapRef.current.getLayer(id)) {
+        mapRef.current.setLayoutProperty(id, 'visibility', newVisibility ? 'visible' : 'none')
+      }
+    })
+  }, [showSleeve])
 
   const fetchDemoRoute = async () => {
     setIsLoadingRoute(true)
@@ -214,11 +250,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     setRouteData(reversed)
     elevationFetchedRef.current = false
+    characterFetchedRef.current = false  // Re-analyze for reversed route
     setElevationData([])
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
-  // Fly animation - SLOWER speed
+  // Fly animation
   const startFlyAnimation = useCallback(() => {
     if (!mapRef.current || !routeData?.coordinates) return
     const coords = routeData.coordinates
@@ -232,12 +269,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     
     let lastTime = 0
-    const frameInterval = 120 / flySpeed // ~120ms between frames at 1x speed
+    const frameInterval = 120 / flySpeed
     
     const animate = (timestamp) => {
       if (flyIndexRef.current >= coords.length - 1) { stopFlyThrough(); return }
       
-      // Throttle animation frames
       if (timestamp - lastTime < frameInterval) {
         flyAnimationRef.current = requestAnimationFrame(animate)
         return
@@ -247,7 +283,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const current = coords[flyIndexRef.current]
       const next = coords[Math.min(flyIndexRef.current + 10, coords.length - 1)]
       mapRef.current?.easeTo({ center: current, bearing: getBearing(current, next), pitch: 55, zoom: 15.5, duration: 150 })
-      flyIndexRef.current += Math.max(1, Math.ceil(flySpeed)) // Move 1 coord at 1x, more at higher speeds
+      flyIndexRef.current += Math.max(1, Math.ceil(flySpeed))
       flyAnimationRef.current = requestAnimationFrame(animate)
     }
     flyAnimationRef.current = requestAnimationFrame(animate)
@@ -275,7 +311,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setIsPaused(false)
     flyIndexRef.current = 0
     
-    // Reset to overview - wait a moment then fit bounds
     if (mapRef.current && routeData?.coordinates) {
       setTimeout(() => {
         if (!mapRef.current) return
@@ -324,11 +359,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const handleStart = async () => { await initAudio(); onStartNavigation() }
 
-  // Build route segments BY CHARACTER (not curves)
+  // Build route segments BY CHARACTER
   const buildCharacterSegments = useCallback((coords, characterSegments) => {
     if (!coords?.length) return []
     if (!characterSegments?.length) {
-      // Fallback: single green segment
       return [{ coords, color: '#22c55e' }]
     }
     
@@ -370,23 +404,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
-    if (!map || !coords?.length) return
-    
-    const startEl = document.createElement('div')
-    startEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="width:18px;height:18px;background:#22c55e;border:2px solid white;border-radius:50%;"></div><div style="font-size:8px;color:white;background:#000a;padding:1px 4px;border-radius:3px;margin-top:2px;">START</div></div>`
-    markersRef.current.push(new mapboxgl.Marker({ element: startEl }).setLngLat(coords[0]).addTo(map))
-    
-    const endEl = document.createElement('div')
-    endEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="width:18px;height:18px;background:#ef4444;border:2px solid white;border-radius:50%;"></div><div style="font-size:8px;color:white;background:#000a;padding:1px 4px;border-radius:3px;margin-top:2px;">FINISH</div></div>`
-    markersRef.current.push(new mapboxgl.Marker({ element: endEl }).setLngLat(coords[coords.length - 1]).addTo(map))
     
     curves?.forEach(curve => {
       if (!curve.position) return
       const color = getCurveColor(curve.severity)
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
+      
       if (curve.isChicane) {
-        el.innerHTML = `<div style="background:#000d;padding:2px 5px;border-radius:5px;border:1px solid ${color};font-size:9px;font-weight:700;color:${color};text-align:center;">${curve.chicaneType === 'CHICANE' ? 'CH' : 'S'}${curve.startDirection === 'LEFT' ? '←' : '→'}<br/>${curve.severitySequence}</div>`
+        el.innerHTML = `<div style="position:relative;background:#000d;padding:2px 5px;border-radius:5px;border:2px solid ${color};font-size:9px;font-weight:700;color:${color};text-align:center;">${curve.chicaneType === 'CHICANE' ? 'CH' : 'S'}${curve.startDirection === 'LEFT' ? '←' : '→'}<br/>${curve.severitySequence}</div>`
       } else {
         el.innerHTML = `<div style="display:flex;align-items:center;gap:2px;background:#000d;padding:2px 5px;border-radius:5px;border:1px solid ${color};"><svg width="9" height="9" viewBox="0 0 24 24" fill="${color}" style="transform:${curve.direction === 'LEFT' ? 'scaleX(-1)' : 'none'}"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg><span style="font-size:11px;font-weight:700;color:${color};">${curve.severity}</span></div>`
       }
@@ -412,6 +438,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeCharacter.segments, mapLoaded])
 
+  // Initialize map
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
     mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
@@ -423,7 +450,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
     mapRef.current.on('style.load', () => rebuildRoute())
-    return () => { markersRef.current.forEach(m => m.remove()); zoneLayersRef.current = []; if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current); mapRef.current?.remove(); mapRef.current = null }
+    return () => { 
+      markersRef.current.forEach(m => m.remove())
+      removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)  // NEW: Cleanup sleeve
+      zoneLayersRef.current = []
+      sleeveLayerIdsRef.current = []
+      if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
+      mapRef.current?.remove()
+      mapRef.current = null 
+    }
   }, [mapContainer, routeData, mapStyle, addRoute, addMarkers, rebuildRoute, routeCharacter.segments])
 
   const handleStyleChange = () => {
@@ -439,7 +474,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
 
-      {/* TOP BAR - Stats + Severity */}
+      {/* TOP BAR */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent">
         {/* Navigation row */}
         <div className="flex items-center justify-between p-2 pt-10">
@@ -450,6 +485,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             <button onClick={handleStyleChange} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">{mapStyle === 'dark' ? <><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></> : <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>}</svg>
             </button>
+            {/* NEW: Sleeve toggle button */}
+            <button 
+              onClick={toggleSleeveVisibility} 
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showSleeve ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-black/70 border border-white/10'}`}
+              title="Toggle density layer"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? '#00d4ff' : 'white'} strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M3 9h18M9 21V9"/>
+              </svg>
+            </button>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -458,21 +504,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
               <span className="text-[10px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
             </div>
-            {/* Difficulty */}
-            <div className="px-2 py-1 rounded-full border flex items-center gap-1" style={{ background: `${difficultyRating.color}20`, borderColor: `${difficultyRating.color}50` }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill={difficultyRating.color}><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-              <span className="text-[10px] font-bold" style={{ color: difficultyRating.color }}>{difficultyRating.label}</span>
-            </div>
+            {/* Difficulty badge */}
+            <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: `${difficultyRating.color}30`, color: difficultyRating.color }}>
+              {difficultyRating.label}
+            </span>
             {/* Favorite */}
-            {routeMode !== 'demo' && (
-              <button onClick={handleToggleFavorite} className={`w-9 h-9 rounded-full border flex items-center justify-center ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
+            {routeData?.name && (
+              <button onClick={handleToggleFavorite} className={`w-9 h-9 rounded-full flex items-center justify-center border ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
               </button>
             )}
           </div>
         </div>
 
-        {/* Stats row - tappable to open curve list */}
+        {/* Stats row */}
         <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-3 px-3 py-1.5 hover:bg-white/5">
           <span className="text-white font-bold text-lg">{routeStats.distance}</span>
           <span className="text-white/50 text-sm">{routeStats.distanceUnit}</span>
@@ -498,6 +543,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         </div>
       </div>
 
+      {/* NEW: Census Density Legend - shows when sleeve is visible */}
+      {showSleeve && routeCharacter.censusTracts?.length > 0 && (
+        <div className="absolute left-3 z-20" style={{ top: '180px' }}>
+          <div className="bg-black/80 rounded-lg p-2 border border-white/10">
+            <div className="text-[9px] text-white/50 mb-1.5 uppercase tracking-wider">Density</div>
+            {getCensusLegendItems().map(item => (
+              <div key={item.category} className="flex items-center gap-2 py-0.5">
+                <div 
+                  className="w-3 h-3 rounded-sm" 
+                  style={{ backgroundColor: item.color, opacity: 0.6 }}
+                />
+                <span className="text-[10px] text-white/70">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ELEVATION - Right side mini widget */}
       {elevationData.length > 0 && (
         <div className="absolute right-2 z-20" style={{ top: '180px' }}>
@@ -508,7 +571,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         </div>
       )}
 
-      {/* FLY CONTROLS - Center when flying */}
+      {/* FLY CONTROLS */}
       {isFlying && (
         <div className="absolute left-1/2 -translate-x-1/2 z-30" style={{ top: '200px' }}>
           <div className="flex items-center gap-2 bg-black/90 rounded-full px-3 py-2 border border-white/20 shadow-lg">
@@ -539,7 +602,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         </div>
       )}
 
-      {/* BOTTOM BAR - Compact */}
+      {/* BOTTOM BAR */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
         {/* Route Character - Compact single line */}
         {routeCharacter.summary && (
@@ -649,31 +712,43 @@ function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   )
 }
 
-// Curve list
+// Curve list modal
 function CurveList({ curves, mode, settings, onSelect, onClose }) {
-  const getSpd = (s) => { const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }; let v = Math.round((b[s] || 40) * (m[mode] || 1)); return settings.units === 'metric' ? Math.round(v * 1.609) : v }
+  const getSpd = (s) => { 
+    const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
+    let v = Math.round((b[s] || 40) * (m[mode] || 1))
+    return settings.units === 'metric' ? Math.round(v * 1.6) : v
+  }
+  
   return (
-    <div className="fixed inset-0 z-50 flex items-end"><div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full max-h-[65vh] bg-[#0d0d12] rounded-t-2xl border-t border-white/10 overflow-hidden">
-        <div className="flex items-center justify-between p-3 border-b border-white/10">
-          <span className="text-white font-semibold">All Curves ({curves.length})</span>
-          <button onClick={onClose} className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-        </div>
-        <div className="overflow-y-auto max-h-[55vh] p-2">
-          {curves.map((c, i) => {
-            const col = getCurveColor(c.severity), dist = settings.units === 'metric' ? `${((c.distanceFromStart || 0) / 1000).toFixed(1)}km` : `${((c.distanceFromStart || 0) / 1609).toFixed(1)}mi`
-            return (
-              <button key={c.id || i} onClick={() => onSelect(c)} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background: `${col}20`, border: `1px solid ${col}`, color: col }}>{c.isChicane ? c.severitySequence : c.severity}</div>
-                <div className="flex-1 text-left">
-                  <div className="text-white text-sm">{c.isChicane ? `${c.chicaneType} ${c.startDirection}` : `${c.direction} ${c.severity}`}{c.modifier && <span className="text-white/40 ml-1 text-xs">{c.modifier}</span>}</div>
-                  <div className="text-white/40 text-xs">{dist} • {getSpd(c.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}</div>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff4" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
-              </button>
-            )
-          })}
-        </div>
+    <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
+      <div className="flex items-center justify-between p-4 pt-12 border-b border-white/10">
+        <h2 className="text-lg font-bold text-white">{curves.length} Curves</h2>
+        <button onClick={onClose} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto p-2">
+        {curves.map((curve, i) => (
+          <button key={curve.id || i} onClick={() => onSelect(curve)} className="w-full p-3 mb-1 rounded-lg bg-white/5 hover:bg-white/10 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: getCurveColor(curve.severity), color: '#000' }}>
+              {curve.severity}
+            </div>
+            <div className="flex-1 text-left">
+              <div className="text-white text-sm font-medium">
+                {curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}
+                {curve.modifier && <span className="text-white/50 ml-1">{curve.modifier}</span>}
+              </div>
+              <div className="text-white/40 text-xs">
+                {((curve.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-white/80 text-sm font-mono">{getSpd(curve.severity)}</div>
+              <div className="text-white/40 text-[10px]">{settings.units === 'metric' ? 'km/h' : 'mph'}</div>
+            </div>
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -681,18 +756,31 @@ function CurveList({ curves, mode, settings, onSelect, onClose }) {
 
 // Curve popup
 function CurvePopup({ curve, mode, settings, onClose }) {
-  const col = getCurveColor(curve.severity)
-  const getSpd = (s) => { const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }; let v = Math.round((b[s] || 40) * (m[mode] || 1)); return settings.units === 'metric' ? Math.round(v * 1.609) : v }
+  const getSpd = (s) => { 
+    const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
+    let v = Math.round((b[s] || 40) * (m[mode] || 1))
+    return settings.units === 'metric' ? Math.round(v * 1.6) : v
+  }
+  
   return (
-    <div className="absolute bottom-36 left-3 right-3 z-30 bg-black/90 rounded-xl border p-3" style={{ borderColor: `${col}50` }}>
-      <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold" style={{ background: `${col}20`, border: `2px solid ${col}`, color: col }}>{curve.severity}</div>
-        <div>
-          <div className="text-white font-semibold">{curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}</div>
-          {curve.modifier && <span className="text-xs px-2 py-0.5 rounded" style={{ background: `${col}20`, color: col }}>{curve.modifier}</span>}
-          <div className="text-white/50 text-xs mt-1">{getSpd(curve.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}{curve.radius && ` • R${curve.radius}m`}{curve.totalAngle && ` • ${curve.totalAngle}°`}</div>
+    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-30 bg-black/90 rounded-xl p-4 border border-white/20 min-w-[200px]">
+      <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: getCurveColor(curve.severity), color: '#000' }}>
+          {curve.severity}
         </div>
+        <div>
+          <div className="text-white font-bold">
+            {curve.isChicane ? `${curve.chicaneType}` : `${curve.direction} ${curve.severity}`}
+          </div>
+          {curve.modifier && <div className="text-white/50 text-sm">{curve.modifier}</div>}
+        </div>
+      </div>
+      <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2">
+        <span className="text-white/50">Suggested</span>
+        <span className="text-white font-mono">{getSpd(curve.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}</span>
       </div>
     </div>
   )
@@ -700,18 +788,22 @@ function CurvePopup({ curve, mode, settings, onClose }) {
 
 // Share modal
 function ShareModal({ name, onClose }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => { try { await navigator.clipboard.writeText(location.href); setCopied(true); setTimeout(() => setCopied(false), 2000) } catch {} }
+  const copyLink = () => {
+    navigator.clipboard.writeText(window.location.href)
+    onClose()
+  }
+  
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-[#12121a] rounded-xl p-4 w-full max-w-sm border border-white/10">
-        <h3 className="text-white font-semibold mb-1">Share Route</h3>
-        <p className="text-white/50 text-sm mb-3">{name || 'Rally Route'}</p>
-        <div className="flex gap-2">
-          <input type="text" value={location.href} readOnly className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-xs" />
-          <button onClick={copy} className={`px-3 py-2 rounded-lg text-xs font-medium ${copied ? 'bg-green-500 text-white' : 'bg-cyan-500 text-black'}`}>{copied ? '✓' : 'Copy'}</button>
-        </div>
-        <button onClick={onClose} className="w-full mt-3 py-2 bg-white/10 rounded-lg text-white/60 text-sm">Close</button>
+    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+      <div className="bg-[#1a1a24] rounded-2xl p-6 w-full max-w-sm">
+        <h3 className="text-lg font-bold text-white mb-4">Share Route</h3>
+        <p className="text-white/60 text-sm mb-4">{name || 'Rally Route'}</p>
+        <button onClick={copyLink} className="w-full py-3 bg-cyan-500 text-black font-bold rounded-xl mb-2">
+          Copy Link
+        </button>
+        <button onClick={onClose} className="w-full py-3 bg-white/10 text-white rounded-xl">
+          Cancel
+        </button>
       </div>
     </div>
   )
