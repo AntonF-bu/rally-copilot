@@ -210,9 +210,10 @@ export function useSimulation(enabled) {
         .sort((a, b) => a.actualDistance - b.actualDistance) // Sort by actual distance
         .slice(0, 5)
 
-      // Debug: Log the curve queue
-      if (upcomingCurvesWithDist.length > 0 && Math.random() < 0.02) {
-        console.log(`🚗 Curve queue: ${upcomingCurvesWithDist.map(c => `id${c.id}@${Math.round(c.actualDistance)}m`).join(', ')}`)
+      // Debug: Log current position and first curve
+      if (Math.random() < 0.01) {
+        const firstCurve = curvesWithActualDistance.find(c => c.id === 1)
+        console.log(`📍 Position: ${Math.round(currentDistanceAlong)}m along route | Curve 1 distanceFromStart: ${firstCurve?.distanceFromStart}m | actual: ${Math.round(firstCurve?.actualDistance || 0)}m`)
       }
 
       setUpcomingCurves(upcomingCurvesWithDist)
