@@ -204,15 +204,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     const newVisibility = !showSleeve
     setShowSleeve(newVisibility)
     
-    // Toggle all sleeve layers
+    // Toggle all sleeve layers (including borders)
     if (mapRef.current) {
-      for (let i = 0; i < 50; i++) {
-        const sleeveId = `sleeve-${i}`
-        try {
-          if (mapRef.current.getLayer(sleeveId)) {
-            mapRef.current.setLayoutProperty(sleeveId, 'visibility', newVisibility ? 'visible' : 'none')
-          }
-        } catch (e) {}
+      for (let i = 0; i < 100; i++) {
+        ['sleeve-', 'sleeve-border-'].forEach(prefix => {
+          const layerId = `${prefix}${i}`
+          try {
+            if (mapRef.current.getLayer(layerId)) {
+              mapRef.current.setLayoutProperty(layerId, 'visibility', newVisibility ? 'visible' : 'none')
+            }
+          } catch (e) {}
+        })
       }
     }
   }, [showSleeve])
@@ -484,11 +486,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     // Add SLEEVE layers first (behind everything)
     sleeveSegs.forEach((seg, i) => {
-      const src = `sleeve-src-${i}`, sleeve = `sleeve-${i}`
+      const src = `sleeve-src-${i}`, sleeve = `sleeve-${i}`, sleeveBorder = `sleeve-border-${i}`
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
         if (showSleeve) {
-          map.addLayer({ id: sleeve, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 45, 'line-blur': 4, 'line-opacity': 0.25 } })
+          // Main sleeve fill - increased opacity
+          map.addLayer({ id: sleeve, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 50, 'line-blur': 3, 'line-opacity': 0.35 } })
+          // Dashed border for visibility
+          map.addLayer({ id: sleeveBorder, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 52, 'line-opacity': 0.6, 'line-dasharray': [2, 4] } })
         }
       }
     })
@@ -499,9 +504,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
         // Glow layer
-        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 6, 'line-opacity': 0.5 } })
-        // Main route line  
-        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 4 } })
+        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.5 } })
+        // Main route line (slightly thicker)
+        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 5 } })
       }
     })
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
@@ -531,7 +536,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     // Clean up all layer types
     for (let i = 0; i < 100; i++) {
-      ['sleeve-', 'line-', 'glow-'].forEach(p => { 
+      ['sleeve-', 'sleeve-border-', 'line-', 'glow-'].forEach(p => { 
         if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
       })
       if (mapRef.current.getSource('sleeve-src-' + i)) mapRef.current.removeSource('sleeve-src-' + i)
