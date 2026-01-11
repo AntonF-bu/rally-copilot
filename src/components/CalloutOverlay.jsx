@@ -3,8 +3,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Racing HUD - v6
-// With status indicators
+// Racing HUD - v7
+// Fixed chicane directions + Technical sections
 // ================================
 
 export default function CalloutOverlay() {
@@ -25,15 +25,12 @@ export default function CalloutOverlay() {
 
   const [isOnline, setIsOnline] = useState(true)
 
-  // Monitor network status
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
-    
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
     setIsOnline(navigator.onLine)
-    
     return () => {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
@@ -52,50 +49,34 @@ export default function CalloutOverlay() {
     return { show: true, start: 40 }
   }
 
-  // Current elevation from GPS (convert meters to feet)
   const currentElevationFt = altitude !== null ? Math.round(altitude * 3.28084) : null
 
-  // Generate simple elevation profile for route (estimated from start/end if no real data)
   const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
     const numPoints = 20
     const points = []
-    
-    // If we have real altitude, use it as reference
-    const baseElev = altitude !== null ? altitude : 50 // default 50m if no GPS
-    
-    // Generate a simple profile (in real app, would fetch from Mapbox Terrain API)
+    const baseElev = altitude !== null ? altitude : 50
     for (let i = 0; i < numPoints; i++) {
-      // Simple variation around current altitude
       const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
       points.push(baseElev + variation)
     }
-    
     const minElev = Math.min(...points)
     const maxElev = Math.max(...points)
     const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
-    
     return {
       elevationData: points,
-      totalElevation: Math.round((maxElev - minElev) * 3.28084), // to feet
+      totalElevation: Math.round((maxElev - minElev) * 3.28084),
       elevationPosition: pos
     }
   }, [altitude, simulationProgress])
 
   if (!isRunning) return null
 
-  // Status warnings
-  const hasGpsIssue = routeMode !== 'demo' && gpsAccuracy && gpsAccuracy > 30
   const hasNetworkIssue = !isOnline
 
-  // Minimal HUD when no curves ahead
   if (!curve) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
-        {/* Status Warnings */}
-        {(hasNetworkIssue) && (
-          <StatusWarnings hasNetworkIssue={hasNetworkIssue} />
-        )}
-        
+        {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -105,8 +86,6 @@ export default function CalloutOverlay() {
               </span>
               <span className="text-white/30 text-xs">• No curves ahead</span>
             </div>
-            
-            {/* Current Speed */}
             <div className="text-right">
               <span className="text-2xl font-bold" style={{ color: modeColor }}>
                 {Math.round(speed || 0)}
@@ -117,8 +96,6 @@ export default function CalloutOverlay() {
             </div>
           </div>
         </div>
-        
-        {/* Elevation widget */}
         <ElevationWidget 
           elevationData={elevationData}
           totalElevation={totalElevation}
@@ -126,14 +103,12 @@ export default function CalloutOverlay() {
           elevationPosition={elevationPosition}
           modeColor={modeColor}
         />
-
         <style>{hudStyles}</style>
       </div>
     )
   }
 
   const recommendedSpeed = getRecommendedSpeed(curve)
-  const isLeft = curve.direction === 'LEFT'
   const severityColor = getCurveColor(curve.severity)
   const brakingZone = getBrakingZone(curve.severity)
   
@@ -141,87 +116,32 @@ export default function CalloutOverlay() {
   const progress = Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100))
   const inBrakingZone = brakingZone.show && progress >= brakingZone.start
 
+  // FIXED: Use startDirection for chicanes, direction for regular curves
+  const displayDirection = curve.isChicane ? curve.startDirection : curve.direction
+  const isLeft = displayDirection === 'LEFT'
+
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
-      
-      {/* Status Warnings */}
-      {(hasNetworkIssue) && (
-        <StatusWarnings hasNetworkIssue={hasNetworkIssue} />
-      )}
+      {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
 
-      {/* Main HUD Bar */}
       <div className="hud-glass rounded-2xl overflow-hidden">
         <div className="px-4 py-3">
           <div className="flex items-center gap-4">
             
-            {/* Direction + Severity */}
             <div className="flex items-center gap-3">
-              {curve.isChicane ? (
-                <div 
-                  className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
-                  style={{ 
-                    background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
-                    border: `1.5px solid ${severityColor}50`,
-                    boxShadow: `0 0 20px ${severityColor}30`
-                  }}
-                >
-                  <span className="text-[10px] font-bold tracking-wider" style={{ color: severityColor }}>
-                    {curve.chicaneType === 'CHICANE' ? 'CHICANE' : 'S-CURVE'}
-                  </span>
-                  <span className="text-lg font-bold" style={{ color: severityColor }}>
-                    {curve.startDirection === 'LEFT' ? '←' : '→'} {curve.severitySequence}
-                  </span>
-                </div>
+              {curve.isTechnicalSection ? (
+                <TechnicalSectionDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
+              ) : curve.isChicane ? (
+                <ChicaneDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
               ) : (
-                <>
-                  <div 
-                    className="w-12 h-12 rounded-xl flex items-center justify-center"
-                    style={{ 
-                      background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
-                      border: `1.5px solid ${severityColor}50`,
-                      boxShadow: `0 0 20px ${severityColor}30`
-                    }}
-                  >
-                    <svg 
-                      width="28" height="28" viewBox="0 0 24 24" 
-                      fill={severityColor}
-                      style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
-                    >
-                      <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                    </svg>
-                  </div>
-                  
-                  <div className="flex flex-col">
-                    <div 
-                      className="text-4xl font-bold tracking-tight leading-none"
-                      style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}
-                    >
-                      {curve.severity}
-                    </div>
-                    {curve.modifier && (
-                      <div 
-                        className="text-[10px] font-bold tracking-wider mt-0.5"
-                        style={{ 
-                          color: curve.modifier === 'TIGHTENS' ? '#f97316' : 
-                                 curve.modifier === 'OPENS' ? '#22c55e' : severityColor 
-                        }}
-                      >
-                        {curve.modifier}
-                      </div>
-                    )}
-                  </div>
-                </>
+                <CurveDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
               )}
             </div>
 
-            {/* Progress Bar */}
             <div className="flex-1 px-2">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
-                <span 
-                  className="text-lg font-bold tracking-tight"
-                  style={{ color: inBrakingZone ? '#ff3366' : 'white' }}
-                >
+                <span className="text-lg font-bold tracking-tight" style={{ color: inBrakingZone ? '#ff3366' : 'white' }}>
                   {Math.round(curve.distance)}<span className="text-xs text-white/40 ml-1">m</span>
                 </span>
               </div>
@@ -237,7 +157,6 @@ export default function CalloutOverlay() {
                     }}
                   />
                 )}
-                
                 <div 
                   className="h-full rounded-full transition-all duration-150"
                   style={{ 
@@ -248,7 +167,6 @@ export default function CalloutOverlay() {
                     boxShadow: inBrakingZone ? '0 0 15px #ff336680' : `0 0 10px ${modeColor}50`
                   }}
                 />
-                
                 {inBrakingZone && (
                   <div className="absolute inset-0 flex items-center justify-end pr-2">
                     <span className="text-[9px] font-black text-white tracking-wider animate-pulse">BRAKE</span>
@@ -257,12 +175,8 @@ export default function CalloutOverlay() {
               </div>
             </div>
 
-            {/* Speed */}
             <div className="text-right pl-2">
-              <div 
-                className="text-4xl font-bold tracking-tight leading-none"
-                style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}
-              >
+              <div className="text-4xl font-bold tracking-tight leading-none" style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}>
                 {recommendedSpeed}
               </div>
               <div className="text-[10px] font-semibold text-white/40 tracking-wider mt-0.5">
@@ -273,54 +187,17 @@ export default function CalloutOverlay() {
         </div>
       </div>
 
-      {/* Upcoming Curves - Left side */}
       {upcomingCurves.length > 1 && (
         <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
           <div className="flex flex-col gap-1">
-            {upcomingCurves.slice(1, 4).map((next) => {
-              const nextColor = getCurveColor(next.severity)
-              const nextIsLeft = next.direction === 'LEFT'
-              
-              if (next.isChicane) {
-                return (
-                  <div key={next.id} className="flex items-center gap-2">
-                    <span className="text-[9px] font-bold" style={{ color: nextColor }}>
-                      {next.chicaneType === 'CHICANE' ? 'CH' : 'S'}{next.startDirection === 'LEFT' ? '←' : '→'}
-                    </span>
-                    <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severitySequence}</span>
-                    <span className="text-[10px] text-white/30">{Math.round(next.distance)}m</span>
-                  </div>
-                )
-              }
-              
-              return (
-                <div key={next.id} className="flex items-center gap-2">
-                  <svg 
-                    width="10" height="10" viewBox="0 0 24 24" 
-                    fill={nextColor}
-                    style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
-                  >
-                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                  </svg>
-                  <span className="text-sm font-bold" style={{ color: nextColor }}>{next.severity}</span>
-                  {next.modifier && (
-                    <span className="text-[8px]" style={{ 
-                      color: next.modifier === 'TIGHTENS' ? '#f97316' : 
-                             next.modifier === 'OPENS' ? '#22c55e' : nextColor 
-                    }}>
-                      {next.modifier === 'TIGHTENS' ? '⟩' : next.modifier === 'OPENS' ? '⟨' : ''}
-                    </span>
-                  )}
-                  <span className="text-[10px] text-white/30">{Math.round(next.distance)}m</span>
-                </div>
-              )
-            })}
+            {upcomingCurves.slice(1, 4).map((next) => (
+              <UpcomingCurveRow key={next.id} curve={next} />
+            ))}
           </div>
         </div>
       )}
 
-      {/* Elevation widget */}
       <ElevationWidget 
         elevationData={elevationData}
         totalElevation={totalElevation}
@@ -334,10 +211,151 @@ export default function CalloutOverlay() {
   )
 }
 
-// Status Warnings Component - only OFFLINE warning (GPS shown in bottom bar)
+// Regular curve display
+function CurveDisplay({ curve, severityColor, isLeft }) {
+  return (
+    <>
+      <div 
+        className="w-12 h-12 rounded-xl flex items-center justify-center"
+        style={{ 
+          background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+          border: `1.5px solid ${severityColor}50`,
+          boxShadow: `0 0 20px ${severityColor}30`
+        }}
+      >
+        <svg 
+          width="28" height="28" viewBox="0 0 24 24" 
+          fill={severityColor}
+          style={{ transform: isLeft ? 'scaleX(-1)' : 'none' }}
+        >
+          <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+        </svg>
+      </div>
+      
+      <div className="flex flex-col">
+        <div className="text-4xl font-bold tracking-tight leading-none" style={{ color: severityColor, textShadow: `0 0 30px ${severityColor}50` }}>
+          {curve.severity}
+        </div>
+        {curve.modifier && (
+          <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ 
+            color: curve.modifier === 'TIGHTENS' ? '#f97316' : curve.modifier === 'OPENS' ? '#22c55e' : severityColor 
+          }}>
+            {curve.modifier}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// Chicane display - FIXED to use startDirection
+function ChicaneDisplay({ curve, severityColor, isLeft }) {
+  return (
+    <div 
+      className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
+      style={{ 
+        background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+        border: `1.5px solid ${severityColor}50`,
+        boxShadow: `0 0 20px ${severityColor}30`
+      }}
+    >
+      <span className="text-[10px] font-bold tracking-wider" style={{ color: severityColor }}>
+        {curve.chicaneType === 'CHICANE' ? 'CHICANE' : 'S-CURVE'}
+      </span>
+      <span className="text-lg font-bold" style={{ color: severityColor }}>
+        {isLeft ? '←' : '→'} {curve.severitySequence}
+      </span>
+    </div>
+  )
+}
+
+// Technical section display
+function TechnicalSectionDisplay({ curve, severityColor, isLeft }) {
+  const characterLabels = {
+    'switchbacks': 'SWITCHBACKS',
+    'sweeping': 'SWEEPING',
+    'technical': 'TECHNICAL',
+    'windy': 'WINDY'
+  }
+  const label = characterLabels[curve.sectionCharacter] || 'TECHNICAL'
+  
+  return (
+    <div 
+      className="px-3 py-2 rounded-xl flex flex-col items-center justify-center"
+      style={{ 
+        background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
+        border: `1.5px solid ${severityColor}50`,
+        boxShadow: `0 0 20px ${severityColor}30`
+      }}
+    >
+      <span className="text-[9px] font-bold tracking-wider" style={{ color: severityColor }}>
+        {label}
+      </span>
+      <span className="text-sm font-bold" style={{ color: severityColor }}>
+        {isLeft ? '←' : '→'} {curve.curveCount} curves
+      </span>
+      <span className="text-[9px] text-white/50">
+        max {curve.severity}
+      </span>
+    </div>
+  )
+}
+
+// Upcoming curve row - FIXED directions
+function UpcomingCurveRow({ curve }) {
+  const nextColor = getCurveColor(curve.severity)
+  // FIXED: Use startDirection for chicanes
+  const direction = curve.isChicane ? curve.startDirection : curve.direction
+  const nextIsLeft = direction === 'LEFT'
+  
+  if (curve.isTechnicalSection) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold" style={{ color: nextColor }}>
+          {nextIsLeft ? '←' : '→'}SEC
+        </span>
+        <span className="text-sm font-bold" style={{ color: nextColor }}>{curve.curveCount}c</span>
+        <span className="text-[10px] text-white/30">{Math.round(curve.distance)}m</span>
+      </div>
+    )
+  }
+  
+  if (curve.isChicane) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold" style={{ color: nextColor }}>
+          {curve.chicaneType === 'CHICANE' ? 'CH' : 'S'}{nextIsLeft ? '←' : '→'}
+        </span>
+        <span className="text-sm font-bold" style={{ color: nextColor }}>{curve.severitySequence}</span>
+        <span className="text-[10px] text-white/30">{Math.round(curve.distance)}m</span>
+      </div>
+    )
+  }
+  
+  return (
+    <div className="flex items-center gap-2">
+      <svg 
+        width="10" height="10" viewBox="0 0 24 24" 
+        fill={nextColor}
+        style={{ transform: nextIsLeft ? 'scaleX(-1)' : 'none' }}
+      >
+        <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+      </svg>
+      <span className="text-sm font-bold" style={{ color: nextColor }}>{curve.severity}</span>
+      {curve.modifier && (
+        <span className="text-[8px]" style={{ 
+          color: curve.modifier === 'TIGHTENS' ? '#f97316' : curve.modifier === 'OPENS' ? '#22c55e' : nextColor 
+        }}>
+          {curve.modifier === 'TIGHTENS' ? '⟩' : curve.modifier === 'OPENS' ? '⟨' : ''}
+        </span>
+      )}
+      <span className="text-[10px] text-white/30">{Math.round(curve.distance)}m</span>
+    </div>
+  )
+}
+
 function StatusWarnings({ hasNetworkIssue }) {
   if (!hasNetworkIssue) return null
-  
   return (
     <div className="mb-2">
       <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30">
@@ -350,9 +368,7 @@ function StatusWarnings({ hasNetworkIssue }) {
   )
 }
 
-// Elevation Widget Component
 function ElevationWidget({ elevationData, totalElevation, currentElevation, elevationPosition, modeColor }) {
-  // Calculate min/max for proper scaling
   const minElev = Math.min(...elevationData)
   const maxElev = Math.max(...elevationData)
   const range = maxElev - minElev || 1
@@ -406,3 +422,10 @@ const hudStyles = `
     padding-top: env(safe-area-inset-top, 0px);
   }
 `
+
+// Helper to get correct direction for any curve type
+export function getCurveDirection(curve) {
+  if (curve.isChicane) return curve.startDirection
+  if (curve.isTechnicalSection) return curve.direction
+  return curve.direction
+}
