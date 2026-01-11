@@ -623,54 +623,83 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
       {/* Bottom Panel */}
       <div className="absolute bottom-0 left-0 right-0 z-20">
-        <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-8 pb-6 px-4">
+        <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-6 pb-4 px-4">
           
           {/* Mode Selector */}
-          <div className="flex justify-center mb-3">
-            <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-1 border border-white/10">
+          <div className="flex justify-center mb-2">
+            <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-0.5 border border-white/10">
               {[{ id: 'cruise', label: 'Cruise', color: '#00d4ff' }, { id: 'fast', label: 'Fast', color: '#ffd500' }, { id: 'race', label: 'Race', color: '#ff3366' }].map(m => (
-                <button key={m.id} onClick={() => setMode(m.id)} className="px-4 py-1.5 rounded-full text-xs font-bold tracking-wider transition-all" style={{ background: mode === m.id ? m.color : 'transparent', color: mode === m.id ? (m.id === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)' }}>
+                <button key={m.id} onClick={() => setMode(m.id)} className="px-3 py-1 rounded-full text-[10px] font-bold tracking-wider transition-all" style={{ background: mode === m.id ? m.color : 'transparent', color: mode === m.id ? (m.id === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)' }}>
                   {m.label.toUpperCase()}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Route Stats */}
-          <div className="grid grid-cols-4 gap-2 mb-2">
-            <StatBox value={routeStats.distance} unit={settings.units === 'metric' ? 'KM' : 'MI'} />
-            <StatBox value={routeStats.duration} unit="MIN" />
-            <StatBox value={routeStats.curves} unit="CURVES" onClick={() => setShowCurveList(true)} />
-            <StatBox value={routeStats.sharpCurves} unit="SHARP" highlight />
+          {/* Route Stats - Compact */}
+          <div className="flex justify-between items-center mb-2 px-2">
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-bold text-white">{routeStats.distance}</span>
+              <span className="text-[10px] text-white/40">{settings.units === 'metric' ? 'km' : 'mi'}</span>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-bold text-white">{routeStats.duration}</span>
+              <span className="text-[10px] text-white/40">min</span>
+            </div>
+            <button onClick={() => setShowCurveList(true)} className="flex items-baseline gap-1 hover:opacity-80">
+              <span className="text-xl font-bold text-white">{routeStats.curves}</span>
+              <span className="text-[10px] text-white/40">curves</span>
+            </button>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xl font-bold text-red-400">{routeStats.sharpCurves}</span>
+              <span className="text-[10px] text-white/40">sharp</span>
+            </div>
           </div>
 
           {/* Severity Bar */}
-          <div className="mb-3">
-            <div className="flex h-1.5 rounded-full overflow-hidden bg-white/10">
+          <div className="mb-2">
+            <div className="flex h-1 rounded-full overflow-hidden bg-white/10">
               <div className="h-full" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%`, background: '#22c55e' }} />
               <div className="h-full" style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100 || 0}%`, background: '#ffd500' }} />
               <div className="h-full" style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100 || 0}%`, background: '#ff3366' }} />
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="grid grid-cols-5 gap-2 mb-3">
-            <ActionButton icon="reverse" label="Reverse" onClick={handleReverseRoute} />
-            <ActionButton icon="fly" label="Preview" onClick={handleFlyThrough} disabled={isFlying} />
-            <ActionButton icon="share" label="Share" onClick={handleShare} />
-            <ActionButton icon="voice" label="Test" onClick={handleSampleCallout} />
-            <ActionButton icon={downloadComplete ? 'check' : 'download'} label={downloadComplete ? 'Ready' : 'Voice'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} />
+          {/* Action Row - Inline icons */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1">
+              <IconButton icon="reverse" onClick={handleReverseRoute} tooltip="Reverse" />
+              <IconButton icon="fly" onClick={handleFlyThrough} disabled={isFlying} tooltip="Preview" />
+              <IconButton icon="voice" onClick={handleSampleCallout} tooltip="Test Voice" />
+              <IconButton icon="share" onClick={handleShare} tooltip="Share" />
+            </div>
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading || downloadComplete || !navigator.onLine}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                downloadComplete ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-white/60 hover:bg-white/10'
+              }`}
+            >
+              {isDownloading ? (
+                <div className="w-3 h-3 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+              ) : downloadComplete ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              )}
+              {downloadComplete ? 'Offline Ready' : 'Download Voice'}
+            </button>
           </div>
 
           {/* Start Button */}
-          <button onClick={handleStart} className="w-full py-4 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: modeColor }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <button onClick={handleStart} className="w-full py-3.5 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: modeColor }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             {routeMode === 'demo' ? 'START DEMO' : 'START NAVIGATION'}
           </button>
         </div>
       </div>
 
-      {/* Elevation Widget - Top Left of map */}
+      {/* Elevation Widget - Small on map */}
       <ElevationWidget 
         data={elevationProfile} 
         curves={routeData?.curves}
@@ -678,6 +707,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
         expanded={showElevationExpanded}
         onToggle={() => setShowElevationExpanded(!showElevationExpanded)}
         settings={settings}
+        totalDistance={routeData?.distance}
       />
 
       {/* Curve List Modal */}
@@ -724,56 +754,61 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 }
 
 // Elevation Widget - Compact and expandable
-function ElevationWidget({ data, curves, modeColor, expanded, onToggle, settings }) {
+function ElevationWidget({ data, curves, modeColor, expanded, onToggle, settings, totalDistance }) {
   if (!data || data.length < 2) return null
   
   const maxElev = Math.max(...data.map(d => d.elevation))
   const minElev = Math.min(...data.map(d => d.elevation))
   const range = maxElev - minElev || 1
   const elevGain = Math.round(maxElev - minElev)
-  const elevGainDisplay = settings?.units === 'metric' ? `${Math.round(elevGain * 0.3048)}m` : `${elevGain}ft`
-  
-  // Build path
-  const pathD = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * 100
-    const y = 100 - ((d.elevation - minElev) / range) * 70
-    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
-  }).join(' ')
-  
-  const areaD = pathD + ` L 100 100 L 0 100 Z`
+  const isMetric = settings?.units === 'metric'
+  const elevGainDisplay = isMetric ? `${Math.round(elevGain * 0.3048)}m` : `${elevGain}ft`
   
   const glassStyle = {
-    background: 'linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%)',
+    background: 'rgba(10,10,15,0.9)',
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255,255,255,0.06)',
-    boxShadow: '0 4px 30px rgba(0,0,0,0.3)'
+    border: '1px solid rgba(255,255,255,0.08)'
   }
   
   if (!expanded) {
-    // Compact widget
+    // Compact widget - positioned on right side
     return (
       <button 
         onClick={onToggle}
-        className="absolute left-4 z-20 rounded-xl px-3 py-2 cursor-pointer hover:bg-white/10 transition-all"
-        style={{ top: '180px', ...glassStyle }}
+        className="absolute right-4 z-20 rounded-xl px-2 py-1.5 cursor-pointer transition-all active:scale-95"
+        style={{ top: '200px', ...glassStyle }}
       >
-        <div className="flex items-center gap-2 mb-1">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
-            <path d="M2 22L12 2l10 20H2z"/>
-          </svg>
-          <span className="text-[9px] text-white/50 uppercase tracking-wider">Elev</span>
-          <span className="text-[10px] text-white/70">{elevGainDisplay}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-white/40 uppercase">Elev</span>
+          <span className="text-[11px] text-white/70 font-medium">{elevGainDisplay}</span>
         </div>
-        <svg viewBox="0 0 80 24" className="w-20 h-6" preserveAspectRatio="none">
+        <svg viewBox="0 0 60 20" className="w-16 h-5 mt-1">
           <defs>
-            <linearGradient id="elevGradWidget" x1="0%" y1="0%" x2="0%" y2="100%">
+            <linearGradient id="elevMiniGrad" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" stopColor={modeColor} stopOpacity="0.4"/>
               <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
             </linearGradient>
           </defs>
-          <path d={areaD} fill="url(#elevGradWidget)" transform="scale(0.8, 0.6)" />
-          <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round" transform="scale(0.8, 0.6)" />
+          {/* Simple area fill */}
+          <path 
+            d={`M 0 20 ${data.slice(0, 20).map((d, i) => {
+              const x = (i / 19) * 60
+              const y = 20 - ((d.elevation - minElev) / range) * 16
+              return `L ${x} ${y}`
+            }).join(' ')} L 60 20 Z`}
+            fill="url(#elevMiniGrad)"
+          />
+          <path 
+            d={data.slice(0, 20).map((d, i) => {
+              const x = (i / 19) * 60
+              const y = 20 - ((d.elevation - minElev) / range) * 16
+              return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+            }).join(' ')}
+            fill="none" 
+            stroke={modeColor} 
+            strokeWidth="1.5"
+          />
         </svg>
       </button>
     )
@@ -781,77 +816,68 @@ function ElevationWidget({ data, curves, modeColor, expanded, onToggle, settings
   
   // Expanded view
   return (
-    <div className="absolute left-4 right-4 z-30" style={{ top: '180px' }}>
-      <div className="rounded-2xl p-4" style={glassStyle}>
-        <div className="flex justify-between items-center mb-3">
+    <div className="absolute left-4 right-4 z-30" style={{ top: '140px' }}>
+      <div className="rounded-2xl p-3" style={glassStyle}>
+        <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
-              <path d="M2 22L12 2l10 20H2z"/>
-            </svg>
-            <span className="text-sm text-white font-medium">Elevation Profile</span>
+            <span className="text-xs text-white font-medium">Elevation Profile</span>
+            <span className="text-[10px] text-white/50">Gain: {elevGainDisplay}</span>
           </div>
-          <button onClick={onToggle} className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          <button onClick={onToggle} className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         </div>
         
-        <div className="flex justify-between text-[10px] text-white/50 mb-1">
-          <span>{settings?.units === 'metric' ? `${Math.round(maxElev * 0.3048)}m` : `${Math.round(maxElev)}ft`}</span>
-          <span>Gain: {elevGainDisplay}</span>
-        </div>
-        
-        <svg viewBox="0 0 100 50" className="w-full h-24" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="elevGradExpanded" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor={modeColor} stopOpacity="0.3"/>
-              <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
-            </linearGradient>
-          </defs>
+        <div className="relative">
+          <svg viewBox="0 0 100 35" className="w-full h-16">
+            <defs>
+              <linearGradient id="elevExpandedGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={modeColor} stopOpacity="0.25"/>
+                <stop offset="100%" stopColor={modeColor} stopOpacity="0"/>
+              </linearGradient>
+            </defs>
+            
+            {/* Grid */}
+            {[0, 25, 50, 75, 100].map(x => (
+              <line key={x} x1={x} y1="0" x2={x} y2="35" stroke="white" strokeOpacity="0.05" />
+            ))}
+            
+            {/* Area */}
+            <path 
+              d={`M 0 35 ${data.map((d, i) => {
+                const x = (i / (data.length - 1)) * 100
+                const y = 35 - ((d.elevation - minElev) / range) * 30
+                return `L ${x} ${y}`
+              }).join(' ')} L 100 35 Z`}
+              fill="url(#elevExpandedGrad)"
+            />
+            
+            {/* Line */}
+            <path 
+              d={data.map((d, i) => {
+                const x = (i / (data.length - 1)) * 100
+                const y = 35 - ((d.elevation - minElev) / range) * 30
+                return `${i === 0 ? 'M' : 'L'} ${x} ${y}`
+              }).join(' ')}
+              fill="none" 
+              stroke={modeColor} 
+              strokeWidth="1.5"
+            />
+            
+            {/* Curve markers */}
+            {curves?.slice(0, 15).map((curve, i) => {
+              const progress = (curve.distanceFromStart || 0) / (totalDistance || 15000)
+              const x = progress * 100
+              const dataIdx = Math.min(Math.floor(progress * (data.length - 1)), data.length - 1)
+              const y = 35 - ((data[dataIdx]?.elevation - minElev) / range) * 30
+              return <circle key={i} cx={x} cy={y} r="2" fill={getCurveColor(curve.severity)} />
+            })}
+          </svg>
           
-          {/* Grid lines */}
-          <line x1="0" y1="25" x2="100" y2="25" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
-          <line x1="25" y1="0" x2="25" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
-          <line x1="50" y1="0" x2="50" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
-          <line x1="75" y1="0" x2="75" y2="50" stroke="white" strokeOpacity="0.1" strokeDasharray="2,2" />
-          
-          <path d={areaD} fill="url(#elevGradExpanded)" transform="scale(1, 0.5)" />
-          <path d={pathD} fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round" transform="scale(1, 0.5)" />
-          
-          {/* Curve markers */}
-          {curves?.map((curve, i) => {
-            const progress = (curve.distanceFromStart || 0) / (data[data.length - 1]?.distance || 15000)
-            const x = progress * 100
-            const dataIndex = Math.floor(progress * (data.length - 1))
-            const elev = data[dataIndex]?.elevation || minElev
-            const y = (100 - ((elev - minElev) / range) * 70) * 0.5
-            return (
-              <g key={i}>
-                <circle cx={x} cy={y} r="3" fill={getCurveColor(curve.severity)} />
-                <line x1={x} y1={y + 3} x2={x} y2="50" stroke={getCurveColor(curve.severity)} strokeWidth="0.5" strokeOpacity="0.3" />
-              </g>
-            )
-          })}
-        </svg>
-        
-        <div className="flex justify-between text-[10px] text-white/40 mt-1">
-          <span>Start</span>
-          <span>{settings?.units === 'metric' ? `${Math.round(minElev * 0.3048)}m` : `${Math.round(minElev)}ft`}</span>
-          <span>Finish</span>
-        </div>
-        
-        {/* Legend */}
-        <div className="flex items-center justify-center gap-4 mt-3 pt-3 border-t border-white/10">
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-[9px] text-white/50">Easy</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span className="text-[9px] text-white/50">Medium</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <span className="text-[9px] text-white/50">Hard</span>
+          {/* Labels */}
+          <div className="flex justify-between text-[9px] text-white/30 mt-1">
+            <span>Start</span>
+            <span>Finish</span>
           </div>
         </div>
       </div>
@@ -859,31 +885,23 @@ function ElevationWidget({ data, curves, modeColor, expanded, onToggle, settings
   )
 }
 
-// Stat Box Component
-function StatBox({ value, unit, highlight = false, onClick }) {
-  return (
-    <button onClick={onClick} disabled={!onClick} className={`bg-white/5 rounded-xl p-2 text-center ${onClick ? 'cursor-pointer active:bg-white/10' : ''}`}>
-      <div className={`text-lg font-bold ${highlight ? 'text-red-400' : 'text-white'}`}>{value}</div>
-      <div className="text-[9px] text-white/40 tracking-wider">{unit}</div>
-    </button>
-  )
-}
-
-// Action Button Component
-function ActionButton({ icon, label, onClick, disabled, success }) {
+// Icon Button - Compact circular button
+function IconButton({ icon, onClick, disabled, tooltip }) {
   const icons = {
     reverse: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
-    fly: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12h6l3-9 3 9h6"/><circle cx="12" cy="12" r="3"/></svg>,
+    fly: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
     share: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
-    download: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
-    check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
     voice: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
   }
   
   return (
-    <button onClick={onClick} disabled={disabled} className={`py-2 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center gap-1 disabled:opacity-50 active:scale-[0.98] transition-all ${success ? 'border-green-500/30' : ''}`}>
-      <span className={success ? 'text-green-400' : 'text-white/70'}>{icons[icon]}</span>
-      <span className={`text-[10px] font-medium ${success ? 'text-green-400' : 'text-white/50'}`}>{label}</span>
+    <button 
+      onClick={onClick} 
+      disabled={disabled}
+      title={tooltip}
+      className="w-9 h-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-40 transition-all active:scale-95"
+    >
+      {icons[icon]}
     </button>
   )
 }
