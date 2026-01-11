@@ -5,10 +5,11 @@ import { getCurveColor } from '../data/routes'
 import { useSpeech, generateCallout } from '../hooks/useSpeech'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
+import { detectZones, ZONE_COLORS } from '../services/zoneService'
 
 // ================================
-// Route Preview - v10
-// Stats at top, compact elevation, proper fly controls
+// Route Preview - v11
+// With zone detection and edit route button
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -21,9 +22,10 @@ const MAP_STYLES = {
   satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
 }
 
-export default function RoutePreview({ onStartNavigation, onBack }) {
+export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const mapRef = useRef(null)
   const markersRef = useRef([])
+  const zoneLayersRef = useRef([])
   const [mapContainer, setMapContainer] = useState(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [mapStyle, setMapStyle] = useState('dark')
@@ -34,6 +36,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   const [selectedCurve, setSelectedCurve] = useState(null)
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
+  const [showZones, setShowZones] = useState(true)
   
   // Fly-through state
   const [isFlying, setIsFlying] = useState(false)
@@ -48,15 +51,25 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
   
   const fetchedRef = useRef(false)
   const elevationFetchedRef = useRef(false)
+  const zonesFetchedRef = useRef(false)
+  
+  // Zone state
+  const [zones, setZones] = useState([])
+  const [isLoadingZones, setIsLoadingZones] = useState(false)
   
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
-    isFavorite, toggleFavorite, settings 
+    isFavorite, toggleFavorite, settings,
+    globalZoneOverrides, routeZoneOverrides, setRouteZones,
+    editedCurves, customCallouts
   } = useStore()
   const { initAudio, preloadRouteAudio, speak } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+  
+  // Check if route has edits
+  const hasEdits = editedCurves?.length > 0 || customCallouts?.length > 0 || routeZoneOverrides?.length > 0
   
   const isRouteFavorite = routeData?.name ? isFavorite(routeData.name) : false
   const handleToggleFavorite = () => { if (routeData) toggleFavorite(routeData) }
@@ -153,6 +166,30 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       fetchElevationData(routeData.coordinates)
     }
   }, [routeData?.coordinates, fetchElevationData])
+
+  // Fetch zones
+  const fetchZones = useCallback(async (coordinates) => {
+    if (!coordinates?.length || coordinates.length < 2 || zonesFetchedRef.current) return
+    zonesFetchedRef.current = true
+    setIsLoadingZones(true)
+    
+    try {
+      const allOverrides = [...(globalZoneOverrides || []), ...(routeZoneOverrides || [])]
+      const detectedZones = await detectZones(coordinates, allOverrides)
+      setZones(detectedZones)
+      setRouteZones(detectedZones)
+    } catch (err) {
+      console.error('Zone detection error:', err)
+    } finally {
+      setIsLoadingZones(false)
+    }
+  }, [globalZoneOverrides, routeZoneOverrides, setRouteZones])
+
+  useEffect(() => {
+    if (routeData?.coordinates?.length > 0 && !zonesFetchedRef.current) {
+      fetchZones(routeData.coordinates)
+    }
+  }, [routeData?.coordinates, fetchZones])
 
   const fetchDemoRoute = async () => {
     setIsLoadingRoute(true)
@@ -337,6 +374,88 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     addMarkers(mapRef.current, data.curves, data.coordinates)
   }, [routeData, addRoute, addMarkers])
 
+  // Add zone overlays to map
+  const addZoneOverlays = useCallback((map, zonesToRender) => {
+    if (!map || !zonesToRender?.length) return
+    
+    // Remove existing zone layers
+    zoneLayersRef.current.forEach(id => {
+      if (map.getLayer(id)) map.removeLayer(id)
+      if (map.getSource(id)) map.removeSource(id)
+    })
+    zoneLayersRef.current = []
+    
+    zonesToRender.forEach((zone, i) => {
+      if (!zone.coordinates?.length || zone.coordinates.length < 2) return
+      
+      const colors = ZONE_COLORS[zone.type] || ZONE_COLORS.rural
+      const sourceId = `zone-${i}`
+      const fillId = `zone-fill-${i}`
+      const lineId = `zone-line-${i}`
+      
+      // Create buffer polygon around route segment
+      const bufferCoords = createRouteBuffer(zone.coordinates, 0.0006)
+      if (bufferCoords.length < 4) return
+      
+      try {
+        map.addSource(sourceId, {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [bufferCoords] } }
+        })
+        
+        map.addLayer({
+          id: fillId,
+          type: 'fill',
+          source: sourceId,
+          paint: { 'fill-color': colors.label, 'fill-opacity': 0.08 }
+        }, 'route-line')
+        
+        map.addLayer({
+          id: lineId,
+          type: 'line',
+          source: sourceId,
+          paint: { 'line-color': colors.border, 'line-width': 1.5, 'line-dasharray': [3, 2] }
+        }, 'route-line')
+        
+        zoneLayersRef.current.push(sourceId, fillId, lineId)
+      } catch (err) {
+        console.log('Zone layer error:', err.message)
+      }
+    })
+  }, [])
+
+  // Create buffer polygon around route
+  const createRouteBuffer = (coords, bufferSize) => {
+    if (!coords?.length || coords.length < 2) return []
+    const left = [], right = []
+    
+    for (let i = 0; i < coords.length; i++) {
+      const curr = coords[i]
+      const next = coords[i + 1] || coords[i]
+      const prev = coords[i - 1] || coords[i]
+      
+      const dx = next[0] - prev[0]
+      const dy = next[1] - prev[1]
+      const len = Math.sqrt(dx * dx + dy * dy) || 1
+      
+      const perpX = -dy / len * bufferSize
+      const perpY = dx / len * bufferSize
+      
+      left.push([curr[0] + perpX, curr[1] + perpY])
+      right.push([curr[0] - perpX, curr[1] - perpY])
+    }
+    
+    return [...left, ...right.reverse(), left[0]]
+  }
+
+  // Render zones when they change
+  useEffect(() => {
+    if (mapLoaded && mapRef.current && zones.length > 0 && showZones) {
+      // Wait for route to be added first
+      setTimeout(() => addZoneOverlays(mapRef.current, zones), 100)
+    }
+  }, [mapLoaded, zones, showZones, addZoneOverlays])
+
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
     mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
@@ -348,7 +467,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
     mapRef.current.on('style.load', () => rebuildRoute())
-    return () => { markersRef.current.forEach(m => m.remove()); if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current); mapRef.current?.remove(); mapRef.current = null }
+    return () => { markersRef.current.forEach(m => m.remove()); zoneLayersRef.current = []; if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current); mapRef.current?.remove(); mapRef.current = null }
   }, [mapContainer, routeData, mapStyle, addRoute, addMarkers, rebuildRoute])
 
   const handleStyleChange = () => {
@@ -466,6 +585,34 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
       {/* BOTTOM BAR - Compact */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
+        {/* Zone indicator */}
+        {zones.length > 0 && (
+          <div className="flex items-center justify-between mb-2">
+            <button 
+              onClick={() => setShowZones(!showZones)}
+              className={`flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition-all ${showZones ? 'bg-white/10 text-white' : 'bg-transparent text-white/40'}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M3 12h18M12 3v18"/>
+              </svg>
+              {zones.length} zones
+              {isLoadingZones && <span className="text-white/30">(loading)</span>}
+            </button>
+            <div className="flex gap-1">
+              {Object.entries(ZONE_COLORS).slice(0, 4).map(([type, colors]) => {
+                const count = zones.filter(z => z.type === type).length
+                if (count === 0) return null
+                return (
+                  <span key={type} className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ background: `${colors.label}20`, color: colors.label }}>
+                    {count} {type}
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Mode + Actions */}
         <div className="flex items-center justify-between mb-2">
           {/* Mode */}
@@ -484,6 +631,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
 
           {/* Actions */}
           <div className="flex gap-1.5">
+            <Btn icon="edit" onClick={onEdit} tip="Edit Route" highlight={hasEdits} />
             <Btn icon="reverse" onClick={handleReverseRoute} tip="Reverse" />
             <Btn icon="fly" onClick={handleFlyThrough} disabled={isFlying} tip="Preview" />
             <Btn icon="voice" onClick={handleSampleCallout} tip="Test Voice" />
@@ -522,8 +670,9 @@ function MiniElevation({ data, color }) {
 }
 
 // Action button
-function Btn({ icon, onClick, disabled, success, loading, tip }) {
+function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   const icons = {
+    edit: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
     reverse: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
     fly: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
     voice: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
@@ -532,7 +681,7 @@ function Btn({ icon, onClick, disabled, success, loading, tip }) {
     check: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>,
   }
   return (
-    <button onClick={onClick} disabled={disabled} title={tip} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 ${success ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-black/60 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white'} disabled:opacity-40`}>
+    <button onClick={onClick} disabled={disabled} title={tip} className={`w-9 h-9 rounded-full flex items-center justify-center transition-all active:scale-95 ${success ? 'bg-green-500/20 text-green-400 border border-green-500/30' : highlight ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-black/60 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white'} disabled:opacity-40`}>
       {loading ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : icons[icon]}
     </button>
   )
