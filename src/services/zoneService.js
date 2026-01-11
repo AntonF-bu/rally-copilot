@@ -407,9 +407,24 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
  * Final classification considering census density + road characteristics + curves
  */
 function finalClassifyPoint(point) {
-  const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity } = point
+  const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity, curveMaxSeverity } = point
   
-  // Highway override: always TRANSIT regardless of density
+  // CRITICAL: Sharp curves (severity 4+) CANNOT be on a highway
+  // No highway in the world has a 90 degree turn
+  // This overrides all other classification
+  if (curveMaxSeverity >= 4) {
+    console.log(`  🚨 Sharp curve detected (severity ${curveMaxSeverity}) - NOT highway`)
+    // If there's a sharp curve, classify based on density
+    if (densityCategory === 'urban') {
+      return ROUTE_CHARACTER.URBAN
+    }
+    if (densityCategory === 'rural' || curveDensity >= 2) {
+      return ROUTE_CHARACTER.TECHNICAL
+    }
+    return ROUTE_CHARACTER.SPIRITED
+  }
+  
+  // Highway classification: only if no sharp curves
   const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
   if (isHighway || speedLimit >= 55) {
     // But if highway has lots of curves (mountain road), bump to SPIRITED
@@ -562,7 +577,12 @@ function addCurveDensity(points, curves) {
       ? nearbyCurves.reduce((sum, c) => sum + c.severity, 0) / nearbyCurves.length
       : 0
     
-    return { ...point, curveDensity, curveAvgSeverity }
+    // Track max severity - critical for highway override
+    const curveMaxSeverity = nearbyCurves.length > 0
+      ? Math.max(...nearbyCurves.map(c => c.severity))
+      : 0
+    
+    return { ...point, curveDensity, curveAvgSeverity, curveMaxSeverity }
   })
 }
 
