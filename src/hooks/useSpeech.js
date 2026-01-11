@@ -109,8 +109,23 @@ export function useSpeech() {
     }
   }, [setSpeaking, settings.volume])
 
-  // ElevenLabs TTS
+  // ElevenLabs TTS (checks cache first)
   const speakElevenLabs = useCallback(async (text) => {
+    // Check cache first (for offline support)
+    if (AUDIO_CACHE.has(text)) {
+      try {
+        audioRef.current.src = AUDIO_CACHE.get(text)
+        audioRef.current.volume = settings.volume || 1.0
+        isPlayingRef.current = true
+        setSpeaking(true, text)
+        await audioRef.current.play()
+        return true
+      } catch (err) {
+        console.error('Cache playback error:', err)
+      }
+    }
+
+    // Can't fetch if offline
     if (!navigator.onLine) {
       return false
     }
@@ -133,6 +148,9 @@ export function useSpeech() {
       }
 
       const audioUrl = URL.createObjectURL(blob)
+      
+      // Cache for future use
+      AUDIO_CACHE.set(text, audioUrl)
       
       audioRef.current.src = audioUrl
       audioRef.current.volume = settings.volume || 1.0
@@ -204,7 +222,87 @@ export function useSpeech() {
     }
   }, [])
 
-  return { speak, stop, isSpeaking, initAudio }
+  return { speak, stop, isSpeaking, initAudio, preloadRouteAudio }
+}
+
+// Audio cache for offline use
+const AUDIO_CACHE = new Map()
+
+// Preload callouts for a route (for offline use)
+async function preloadRouteAudio(curves) {
+  if (!curves || curves.length === 0) {
+    return { success: true, cached: 0, total: 0 }
+  }
+
+  if (!navigator.onLine) {
+    return { success: false, cached: 0, total: 0 }
+  }
+
+  const callouts = new Set()
+
+  // Generate callouts for each curve
+  curves.forEach(curve => {
+    if (curve.isChicane) {
+      const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+      callouts.add(curve.chicaneType === 'CHICANE' 
+        ? `Chicane ${dir} ${curve.severitySequence}`
+        : `S ${dir} ${curve.severitySequence}`)
+    } else {
+      const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+      callouts.add(`${dir} ${curve.severity}`)
+      
+      if (curve.modifier) {
+        callouts.add(`${dir} ${curve.severity} ${curve.modifier.toLowerCase()}`)
+      }
+    }
+  })
+
+  const calloutList = Array.from(callouts)
+  console.log(`🎤 Pre-loading ${calloutList.length} callouts...`)
+
+  let cached = 0
+  let failed = 0
+
+  for (const text of calloutList) {
+    if (AUDIO_CACHE.has(text)) {
+      cached++
+      continue
+    }
+
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceId: 'puLAe8o1npIDg374vYZp' }),
+      })
+
+      if (response.ok) {
+        const blob = await response.blob()
+        if (blob.size > 500) {
+          AUDIO_CACHE.set(text, URL.createObjectURL(blob))
+          cached++
+        } else {
+          failed++
+        }
+      } else {
+        failed++
+      }
+    } catch (err) {
+      failed++
+    }
+
+    // Small delay between requests
+    await new Promise(r => setTimeout(r, 100))
+  }
+
+  console.log(`🎤 Cached ${cached}/${calloutList.length} callouts`)
+  
+  return { 
+    success: cached > 0, 
+    cached, 
+    total: calloutList.length, 
+    failed 
+  }
 }
 
 // Generate callout text from curve data
