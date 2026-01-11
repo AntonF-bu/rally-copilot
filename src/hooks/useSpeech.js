@@ -320,7 +320,7 @@ async function preloadRouteAudio(curves) {
   return { success: cached > 0, cached, total: list.length }
 }
 
-// Generate callout with speeds - CLEAR COMMUNICATION FOCUS
+// Generate callout - ADAPTIVE LENGTH based on time available
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main', options = {}) {
   if (!curve) return ''
 
@@ -342,41 +342,36 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   // Distance text
   const distText = getDistanceText(curve.distance, speedUnit)
   
+  // Check gap to next curve - determines callout length
+  let gapToNext = 999
+  if (nextCurve) {
+    gapToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+  }
+  const hasTimeForDetail = gapToNext > 150 // More than 150m to next curve = time for details
+  
   // Curve character description
   const curveCharacter = getCurveCharacter(curve)
   
-  // PHASE: EARLY WARNING (far away, heads up)
+  // PHASE: EARLY WARNING
   if (phase === 'early') {
-    if (curve.isChicane) {
-      const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-      return `Heads up. Chicane in ${distText}. Starts ${chicaneDir}. Get ready.`
-    }
-    
     if (isVeryHard) {
-      return `Warning. ${curveCharacter} ${dir} turn in ${distText}. You'll need to slow to ${speed}.`
+      return `Caution ahead. ${curveCharacter} ${dir} ${curve.severity} in ${distText}. Prepare to slow to ${speed}.`
     }
-    
     if (isHard) {
-      return `${curveCharacter} ${dir} turn coming in ${distText}. Target ${speed}.`
+      return `${curveCharacter} ${dir} ${curve.severity} coming in ${distText}. Target ${speed}.`
     }
-    
-    return `${curveCharacter} ${dir} bend in ${distText}.`
+    return `${curveCharacter} ${dir} ${curve.severity} ahead in ${distText}.`
   }
   
-  // PHASE: FINAL WARNING (very close, action needed NOW)
+  // PHASE: FINAL WARNING - always short
   if (phase === 'final') {
-    if (curve.isChicane) {
-      return `Chicane! ${curve.startDirection === 'LEFT' ? 'Left' : 'Right'} now!`
-    }
-    
     if (isVeryHard) {
-      return `${Dir} now! ${speed}!`
+      return `${Dir} ${curve.severity} now! ${speed}!`
     }
-    
-    return `${Dir} now.`
+    return `${Dir} ${curve.severity} now.`
   }
   
-  // PHASE: MAIN CALLOUT (primary announcement with full details)
+  // PHASE: MAIN CALLOUT - length depends on time available
   const sentences = []
   
   if (curve.isChicane) {
@@ -384,74 +379,110 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     const maxSev = Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity]))
     const chicaneSpeed = getSpeed(maxSev)
     
-    sentences.push(`In ${distText}, chicane.`)
-    sentences.push(`Starts ${chicaneDir}, sequence ${curve.severitySequence}.`)
-    sentences.push(`Take it at ${chicaneSpeed}.`)
+    sentences.push(`In ${distText}, chicane starting ${chicaneDir}.`)
+    sentences.push(`Severity ${curve.severitySequence}, take at ${chicaneSpeed}.`)
     
   } else {
-    // Opening with distance and action
+    // Opening with action and curve info
     if (isVeryHard) {
-      sentences.push(`Slow down. In ${distText}, ${curveCharacter} ${dir} turn.`)
+      sentences.push(`Slow to ${speed}.`)
+      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}.`)
     } else if (isHard) {
-      sentences.push(`Brake ahead. In ${distText}, ${curveCharacter} ${dir} turn.`)
+      sentences.push(`Brake ahead.`)
+      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}. Target ${speed}.`)
     } else if (isGentle) {
-      sentences.push(`In ${distText}, gentle ${dir} bend.`)
+      sentences.push(`In ${distText}, gentle ${dir} ${curve.severity}. ${speed}.`)
     } else {
-      sentences.push(`In ${distText}, ${curveCharacter} ${dir} turn.`)
+      sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}. Target ${speed}.`)
     }
     
-    // Speed recommendation
-    sentences.push(`Target ${speed}.`)
-    
-    // Curve behavior (tightens, opens, etc)
-    if (curve.modifier) {
-      switch (curve.modifier) {
-        case 'HAIRPIN': 
-          sentences.push(`Hairpin. Slow to ${getSpeed(6)} at apex.`)
-          break
-        case 'SHARP': 
-          sentences.push(`Sharp turn.`)
-          break
-        case 'LONG': 
-          sentences.push(`Long curve. Hold your line and speed.`)
-          break
-        case 'TIGHTENS':
-          sentences.push(`Tightens on exit. Drop to ${getSpeed(Math.min(6, curve.severity + 1))}.`)
-          break
-        case 'OPENS':
-          sentences.push(`Opens on exit. Accelerate to ${getSpeed(Math.max(1, curve.severity - 1))}.`)
-          break
-        case 'S-CURVE':
-          sentences.push(`S-curve. Stay centered.`)
-          break
+    // Add details ONLY if we have time (next curve is far)
+    if (hasTimeForDetail) {
+      // Curve behavior
+      if (curve.modifier) {
+        switch (curve.modifier) {
+          case 'HAIRPIN': 
+            sentences.push(`Hairpin turn. Slow to ${getSpeed(6)} at apex.`)
+            break
+          case 'SHARP': 
+            sentences.push(`Sharp turn.`)
+            break
+          case 'LONG': 
+            sentences.push(`Long curve, hold your line.`)
+            break
+          case 'TIGHTENS':
+            sentences.push(`Tightens through. Exit at ${getSpeed(Math.min(6, curve.severity + 1))}.`)
+            break
+          case 'OPENS':
+            sentences.push(`Opens on exit. Accelerate to ${getSpeed(Math.max(1, curve.severity - 1))}.`)
+            break
+        }
       }
-    }
-    
-    // Length context for long curves
-    if (curve.length > 200) {
-      sentences.push(`${getLengthInUnits(curve.length, speedUnit)} long.`)
+      
+      // Length info for long curves
+      if (curve.length > 150) {
+        const lengthText = speedUnit === 'kmh' 
+          ? `${Math.round(curve.length)} meters long`
+          : `${Math.round(curve.length * 3.28084 / 50) * 50} feet long`
+        sentences.push(lengthText + '.')
+      }
     }
   }
   
   // Next curve preview
   if (nextCurve && !curve.isChicane) {
-    const gapDist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
     const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
     const nextSpeed = getSpeed(nextCurve.severity)
     const nextCharacter = getCurveCharacter(nextCurve)
     
-    if (gapDist >= 0 && gapDist < 50) {
-      sentences.push(`Immediately into ${nextDir}.`)
-    } else if (gapDist >= 0 && gapDist < 150) {
-      sentences.push(`Then ${nextCharacter} ${nextDir} at ${nextSpeed}.`)
-    } else if (gapDist >= 0 && gapDist < 400) {
-      sentences.push(`${nextCharacter} ${nextDir} follows.`)
-    } else if (gapDist >= 400) {
-      sentences.push(`Then straight.`)
+    if (gapToNext < 50) {
+      sentences.push(`Immediately into ${nextDir} ${nextCurve.severity}.`)
+    } else if (gapToNext < 150) {
+      sentences.push(`Then ${nextDir} ${nextCurve.severity} at ${nextSpeed}.`)
+    } else if (gapToNext < 300 && hasTimeForDetail) {
+      sentences.push(`${nextCharacter} ${nextDir} ${nextCurve.severity} follows.`)
     }
   }
   
   return sentences.join(' ')
+}
+
+// Get curve character description
+function getCurveCharacter(curve) {
+  if (!curve) return ''
+  
+  const severity = curve.severity
+  const length = curve.length || 0
+  
+  // Wide sweeper
+  if (severity <= 2 && length > 150) {
+    return 'sweeping'
+  }
+  
+  if (severity <= 1) return 'gentle'
+  if (severity === 2) return 'easy'
+  if (severity === 3) return 'moderate'
+  if (severity === 4) return 'tight'
+  if (severity === 5) return 'sharp'
+  return 'very sharp'
+}
+
+// Short distance text
+function getShortDistanceText(distanceMeters, speedUnit = 'mph') {
+  if (!distanceMeters || distanceMeters < 0) return 'ahead'
+  
+  if (speedUnit === 'kmh') {
+    if (distanceMeters >= 500) {
+      return `${Math.round(distanceMeters / 100) * 100}m`
+    }
+    return `${Math.round(distanceMeters / 50) * 50}m`
+  } else {
+    const feet = distanceMeters * 3.28084
+    if (feet >= 1000) {
+      return `${Math.round(feet / 100) * 100} feet`
+    }
+    return `${Math.round(feet / 50) * 50} feet`
+  }
 }
 
 // Get curve character description based on severity and properties
@@ -474,125 +505,26 @@ function getCurveCharacter(curve) {
   return 'very sharp'
 }
 
-// Get length in appropriate units
-function getLengthInUnits(meters, speedUnit = 'mph') {
-  if (speedUnit === 'kmh') {
-    return `${Math.round(meters)} meters`
-  } else {
-    const feet = Math.round(meters * 3.28084)
-    if (feet >= 1000) {
-      return `${Math.round(feet / 100) * 100} feet`
-    }
-    return `${Math.round(feet / 50) * 50} feet`
-  }
-}
-
-// Generate straight section callout - CLEAR COMMUNICATION
+// Generate straight section callout - SHORT
 export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const getStraightSpeed = () => {
-    const speeds = { cruise: 55, fast: 65, race: 75 }
-    let speed = speeds[mode] || 55
-    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
-    return speed
-  }
+  const distText = getShortDistanceText(distanceMeters, speedUnit)
   
-  const speed = getStraightSpeed()
-  const distText = getDistanceText(distanceMeters, speedUnit)
-  
-  const sentences = []
-  
-  // Main message based on length
-  if (distanceMeters >= 800) {
-    sentences.push(`Clear road ahead for ${distText}.`)
-    sentences.push(`Cruise at ${speed}.`)
-  } else if (distanceMeters >= 400) {
-    sentences.push(`Straight section, ${distText}.`)
-    sentences.push(`Hold ${speed}.`)
-  } else {
-    sentences.push(`Short straight ahead.`)
-  }
-  
-  // Add next curve preview if available
   if (nextCurve) {
     const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-    const nextCharacter = getCurveCharacter(nextCurve)
-    
-    if (nextCurve.severity >= 4) {
-      sentences.push(`Then ${nextCharacter} ${nextDir} turn ahead.`)
-    } else {
-      sentences.push(`${nextCharacter} ${nextDir} bend coming up.`)
-    }
+    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
   }
-  
-  return sentences.join(' ')
+  return `Clear for ${distText}.`
 }
 
-// Generate "after curve" callout for straights following curves - CLEAR COMMUNICATION
+// Generate "after curve" callout - SHORT
 export function generatePostCurveCallout(straightDistance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const getStraightSpeed = () => {
-    const speeds = { cruise: 55, fast: 65, race: 75 }
-    let speed = speeds[mode] || 55
-    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
-    return speed
+  const distText = getShortDistanceText(straightDistance, speedUnit)
+  
+  if (nextCurve) {
+    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
   }
-  
-  const speed = getStraightSpeed()
-  const distText = getDistanceText(straightDistance, speedUnit)
-  
-  if (straightDistance >= 500) {
-    if (nextCurve) {
-      const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-      const nextCharacter = getCurveCharacter(nextCurve)
-      return `Clear road. Cruise at ${speed}. Next is ${nextCharacter} ${nextDir} in ${distText}.`
-    }
-    return `Clear road ahead. Cruise at ${speed} for ${distText}.`
-  } else if (straightDistance >= 200) {
-    if (nextCurve) {
-      const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-      const nextCharacter = getCurveCharacter(nextCurve)
-      return `Short straight. ${nextCharacter} ${nextDir} ahead.`
-    }
-    return `Short straight. Hold ${speed}.`
-  }
-  
-  return '' // Too short to call out
-}
-
-// Get curve length description
-function getCurveLengthDescription(lengthMeters) {
-  if (!lengthMeters) return ''
-  
-  if (lengthMeters < 30) return 'quick turn'
-  if (lengthMeters < 60) return 'short'
-  if (lengthMeters < 100) return '' // Normal, no need to mention
-  if (lengthMeters < 150) return 'extended'
-  if (lengthMeters < 250) return 'long'
-  return 'very long sweeper'
-}
-
-// Get elevation context
-function getElevationContext(elevationChange) {
-  if (!elevationChange) return ''
-  
-  // elevationChange is in meters, positive = uphill, negative = downhill
-  if (elevationChange > 10) return 'uphill'
-  if (elevationChange > 5) return 'slight uphill'
-  if (elevationChange < -10) return 'downhill, watch braking'
-  if (elevationChange < -5) return 'slight downhill'
-  return ''
-}
-
-// Get severity description
-function getSeverityDescription(severity) {
-  switch(severity) {
-    case 1: return 'very gentle'
-    case 2: return 'easy'
-    case 3: return 'moderate'
-    case 4: return 'tight'
-    case 5: return 'very tight'
-    case 6: return 'extreme'
-    default: return ''
-  }
+  return `Clear for ${distText}.`
 }
 
 // Convert distance to natural speech
