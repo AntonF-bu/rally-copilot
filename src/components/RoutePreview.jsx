@@ -535,16 +535,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
         if (showSleeve) {
-          // Light transparent fill - use butt caps to avoid circles
+          // Light transparent fill - round caps for smooth corners
           map.addLayer({ 
             id: sleeve, 
             type: 'line', 
             source: src, 
-            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
+            layout: { 'line-join': 'round', 'line-cap': 'round' }, 
             paint: { 
               'line-color': seg.color, 
               'line-width': 40, 
-              'line-opacity': 0.25
+              'line-opacity': seg.isTransition ? 0.2 : 0.25  // Slightly less opacity on transitions
             } 
           })
         }
