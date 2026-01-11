@@ -3,7 +3,7 @@ import useStore from '../store'
 
 // ================================
 // Speech Hook - ElevenLabs + Offline Cache
-// With Audio Ducking for Spotify/Music compatibility
+// Simplified: No complex audio APIs
 // Voice ID: puLAe8o1npIDg374vYZp
 // ================================
 
@@ -22,58 +22,32 @@ let cacheStatus = {
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
   
-  const audioContextRef = useRef(null)
-  const gainNodeRef = useRef(null)
-  const audioElementRef = useRef(null)
+  const audioRef = useRef(null)
   const isPlayingRef = useRef(false)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
   const lastSpokenTimeRef = useRef(0)
 
-  // Initialize with Web Audio API for better audio mixing
+  // Initialize
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create audio context for mixing/ducking
-    try {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)()
-      gainNodeRef.current = audioContextRef.current.createGain()
-      gainNodeRef.current.connect(audioContextRef.current.destination)
-    } catch (e) {
-      console.log('Web Audio API not available')
-    }
-
-    // Create audio element with special settings for notifications
-    audioElementRef.current = new Audio()
+    // Simple audio element
+    audioRef.current = new Audio()
     
-    // iOS: Request audio session for 'playback' with mixing
-    if ('audioSession' in navigator) {
-      try {
-        // @ts-ignore - experimental API
-        navigator.audioSession.type = 'play-and-record' // Allows mixing
-      } catch (e) {}
-    }
-    
-    // Set up audio element for notification-style playback
-    audioElementRef.current.setAttribute('playsinline', 'true')
-    audioElementRef.current.setAttribute('webkit-playsinline', 'true')
-    
-    audioElementRef.current.onended = () => {
+    audioRef.current.onended = () => {
       isPlayingRef.current = false
       setSpeaking(false, '')
-      // Resume audio context if suspended
-      if (audioContextRef.current?.state === 'suspended') {
-        audioContextRef.current.resume()
-      }
     }
     
-    audioElementRef.current.onerror = () => {
+    audioRef.current.onerror = (e) => {
+      console.error('Audio playback error:', e)
       isPlayingRef.current = false
       setSpeaking(false, '')
     }
 
-    // Initialize native speech synthesis
+    // Initialize native speech synthesis as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -98,30 +72,11 @@ export function useSpeech() {
       synthRef.current.onvoiceschanged = loadVoices
     }
 
-    // Set up Media Session for system integration
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'Rally Co-Pilot',
-        artist: 'Navigation',
-        album: 'Driving'
-      })
-    }
-
     return () => {
-      audioElementRef.current?.pause()
+      audioRef.current?.pause()
       synthRef.current?.cancel()
-      audioContextRef.current?.close()
     }
   }, [setSpeaking])
-
-  // Resume audio context (needed after user interaction on iOS)
-  const ensureAudioContext = useCallback(async () => {
-    if (audioContextRef.current?.state === 'suspended') {
-      try {
-        await audioContextRef.current.resume()
-      } catch (e) {}
-    }
-  }, [])
 
   // Fetch and cache a single callout
   const fetchAndCacheAudio = useCallback(async (text) => {
@@ -134,15 +89,22 @@ export function useSpeech() {
         body: JSON.stringify({ text, voiceId: ELEVENLABS_VOICE_ID }),
       })
 
-      if (!response.ok) return false
+      if (!response.ok) {
+        console.error('TTS API error:', response.status)
+        return false
+      }
 
       const blob = await response.blob()
-      if (blob.size < 500) return false
+      if (blob.size < 500) {
+        console.error('TTS returned invalid audio')
+        return false
+      }
 
       const audioUrl = URL.createObjectURL(blob)
       AUDIO_CACHE.set(text, audioUrl)
       return true
     } catch (err) {
+      console.error('TTS fetch error:', err)
       return false
     }
   }, [])
@@ -153,8 +115,15 @@ export function useSpeech() {
       return { success: true, cached: 0, total: 0 }
     }
 
+    // Check if online
+    if (!navigator.onLine) {
+      console.log('Offline - skipping preload')
+      return { success: false, cached: 0, total: 0, failed: 0 }
+    }
+
     const callouts = new Set()
 
+    // Generate callouts for each curve
     curves.forEach(curve => {
       if (curve.isChicane) {
         const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
@@ -179,11 +148,13 @@ export function useSpeech() {
       }
     })
 
-    // Add common callouts
+    // Add common standalone callouts
     ['Caution', 'Tightens', 'Opens'].forEach(s => callouts.add(s))
 
     const calloutList = Array.from(callouts)
     const total = calloutList.length
+
+    console.log(`🎤 Pre-loading ${total} callouts...`)
 
     cacheStatus = { isPreloading: true, progress: 0, total, ready: false }
     onProgress?.(0, total)
@@ -200,6 +171,8 @@ export function useSpeech() {
         const success = await fetchAndCacheAudio(text)
         if (success) cached++
         else failed++
+        
+        // Small delay between requests
         await new Promise(r => setTimeout(r, 80))
       }
 
@@ -209,24 +182,21 @@ export function useSpeech() {
 
     cacheStatus = { isPreloading: false, progress: total, total, ready: cached > 0 }
     
-    return { success: failed < total * 0.5, cached, total, failed }
+    console.log(`🎤 Pre-loaded ${cached}/${total} (${failed} failed)`)
+    
+    return { success: failed < total * 0.3, cached, total, failed }
   }, [fetchAndCacheAudio])
 
-  // Play audio with ducking behavior
-  const playWithDucking = useCallback(async (audioUrl, text) => {
-    await ensureAudioContext()
-    
+  // Play audio from URL
+  const playAudio = useCallback(async (audioUrl, text) => {
     try {
       isPlayingRef.current = true
       setSpeaking(true, text)
       
-      // Set volume slightly higher to cut through music
-      audioElementRef.current.volume = Math.min(1.0, (settings.volume || 1.0) * 1.2)
-      audioElementRef.current.src = audioUrl
+      audioRef.current.src = audioUrl
+      audioRef.current.volume = settings.volume || 1.0
       
-      // Use play() which should trigger audio ducking on iOS
-      await audioElementRef.current.play()
-      
+      await audioRef.current.play()
       return true
     } catch (err) {
       console.error('Playback error:', err)
@@ -234,23 +204,29 @@ export function useSpeech() {
       setSpeaking(false, '')
       return false
     }
-  }, [ensureAudioContext, setSpeaking, settings.volume])
+  }, [setSpeaking, settings.volume])
 
   // Play from cache
   const playFromCache = useCallback(async (text) => {
     const audioUrl = AUDIO_CACHE.get(text)
     if (!audioUrl) return false
-    return playWithDucking(audioUrl, text)
-  }, [playWithDucking])
+    return playAudio(audioUrl, text)
+  }, [playAudio])
 
-  // Speak using ElevenLabs
+  // Speak using ElevenLabs (live or cached)
   const speakElevenLabs = useCallback(async (text) => {
+    // Check cache first
     if (AUDIO_CACHE.has(text)) {
+      console.log('🎤 Playing from cache:', text)
       return playFromCache(text)
     }
 
-    if (!navigator.onLine) return false
+    // Can't fetch if offline
+    if (!navigator.onLine) {
+      return false
+    }
 
+    // Fetch and play
     try {
       const response = await fetch('/api/tts', {
         method: 'POST',
@@ -260,19 +236,22 @@ export function useSpeech() {
 
       if (!response.ok) return false
 
-      const audioBlob = await response.blob()
-      if (audioBlob.size < 500) return false
+      const blob = await response.blob()
+      if (blob.size < 500) return false
 
-      const audioUrl = URL.createObjectURL(audioBlob)
+      const audioUrl = URL.createObjectURL(blob)
+      
+      // Cache for future
       AUDIO_CACHE.set(text, audioUrl)
       
-      return playWithDucking(audioUrl, text)
+      return playAudio(audioUrl, text)
     } catch (err) {
+      console.error('ElevenLabs error:', err)
       return false
     }
-  }, [playFromCache, playWithDucking])
+  }, [playFromCache, playAudio])
 
-  // Native speech (also supports ducking on iOS)
+  // Native speech fallback
   const speakNative = useCallback((text) => {
     if (!synthRef.current) return false
 
@@ -284,15 +263,17 @@ export function useSpeech() {
       
       utterance.rate = 1.1
       utterance.pitch = 1.0
-      utterance.volume = Math.min(1.0, (settings.volume || 1.0))
+      utterance.volume = settings.volume || 1.0
 
       utterance.onstart = () => setSpeaking(true, text)
       utterance.onend = () => setSpeaking(false, '')
       utterance.onerror = () => setSpeaking(false, '')
 
       synthRef.current.speak(utterance)
+      console.log('🔊 Native speech:', text)
       return true
     } catch (err) {
+      console.error('Native speech error:', err)
       return false
     }
   }, [setSpeaking, settings.volume])
@@ -303,56 +284,60 @@ export function useSpeech() {
 
     const now = Date.now()
     
+    // Prevent repeating same callout too fast
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 1500) {
       return false
     }
 
+    // High priority interrupts current speech
     if (priority === 'high') {
-      audioElementRef.current?.pause()
+      audioRef.current?.pause()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current || synthRef.current?.speaking) {
+      // Don't interrupt for normal priority
       return false
     }
 
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try cached first, then live, then native
-    if (AUDIO_CACHE.has(text)) {
-      const success = await playFromCache(text)
-      if (success) return true
-    }
+    // Try ElevenLabs first (cached or live)
+    const success = await speakElevenLabs(text)
+    if (success) return true
 
-    if (navigator.onLine) {
-      const success = await speakElevenLabs(text)
-      if (success) return true
-    }
-
+    // Fallback to native speech
+    console.log('🔊 Falling back to native speech')
     return speakNative(text)
-  }, [settings.voiceEnabled, playFromCache, speakElevenLabs, speakNative])
+  }, [settings.voiceEnabled, speakElevenLabs, speakNative])
 
-  // Initialize audio on first user interaction (required for iOS)
+  // Initialize audio on user interaction (for iOS)
   const initAudio = useCallback(async () => {
-    await ensureAudioContext()
-    
-    // Play a silent audio to unlock audio playback
+    // Play silent audio to unlock playback
     try {
-      const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA')
-      silentAudio.volume = 0.01
-      await silentAudio.play()
-      silentAudio.pause()
-    } catch (e) {}
-    
-    console.log('🔊 Audio initialized')
-  }, [ensureAudioContext])
+      const silentBlob = new Blob(
+        [new Uint8Array([255, 227, 24, 196, 0, 0, 0, 3, 72, 0, 0, 0, 0, 76, 65, 77, 69])],
+        { type: 'audio/mp3' }
+      )
+      const silentUrl = URL.createObjectURL(silentBlob)
+      audioRef.current.src = silentUrl
+      audioRef.current.volume = 0.01
+      await audioRef.current.play()
+      audioRef.current.pause()
+      URL.revokeObjectURL(silentUrl)
+      console.log('🔊 Audio initialized')
+    } catch (e) {
+      // May fail but that's okay
+      console.log('Audio init attempted')
+    }
+  }, [])
 
   const isSpeaking = useCallback(() => {
     return isPlayingRef.current || (synthRef.current?.speaking ?? false)
   }, [])
 
   const stop = useCallback(() => {
-    audioElementRef.current?.pause()
+    audioRef.current?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
