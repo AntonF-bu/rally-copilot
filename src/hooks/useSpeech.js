@@ -339,9 +339,16 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   
   const distText = getDistanceText(curve.distance, speedUnit)
   
+  // Calculate gap to next curve - use relative distances if available, fall back to absolute
   let gapToNext = 999
   if (nextCurve) {
-    gapToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+    // If we have relative distances (from upcoming curves), use the difference
+    if (nextCurve.distance !== undefined && curve.distance !== undefined) {
+      gapToNext = nextCurve.distance - curve.distance
+    } else if (nextCurve.distanceFromStart !== undefined && curve.distanceFromStart !== undefined) {
+      // Fall back to absolute distances
+      gapToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
+    }
   }
   const hasTimeForDetail = gapToNext > 150
   
