@@ -92,8 +92,8 @@ export default function CalloutOverlay() {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
         {/* Status Warnings */}
-        {(hasGpsIssue || hasNetworkIssue) && (
-          <StatusWarnings hasGpsIssue={hasGpsIssue} hasNetworkIssue={hasNetworkIssue} gpsAccuracy={gpsAccuracy} />
+        {(hasNetworkIssue) && (
+          <StatusWarnings hasNetworkIssue={hasNetworkIssue} />
         )}
         
         <div className="hud-glass rounded-2xl px-4 py-3">
@@ -145,8 +145,8 @@ export default function CalloutOverlay() {
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       
       {/* Status Warnings */}
-      {(hasGpsIssue || hasNetworkIssue) && (
-        <StatusWarnings hasGpsIssue={hasGpsIssue} hasNetworkIssue={hasNetworkIssue} gpsAccuracy={gpsAccuracy} />
+      {(hasNetworkIssue) && (
+        <StatusWarnings hasNetworkIssue={hasNetworkIssue} />
       )}
 
       {/* Main HUD Bar */}
@@ -334,27 +334,18 @@ export default function CalloutOverlay() {
   )
 }
 
-// Status Warnings Component
-function StatusWarnings({ hasGpsIssue, hasNetworkIssue, gpsAccuracy }) {
+// Status Warnings Component - only OFFLINE warning (GPS shown in bottom bar)
+function StatusWarnings({ hasNetworkIssue }) {
+  if (!hasNetworkIssue) return null
+  
   return (
-    <div className="mb-2 flex gap-2">
-      {hasNetworkIssue && (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff3366" strokeWidth="2">
-            <path d="M1 1l22 22M9.7 4.7a10 10 0 0 1 12.6 2.6M4.7 9.7a10 10 0 0 1 2-2M16.2 8.2a6 6 0 0 1 3.5 5.8M8.2 11a6 6 0 0 1 3.2-2.8M12 17h.01"/>
-          </svg>
-          <span className="text-xs font-semibold text-red-400">OFFLINE</span>
-        </div>
-      )}
-      {hasGpsIssue && (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/20 border border-yellow-500/30">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffd500" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 8v4m0 4h.01"/>
-          </svg>
-          <span className="text-xs font-semibold text-yellow-400">GPS ±{Math.round(gpsAccuracy)}m</span>
-        </div>
-      )}
+    <div className="mb-2">
+      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff3366" strokeWidth="2">
+          <path d="M1 1l22 22M9.7 4.7a10 10 0 0 1 12.6 2.6M4.7 9.7a10 10 0 0 1 2-2M16.2 8.2a6 6 0 0 1 3.5 5.8M8.2 11a6 6 0 0 1 3.2-2.8M12 17h.01"/>
+        </svg>
+        <span className="text-xs font-semibold text-red-400">OFFLINE</span>
+      </div>
     </div>
   )
 }
