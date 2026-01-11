@@ -9,16 +9,17 @@ const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 export const ROUTE_CHARACTER = {
   TECHNICAL: 'technical',   // Twisty fun roads - full co-pilot mode
   SPIRITED: 'spirited',     // Fun roads but some interruptions
-  TRANSIT: 'transit',       // Highway cruising - minimal callouts
+  TRANSIT: 'transit',       // Highway cruising - minimal callouts (highway)
   URBAN: 'urban'            // City driving - only important stuff
 }
 
-// Character colors for UI
+// SLEEVE colors for UI (COOL spectrum - distinct from route line warm colors)
+// These show WHERE you are (context/mode)
 export const CHARACTER_COLORS = {
-  technical: { primary: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: 'Technical' },
-  spirited: { primary: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', label: 'Spirited' },
-  transit: { primary: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)', label: 'Transit' },
-  urban: { primary: '#f87171', bg: 'rgba(248, 113, 113, 0.15)', label: 'Urban' }
+  technical: { primary: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)', label: 'Technical' },  // Cyan
+  spirited: { primary: '#64748b', bg: 'rgba(100, 116, 139, 0.15)', label: 'Spirited' },  // Slate
+  transit: { primary: '#818cf8', bg: 'rgba(129, 140, 248, 0.15)', label: 'Highway' },    // Indigo
+  urban: { primary: '#e879f9', bg: 'rgba(232, 121, 249, 0.15)', label: 'Urban' }         // Magenta
 }
 
 // Callout behavior per character
