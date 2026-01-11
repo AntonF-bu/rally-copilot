@@ -351,11 +351,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const handleStart = async () => { await initAudio(); onStartNavigation() }
 
-  // Build route segments BY CHARACTER
-  const buildCharacterSegments = useCallback((coords, characterSegments) => {
+  // Build SLEEVE segments by character (context - cyan/slate/indigo/magenta)
+  const buildSleeveSegments = useCallback((coords, characterSegments) => {
     if (!coords?.length) return []
     if (!characterSegments?.length) {
-      return [{ coords, color: '#22c55e' }]
+      return [{ coords, color: CHARACTER_COLORS.spirited.primary }]
     }
     
     const totalDist = routeData?.distance || 15000
@@ -380,24 +380,131 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     return segments
   }, [routeData?.distance])
 
-  const addRoute = useCallback((map, coords, characterSegments) => {
+  // Build ROUTE LINE segments by severity (what's coming - green/yellow/red)
+  const buildSeveritySegments = useCallback((coords, curves) => {
+    if (!coords?.length) return [{ coords, color: '#22c55e' }]
+    if (!curves?.length) return [{ coords, color: '#22c55e' }]
+
+    const totalDist = routeData?.distance || 15000
+    const gradientDist = 150 // meters for warning zone gradient
+    
+    // Severity colors (warm spectrum)
+    const severityColors = {
+      0: '#22c55e', // Green - clear
+      1: '#22c55e', // Green
+      2: '#84cc16', // Lime
+      3: '#eab308', // Yellow
+      4: '#f97316', // Orange
+      5: '#ef4444', // Red
+      6: '#dc2626', // Dark red
+    }
+    
+    // Build a color map for each coordinate
+    const coordColors = coords.map(() => severityColors[0])
+    
+    curves.forEach(curve => {
+      if (!curve.distanceFromStart) return
+      
+      const curveDist = curve.distanceFromStart
+      const severity = curve.severity || 3
+      const curveColor = severityColors[Math.min(severity, 6)]
+      
+      // Warning zone BEFORE curve (gradient from green to curve color)
+      const warningStart = curveDist - gradientDist
+      const warningEnd = curveDist
+      
+      // Curve zone (at the curve)
+      const curveStart = curveDist
+      const curveEnd = curveDist + (curve.length || 50)
+      
+      // Recovery zone AFTER curve (gradient back to green)
+      const recoveryStart = curveEnd
+      const recoveryEnd = curveEnd + (gradientDist * 0.5)
+      
+      coords.forEach((coord, i) => {
+        const coordDist = (i / coords.length) * totalDist
+        
+        // Warning zone - gradient into curve
+        if (coordDist >= warningStart && coordDist < warningEnd) {
+          const progress = (coordDist - warningStart) / gradientDist
+          coordColors[i] = interpolateColor(severityColors[0], curveColor, progress)
+        }
+        
+        // At curve - full color
+        if (coordDist >= curveStart && coordDist < curveEnd) {
+          coordColors[i] = curveColor
+        }
+        
+        // Recovery zone - gradient out of curve
+        if (coordDist >= recoveryStart && coordDist < recoveryEnd) {
+          const progress = (coordDist - recoveryStart) / (gradientDist * 0.5)
+          coordColors[i] = interpolateColor(curveColor, severityColors[0], progress)
+        }
+      })
+    })
+    
+    // Now build segments from consecutive same-color coords
+    const segments = []
+    let currentSegment = { coords: [coords[0]], color: coordColors[0] }
+    
+    for (let i = 1; i < coords.length; i++) {
+      if (coordColors[i] === currentSegment.color) {
+        currentSegment.coords.push(coords[i])
+      } else {
+        // Add overlap point for smooth connection
+        currentSegment.coords.push(coords[i])
+        segments.push(currentSegment)
+        currentSegment = { coords: [coords[i]], color: coordColors[i] }
+      }
+    }
+    segments.push(currentSegment)
+    
+    return segments.filter(s => s.coords.length > 1)
+  }, [routeData?.distance])
+
+  // Interpolate between two hex colors
+  const interpolateColor = (color1, color2, progress) => {
+    const hex = (c) => parseInt(c.slice(1), 16)
+    const r1 = (hex(color1) >> 16) & 255, g1 = (hex(color1) >> 8) & 255, b1 = hex(color1) & 255
+    const r2 = (hex(color2) >> 16) & 255, g2 = (hex(color2) >> 8) & 255, b2 = hex(color2) & 255
+    const r = Math.round(r1 + (r2 - r1) * progress)
+    const g = Math.round(g1 + (g2 - g1) * progress)
+    const b = Math.round(b1 + (b2 - b1) * progress)
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+  }
+
+  const addRoute = useCallback((map, coords, characterSegments, curves) => {
     if (!map || !coords?.length) return
-    const segs = buildCharacterSegments(coords, characterSegments)
-    segs.forEach((seg, i) => {
-      const src = `seg-${i}`, sleeve = `sleeve-${i}`, glow = `glow-${i}`, line = `line-${i}`
+    
+    // Build sleeve segments (context - cool colors)
+    const sleeveSegs = buildSleeveSegments(coords, characterSegments)
+    
+    // Build route line segments (severity - warm colors)  
+    const routeSegs = buildSeveritySegments(coords, curves)
+    
+    // Add SLEEVE layers first (behind everything)
+    sleeveSegs.forEach((seg, i) => {
+      const src = `sleeve-src-${i}`, sleeve = `sleeve-${i}`
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
-        // Wide sleeve layer (outermost, low opacity)
         if (showSleeve) {
-          map.addLayer({ id: sleeve, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 45, 'line-blur': 4, 'line-opacity': 0.2 } })
+          map.addLayer({ id: sleeve, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 45, 'line-blur': 4, 'line-opacity': 0.25 } })
         }
-        // Glow layer
-        map.addLayer({ id: glow, type: 'line', source: src, paint: { 'line-color': seg.color, 'line-width': 10, 'line-blur': 6, 'line-opacity': 0.4 } })
-        // Main route line
-        map.addLayer({ id: line, type: 'line', source: src, paint: { 'line-color': seg.color, 'line-width': 4 } })
       }
     })
-  }, [buildCharacterSegments, showSleeve])
+    
+    // Add ROUTE LINE layers (severity gradient)
+    routeSegs.forEach((seg, i) => {
+      const src = `route-src-${i}`, glow = `glow-${i}`, line = `line-${i}`
+      if (!map.getSource(src)) {
+        map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
+        // Glow layer
+        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 6, 'line-opacity': 0.5 } })
+        // Main route line  
+        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 4 } })
+      }
+    })
+  }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
@@ -421,11 +528,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
-    for (let i = 0; i < 50; i++) {
-      ['sleeve-', 'line-', 'glow-'].forEach(p => { if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) })
+    
+    // Clean up all layer types
+    for (let i = 0; i < 100; i++) {
+      ['sleeve-', 'line-', 'glow-'].forEach(p => { 
+        if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
+      })
+      if (mapRef.current.getSource('sleeve-src-' + i)) mapRef.current.removeSource('sleeve-src-' + i)
+      if (mapRef.current.getSource('route-src-' + i)) mapRef.current.removeSource('route-src-' + i)
+      // Also clean old format
       if (mapRef.current.getSource('seg-' + i)) mapRef.current.removeSource('seg-' + i)
     }
-    addRoute(mapRef.current, data.coordinates, charSegs)
+    
+    addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
     addMarkers(mapRef.current, data.curves, data.coordinates)
   }, [routeData, routeCharacter.segments, addRoute, addMarkers])
 
@@ -442,7 +557,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
     mapRef.current.on('load', () => {
       setMapLoaded(true)
-      addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments)
+      addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments, routeData.curves)
       addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
       mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
