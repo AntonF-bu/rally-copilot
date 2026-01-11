@@ -1,174 +1,284 @@
+import { useMemo } from 'react'
 import useStore from '../store'
 
 // ================================
-// Trip Summary - Strava-style stats
+// Trip Summary - Minimalist HUD Style
+// With Strava-like route outline
 // ================================
 
 export default function TripSummary() {
-  const { getTripSummary, closeTripSummary, goToMenu, mode } = useStore()
+  const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, tripStats } = useStore()
   
   const summary = getTripSummary()
   
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
+  // Generate SVG path from route coordinates
+  const routePath = useMemo(() => {
+    const coords = routeData?.coordinates
+    if (!coords || coords.length < 2) return null
+    
+    // Find bounds
+    let minLng = Infinity, maxLng = -Infinity
+    let minLat = Infinity, maxLat = -Infinity
+    
+    coords.forEach(([lng, lat]) => {
+      minLng = Math.min(minLng, lng)
+      maxLng = Math.max(maxLng, lng)
+      minLat = Math.min(minLat, lat)
+      maxLat = Math.max(maxLat, lat)
+    })
+    
+    const padding = 0.1
+    const width = maxLng - minLng || 0.01
+    const height = maxLat - minLat || 0.01
+    
+    // Scale to viewBox (200x120 with padding)
+    const viewWidth = 200
+    const viewHeight = 120
+    const scale = Math.min(
+      (viewWidth * (1 - padding * 2)) / width,
+      (viewHeight * (1 - padding * 2)) / height
+    )
+    
+    const offsetX = (viewWidth - width * scale) / 2
+    const offsetY = (viewHeight - height * scale) / 2
+    
+    // Build path - sample every Nth point for smoothness
+    const sampleRate = Math.max(1, Math.floor(coords.length / 100))
+    const points = coords
+      .filter((_, i) => i % sampleRate === 0 || i === coords.length - 1)
+      .map(([lng, lat]) => [
+        offsetX + (lng - minLng) * scale,
+        viewHeight - (offsetY + (lat - minLat) * scale) // Flip Y
+      ])
+    
+    if (points.length < 2) return null
+    
+    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+    
+    return {
+      d: pathD,
+      start: points[0],
+      end: points[points.length - 1]
+    }
+  }, [routeData])
+
   if (!summary) {
     return (
       <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
-        <p className="text-white/40">No trip data</p>
+        <p className="text-white/30 text-sm">No trip data</p>
       </div>
     )
   }
 
-  const severityLabels = {
-    1: 'Gentle',
-    2: 'Easy', 
-    3: 'Moderate',
-    4: 'Tight',
-    5: 'Sharp',
-    6: 'Hairpin'
-  }
-
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col">
-      {/* Header */}
-      <div className="p-6 pt-12 safe-top text-center">
-        <div className="text-4xl mb-2">🏁</div>
-        <h1 className="text-2xl font-bold text-white">Trip Complete</h1>
-        <p className="text-white/40 text-sm mt-1">Great drive!</p>
+      
+      {/* Route Visualization */}
+      <div className="flex-shrink-0 px-6 pt-12 pb-4 safe-top">
+        <div className="relative">
+          {/* Route SVG */}
+          <svg 
+            viewBox="0 0 200 120" 
+            className="w-full h-32"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {/* Glow effect */}
+            <defs>
+              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            
+            {routePath ? (
+              <>
+                {/* Route line glow */}
+                <path
+                  d={routePath.d}
+                  fill="none"
+                  stroke={modeColor}
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.3"
+                  filter="url(#glow)"
+                />
+                {/* Route line */}
+                <path
+                  d={routePath.d}
+                  fill="none"
+                  stroke={modeColor}
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {/* Start point */}
+                <circle
+                  cx={routePath.start[0]}
+                  cy={routePath.start[1]}
+                  r="4"
+                  fill="#0a0a0f"
+                  stroke="#22c55e"
+                  strokeWidth="2"
+                />
+                {/* End point */}
+                <circle
+                  cx={routePath.end[0]}
+                  cy={routePath.end[1]}
+                  r="4"
+                  fill="#0a0a0f"
+                  stroke={modeColor}
+                  strokeWidth="2"
+                />
+              </>
+            ) : (
+              <text x="100" y="60" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="12">
+                Route
+              </text>
+            )}
+          </svg>
+          
+          {/* Finish label */}
+          <div className="absolute top-2 right-0 flex items-center gap-2">
+            <span className="text-[10px] tracking-widest text-white/30">COMPLETE</span>
+            <div className="w-2 h-2 rounded-full" style={{ background: modeColor }} />
+          </div>
+        </div>
       </div>
 
-      {/* Main Stats */}
+      {/* Stats Grid */}
       <div className="flex-1 px-4 overflow-auto">
-        {/* Big numbers row */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <StatCard 
-            value={summary.distance.toFixed(1)} 
-            unit={summary.distanceUnit}
-            label="Distance"
-            color={modeColor}
-            large
-          />
-          <StatCard 
-            value={summary.durationFormatted} 
-            unit=""
-            label="Duration"
-            color={modeColor}
-            large
-          />
+        
+        {/* Primary Stats - Large */}
+        <div className="hud-glass rounded-2xl p-5 mb-3">
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-white/30 text-[10px] tracking-widest mb-1">DISTANCE</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold text-white">{summary.distance.toFixed(1)}</span>
+                <span className="text-white/40 text-sm">{summary.distanceUnit}</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-white/30 text-[10px] tracking-widest mb-1">TIME</div>
+              <div className="text-3xl font-bold text-white">{summary.durationFormatted}</div>
+            </div>
+          </div>
         </div>
 
-        {/* Speed stats */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <StatCard 
-            value={summary.avgSpeed} 
-            unit={summary.speedUnit}
-            label="Avg Speed"
-            color="#22c55e"
-          />
-          <StatCard 
-            value={summary.maxSpeed} 
-            unit={summary.speedUnit}
-            label="Max Speed"
-            color="#f97316"
-          />
+        {/* Secondary Stats */}
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="hud-glass rounded-xl p-3 text-center">
+            <div className="text-white/30 text-[9px] tracking-widest mb-1">AVG</div>
+            <div className="text-xl font-bold" style={{ color: modeColor }}>{summary.avgSpeed}</div>
+            <div className="text-white/30 text-[9px]">{summary.speedUnit}</div>
+          </div>
+          <div className="hud-glass rounded-xl p-3 text-center">
+            <div className="text-white/30 text-[9px] tracking-widest mb-1">MAX</div>
+            <div className="text-xl font-bold text-white">{summary.maxSpeed}</div>
+            <div className="text-white/30 text-[9px]">{summary.speedUnit}</div>
+          </div>
+          <div className="hud-glass rounded-xl p-3 text-center">
+            <div className="text-white/30 text-[9px] tracking-widest mb-1">CURVES</div>
+            <div className="text-xl font-bold" style={{ color: modeColor }}>{summary.curvesCompleted}</div>
+            <div className="text-white/30 text-[9px]">of {summary.totalCurves}</div>
+          </div>
         </div>
 
-        {/* Curve stats */}
-        <div className="bg-white/5 rounded-2xl p-4 mb-4">
-          <h3 className="text-white/40 text-xs tracking-wider mb-3">CURVES</h3>
-          
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-white/60">Completed</span>
-            <span className="text-white font-bold text-lg">
-              {summary.curvesCompleted} 
-              <span className="text-white/40 text-sm font-normal"> / {summary.totalCurves}</span>
-            </span>
-          </div>
-
-          {/* Progress bar */}
-          <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-3">
-            <div 
-              className="h-full rounded-full transition-all"
-              style={{ 
-                width: `${summary.totalCurves > 0 ? (summary.curvesCompleted / summary.totalCurves) * 100 : 0}%`,
-                background: modeColor
-              }}
-            />
-          </div>
-
-          {summary.sharpestCurve && (
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Sharpest Curve</span>
-              <div className="flex items-center gap-2">
+        {/* Sharpest Curve Badge */}
+        {summary.sharpestCurve && summary.sharpestCurve >= 3 && (
+          <div className="hud-glass rounded-xl p-3 mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div 
+                className="w-10 h-10 rounded-lg flex items-center justify-center"
+                style={{ 
+                  background: `${getSeverityColor(summary.sharpestCurve)}20`,
+                  border: `1px solid ${getSeverityColor(summary.sharpestCurve)}40`
+                }}
+              >
                 <span 
                   className="text-lg font-bold"
                   style={{ color: getSeverityColor(summary.sharpestCurve) }}
                 >
                   {summary.sharpestCurve}
                 </span>
-                <span className="text-white/40 text-sm">
-                  ({severityLabels[summary.sharpestCurve] || 'Unknown'})
-                </span>
+              </div>
+              <div>
+                <div className="text-white/30 text-[9px] tracking-widest">SHARPEST CURVE</div>
+                <div className="text-white/60 text-sm">{getSeverityLabel(summary.sharpestCurve)}</div>
               </div>
             </div>
-          )}
-        </div>
+            <svg 
+              width="20" height="20" viewBox="0 0 24 24" 
+              fill={getSeverityColor(summary.sharpestCurve)}
+            >
+              <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+            </svg>
+          </div>
+        )}
 
-        {/* Fun message based on performance */}
-        <div className="bg-gradient-to-r from-white/5 to-transparent rounded-2xl p-4 mb-4">
-          <p className="text-white/80 text-sm">
-            {getPerformanceMessage(summary)}
-          </p>
-        </div>
+        {/* Curve Progress */}
+        {summary.totalCurves > 0 && (
+          <div className="mb-3">
+            <div className="flex justify-between text-[10px] text-white/30 mb-1">
+              <span>CURVE PROGRESS</span>
+              <span>{Math.round((summary.curvesCompleted / summary.totalCurves) * 100)}%</span>
+            </div>
+            <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+              <div 
+                className="h-full rounded-full transition-all"
+                style={{ 
+                  width: `${(summary.curvesCompleted / summary.totalCurves) * 100}%`,
+                  background: `linear-gradient(90deg, ${modeColor}80, ${modeColor})`
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Bottom buttons */}
-      <div className="p-4 pb-8 safe-bottom space-y-2">
+      {/* Bottom Actions */}
+      <div className="p-4 pb-6 safe-bottom">
         <button
           onClick={closeTripSummary}
-          className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
-          style={{ background: modeColor }}
+          className="w-full py-4 rounded-xl font-semibold text-sm tracking-wider transition-all active:scale-[0.98]"
+          style={{ 
+            background: `linear-gradient(135deg, ${modeColor}, ${modeColor}cc)`,
+            boxShadow: `0 4px 20px ${modeColor}40`
+          }}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0"/>
-            <path d="M12 8v4l2 2"/>
-          </svg>
           DRIVE AGAIN
         </button>
         
         <button
           onClick={goToMenu}
-          className="w-full py-3 rounded-xl font-semibold text-sm tracking-wider bg-white/10 text-white/60"
+          className="w-full mt-2 py-3 rounded-xl text-sm tracking-wider text-white/40 active:text-white/60 transition-colors"
         >
           Back to Menu
         </button>
       </div>
+
+      <style>{`
+        .hud-glass {
+          background: linear-gradient(135deg, rgba(15,15,20,0.9) 0%, rgba(10,10,15,0.95) 100%);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+        .safe-top { padding-top: max(12px, env(safe-area-inset-top)); }
+        .safe-bottom { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+      `}</style>
     </div>
   )
 }
 
-// Stat card component
-function StatCard({ value, unit, label, color, large }) {
-  return (
-    <div className="bg-white/5 rounded-xl p-4 text-center">
-      <div className="flex items-baseline justify-center gap-1">
-        <span 
-          className={`font-bold ${large ? 'text-3xl' : 'text-2xl'}`}
-          style={{ color }}
-        >
-          {value}
-        </span>
-        {unit && (
-          <span className="text-white/40 text-sm">{unit}</span>
-        )}
-      </div>
-      <div className="text-white/40 text-xs tracking-wider mt-1">{label}</div>
-    </div>
-  )
-}
-
-// Get color for severity
+// Severity color
 function getSeverityColor(severity) {
   if (severity <= 2) return '#22c55e'
   if (severity <= 3) return '#84cc16'
@@ -177,25 +287,15 @@ function getSeverityColor(severity) {
   return '#ff3366'
 }
 
-// Generate fun message based on stats
-function getPerformanceMessage(summary) {
-  const { avgSpeed, maxSpeed, curvesCompleted, sharpestCurve } = summary
-  
-  if (curvesCompleted === 0) {
-    return "That was a smooth cruise! No major curves on this route."
+// Severity label
+function getSeverityLabel(severity) {
+  const labels = {
+    1: 'Gentle bend',
+    2: 'Easy curve', 
+    3: 'Moderate turn',
+    4: 'Tight corner',
+    5: 'Sharp turn',
+    6: 'Hairpin'
   }
-  
-  if (sharpestCurve >= 5) {
-    return `You conquered ${curvesCompleted} curves including some sharp severity ${sharpestCurve} turns! Nice handling! 🔥`
-  }
-  
-  if (maxSpeed > avgSpeed * 1.5) {
-    return `Good speed management! You knew when to push it and when to hold back. ${curvesCompleted} curves tackled.`
-  }
-  
-  if (curvesCompleted > 20) {
-    return `Impressive! ${curvesCompleted} curves navigated. That's some serious winding road action! 🛣️`
-  }
-  
-  return `Nice drive! ${curvesCompleted} curves completed with an average of ${avgSpeed} ${summary.speedUnit}.`
+  return labels[severity] || 'Curve'
 }
