@@ -311,7 +311,7 @@ async function preloadRouteAudio(curves) {
 }
 
 // Generate callout with speeds
-export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main') {
   if (!curve) return ''
 
   const getSpeed = (severity) => {
@@ -322,48 +322,155 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     return speed
   }
 
-  const parts = []
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
   const speed = getSpeed(curve.severity)
+  const isHard = curve.severity >= 4
+  const isVeryHard = curve.severity >= 5
+  
+  // PHASE: EARLY WARNING (far away, heads up)
+  if (phase === 'early') {
+    if (curve.isChicane) {
+      const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+      return `Chicane ahead, ${chicaneDir} entry`
+    }
+    
+    if (isVeryHard) {
+      return `Caution, ${dir} ${curve.severity} ahead${curve.modifier === 'HAIRPIN' ? ', hairpin' : ''}`
+    }
+    
+    return `${dir} ${curve.severity} ahead`
+  }
+  
+  // PHASE: FINAL WARNING (very close, action needed)
+  if (phase === 'final') {
+    if (curve.isChicane) {
+      return `Chicane now`
+    }
+    
+    if (isVeryHard) {
+      return `${dir} ${curve.severity} now, ${speed}`
+    }
+    
+    return `${dir} now`
+  }
+  
+  // PHASE: MAIN CALLOUT (primary announcement with full details)
+  const parts = []
+  
+  // Distance context (converted from meters to spoken form)
+  const distanceText = getDistanceText(curve.distance, speedUnit)
   
   if (curve.isChicane) {
-    const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+    const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
     const maxSev = Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity]))
-    parts.push(`Chicane ${dir} ${curve.severitySequence}, ${getSpeed(maxSev)} through`)
-  } else {
-    const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-    parts.push(`${dir} ${curve.severity}`)
+    const chicaneSpeed = getSpeed(maxSev)
     
+    if (distanceText) {
+      parts.push(`${distanceText}, chicane ${chicaneDir}`)
+    } else {
+      parts.push(`Chicane ${chicaneDir}`)
+    }
+    parts.push(`${curve.severitySequence}, ${chicaneSpeed} through`)
+  } else {
+    // Speed warning for hard curves
+    if (isVeryHard) {
+      parts.push(`Slow to ${speed}`)
+    } else if (isHard) {
+      parts.push(`Brake`)
+    }
+    
+    // Distance + direction + severity
+    if (distanceText) {
+      parts.push(`${distanceText}, ${dir} ${curve.severity}`)
+    } else {
+      parts.push(`${dir} ${curve.severity}`)
+    }
+    
+    // Modifier details
     if (curve.modifier) {
       switch (curve.modifier) {
-        case 'HAIRPIN': parts.push(`hairpin, ${getSpeed(6)}`); break
-        case 'SHARP': parts.push(`sharp, ${speed - 5}`); break
-        case 'LONG': parts.push(`long, hold ${speed}`); break
+        case 'HAIRPIN': 
+          parts.push(`hairpin, ${getSpeed(6)}`)
+          break
+        case 'SHARP': 
+          parts.push(`sharp, ${speed - 5}`)
+          break
+        case 'LONG': 
+          parts.push(`long, hold ${speed}`)
+          break
         case 'TIGHTENS':
-          parts.push(`tightens, ${speed} to ${getSpeed(Math.min(6, curve.severity + 1))}`)
+          parts.push(`tightens to ${getSpeed(Math.min(6, curve.severity + 1))}`)
           break
         case 'OPENS':
-          parts.push(`opens, ${speed} to ${getSpeed(Math.max(1, curve.severity - 1))}`)
+          parts.push(`opens to ${getSpeed(Math.max(1, curve.severity - 1))}`)
           break
-        default: parts.push(`, ${speed}`)
+        default: 
+          if (!isHard && !isVeryHard) parts.push(`${speed}`)
       }
-    } else {
-      parts.push(`, ${speed}`)
+    } else if (!isHard && !isVeryHard) {
+      parts.push(`${speed}`)
     }
   }
   
+  // Next curve info (sequence awareness)
   if (nextCurve && !curve.isChicane) {
     const dist = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
     const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
     const nextSpeed = getSpeed(nextCurve.severity)
     
     if (dist >= 0 && dist < 30) {
-      parts.push(`into ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
-    } else if (dist >= 0 && dist < 80) {
-      parts.push(`then ${nextDir} ${nextCurve.severity}, ${nextSpeed}`)
+      parts.push(`into ${nextDir} ${nextCurve.severity}`)
+    } else if (dist >= 0 && dist < 100) {
+      parts.push(`then ${nextDir} ${nextCurve.severity}`)
+    } else if (dist >= 0 && dist < 200) {
+      // Just mention there's more coming
+      parts.push(`more ahead`)
     }
   }
   
-  return parts.join(' ')
+  return parts.join(', ').replace(/, ,/g, ',')
+}
+
+// Convert distance to natural speech
+function getDistanceText(distanceMeters, speedUnit = 'mph') {
+  if (!distanceMeters || distanceMeters < 0) return ''
+  
+  if (speedUnit === 'kmh') {
+    // Metric
+    if (distanceMeters >= 500) {
+      return `In ${Math.round(distanceMeters / 100) * 100} meters`
+    } else if (distanceMeters >= 200) {
+      return `In ${Math.round(distanceMeters / 50) * 50} meters`
+    } else if (distanceMeters >= 100) {
+      return `In ${Math.round(distanceMeters / 25) * 25} meters`
+    }
+    return '' // Too close for distance callout
+  } else {
+    // Imperial - convert to feet, round nicely
+    const feet = distanceMeters * 3.28084
+    if (feet >= 1000) {
+      const tenths = Math.round(feet / 528) / 10 // Convert to tenths of a mile
+      if (tenths >= 0.2) {
+        return `In ${tenths} miles`
+      }
+      return `In ${Math.round(feet / 100) * 100} feet`
+    } else if (feet >= 300) {
+      return `In ${Math.round(feet / 100) * 100} feet`
+    } else if (feet >= 150) {
+      return `In ${Math.round(feet / 50) * 50} feet`
+    }
+    return '' // Too close for distance callout
+  }
+}
+
+// Generate early warning callout
+export function generateEarlyWarning(curve, mode = 'cruise') {
+  return generateCallout(curve, mode, 'mph', null, 'early')
+}
+
+// Generate final "NOW" callout
+export function generateFinalWarning(curve, mode = 'cruise') {
+  return generateCallout(curve, mode, 'mph', null, 'final')
 }
 
 export function generateShortCallout(curve, mode = 'cruise') {
