@@ -12,9 +12,10 @@ import SettingsPanel from './components/SettingsPanel'
 import VoiceIndicator from './components/VoiceIndicator'
 import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
+import TripSummary from './components/TripSummary'
 
-// Rally Co-Pilot App - v10
-// Technical sections + Fixed directions
+// Rally Co-Pilot App - v11
+// Trip tracking + Speed display
 
 export default function App() {
   const { speak } = useSpeech()
@@ -28,12 +29,16 @@ export default function App() {
     getDisplaySpeed,
     showRouteSelector,
     showRoutePreview,
+    showTripSummary,
     routeMode,
     routeData,
     goToMenu,
     goToPreview,
     goToDriving,
-    clearRouteData
+    clearRouteData,
+    position,
+    speed,
+    updateTripStats,
   } = useStore()
 
   const earlyWarningsRef = useRef(new Set())
@@ -42,6 +47,8 @@ export default function App() {
   const straightCalledRef = useRef(new Set())
   const lastCalloutTimeRef = useRef(0)
   const inTechnicalSectionRef = useRef(null)
+  const lastTripUpdateRef = useRef(0)
+  const announcedCurvesRef = useRef(new Set()) // Track curves we've passed for trip stats
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -58,7 +65,32 @@ export default function App() {
     straightCalledRef.current = new Set()
     inTechnicalSectionRef.current = null
     lastCalloutTimeRef.current = Date.now()
+    announcedCurvesRef.current = new Set()
   }, [routeMode, routeData])
+
+  // Update trip stats periodically
+  useEffect(() => {
+    if (!isRunning) return
+    
+    const now = Date.now()
+    // Update every 500ms
+    if (now - lastTripUpdateRef.current < 500) return
+    lastTripUpdateRef.current = now
+    
+    // Check if any curves were just passed (distance < 20m and we announced them)
+    let passedCurve = null
+    if (upcomingCurves.length > 0) {
+      const firstCurve = upcomingCurves[0]
+      if (firstCurve.distance < 20 && 
+          mainCalloutsRef.current.has(firstCurve.id) && 
+          !announcedCurvesRef.current.has(firstCurve.id)) {
+        passedCurve = firstCurve
+        announcedCurvesRef.current.add(firstCurve.id)
+      }
+    }
+    
+    updateTripStats(position, speed, passedCurve)
+  }, [isRunning, position, speed, upcomingCurves, updateTripStats])
 
   // Progressive Callout Logic with Technical Section support
   useEffect(() => {
@@ -252,6 +284,7 @@ export default function App() {
     finalWarningsRef.current = new Set()
     straightCalledRef.current = new Set()
     inTechnicalSectionRef.current = null
+    announcedCurvesRef.current = new Set()
     goToDriving()
   }
 
@@ -260,8 +293,13 @@ export default function App() {
     goToMenu()
   }
 
+  // SCREEN 1: Route Selector
   if (showRouteSelector) return <RouteSelector />
 
+  // SCREEN 2: Trip Summary (Strava-style)
+  if (showTripSummary) return <TripSummary />
+
+  // SCREEN 3: Route Preview
   if (showRoutePreview) {
     return (
       <RoutePreview 
@@ -271,6 +309,7 @@ export default function App() {
     )
   }
 
+  // SCREEN 4: Main Driving UI
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] overflow-hidden">
       <Map />
