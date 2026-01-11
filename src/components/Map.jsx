@@ -241,13 +241,17 @@ export default function Map() {
 
       // Always follow when running (unless user has manually dragged)
       if (isRunning && isFollowing) {
+        // Use flyTo for smoother animation with longer duration
         map.current.easeTo({
           center: position,
           bearing: heading || 0,
-          pitch: 65,
-          zoom: 16,
-          duration: 100,
-          easing: t => t
+          pitch: 60,
+          zoom: 16.5,
+          duration: 800,  // Longer duration for smoothness
+          easing: (t) => {
+            // Smooth easing function (ease-out cubic)
+            return 1 - Math.pow(1 - t, 3)
+          }
         })
       }
     }
