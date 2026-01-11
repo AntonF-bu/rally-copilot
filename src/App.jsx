@@ -208,9 +208,6 @@ export default function App() {
   // ================================
   
   useEffect(() => {
-    // Debug: Log why we might exit early
-    console.log(`🔍 Callout effect check: isRunning=${isRunning}, voiceEnabled=${settings.voiceEnabled}, curves=${upcomingCurves.length}, mode=${currentDrivingMode}`)
-    
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
@@ -227,20 +224,12 @@ export default function App() {
     const actualDist = nextCurve.actualDistance ?? distance
     const curveId = nextCurve.id
     
-    // Log on every check - include actual distance
-    console.log(`📊 Mode: ${currentDrivingMode} | Curve ${curveId}: dist=${Math.round(distance)}m actual=${Math.round(actualDist)}m | Early: ${Math.round(distances.early)}m | Main: ${Math.round(distances.main)}m | Announced: ${mainCalloutsRef.current.has(curveId)}`)
-    
-    // Respect minimum pause between callouts
-    // Scale minPause by simulation speed (at 4x speed, divide pause by 4)
+    // Respect minimum pause between callouts (scaled by simulation speed)
     const simulationSpeed = useStore.getState().simulationSpeed || 1
-    const effectiveMinPause = voiceParams.minPause / simulationSpeed
+    const effectiveMinPause = Math.max(500, voiceParams.minPause / simulationSpeed)
     
     const timeSinceLastCallout = now - lastCalloutTimeRef.current
     if (timeSinceLastCallout < effectiveMinPause) {
-      // Only log occasionally to reduce spam
-      if (Math.random() < 0.05) {
-        console.log(`⏳ Waiting: ${Math.round(timeSinceLastCallout)}ms < ${Math.round(effectiveMinPause)}ms (${voiceParams.minPause}/${simulationSpeed}x)`)
-      }
       return
     }
     
@@ -329,22 +318,14 @@ export default function App() {
       }
       
       if (callout) {
-        console.log(`🔊 Attempting to speak: "${callout}" for curve ${curveId}`)
-        console.log(`🔊 mainCalloutsRef BEFORE add: ${Array.from(mainCalloutsRef.current).join(', ')}`)
-        // Mark as announced BEFORE speaking to prevent double-calls
+        // Mark as announced BEFORE speaking
         mainCalloutsRef.current.add(curveId)
-        console.log(`🔊 mainCalloutsRef AFTER add: ${Array.from(mainCalloutsRef.current).join(', ')}`)
         setLastAnnouncedCurveId(curveId)
         lastCalloutTimeRef.current = now
         
-        // Fire and forget - don't await in useEffect
-        speak(callout, 'high').then(result => {
-          console.log(`🔊 Speak completed: ${result ? 'success' : 'failed'}`)
-        }).catch(err => {
-          console.error('🔊 Speak error:', err)
-        })
+        console.log(`🔊 Callout: "${callout}" (curve ${curveId})`)
         
-        console.log(`🔊 Main callout queued: ${callout}`)
+        speak(callout, 'high')
         
         if (settings.hapticFeedback && 'vibrate' in navigator) {
           const pattern = nextCurve.severity >= 5 ? [100, 50, 100] : [50]
