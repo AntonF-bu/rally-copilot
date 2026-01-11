@@ -119,22 +119,6 @@ export function useSimulation(enabled) {
     }
   }, [routeData?.coordinates, calculateSegments])
 
-  // Sync internal progress with external changes (from slider drag)
-  useEffect(() => {
-    // Subscribe to simulationProgress changes
-    const unsubscribe = useStore.subscribe(
-      (state) => state.simulationProgress,
-      (newProgress) => {
-        // Only sync if significantly different (slider was dragged)
-        if (Math.abs(newProgress - progressRef.current) > 0.02) {
-          progressRef.current = newProgress
-          console.log(`🎚️ Progress jumped to: ${Math.round(newProgress * 100)}%`)
-        }
-      }
-    )
-    return unsubscribe
-  }, [])
-
   // Main animation loop - REALISTIC DRIVING
   useEffect(() => {
     if (!enabled || !isRunning) {
@@ -156,6 +140,14 @@ export function useSimulation(enabled) {
       if (!lastTimeRef.current) lastTimeRef.current = timestamp
       const deltaMs = Math.min(timestamp - lastTimeRef.current, 100) // Cap delta to prevent jumps
       lastTimeRef.current = timestamp
+
+      // Sync with store progress (in case slider was dragged)
+      const storeProgress = useStore.getState().simulationProgress
+      if (Math.abs(storeProgress - progressRef.current) > 0.01) {
+        progressRef.current = storeProgress
+        // Reset last time to prevent jump
+        lastTimeRef.current = timestamp
+      }
 
       // Check if paused
       if (simulationPaused) {
