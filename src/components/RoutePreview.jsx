@@ -203,12 +203,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // NEW: Add census sleeve when map loads after character analysis
   useEffect(() => {
-    if (mapLoaded && routeCharacter.censusTracts?.length && sleeveLayerIdsRef.current.length === 0) {
+    if (mapLoaded && routeCharacter.censusTracts?.length > 0 && mapRef.current) {
+      console.log('🗺️ Adding census sleeve with', routeCharacter.censusTracts.length, 'tracts')
+      
+      // Remove old sleeve first
+      removeCensusSleeve(mapRef.current, sleeveLayerIdsRef.current)
+      
+      // Add new sleeve
       sleeveLayerIdsRef.current = addCensusSleeveAsCollection(
         mapRef.current,
         routeCharacter.censusTracts,
         'census-sleeve'
       )
+      
+      console.log('🗺️ Sleeve layers added:', sleeveLayerIdsRef.current)
     }
   }, [mapLoaded, routeCharacter.censusTracts])
 
