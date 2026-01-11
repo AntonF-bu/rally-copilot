@@ -354,7 +354,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const handleStart = async () => { await initAudio(); onStartNavigation() }
 
-  // Build SLEEVE as continuous segments with smooth color transitions
+  // Build SLEEVE as continuous segments - NO transitions, clean hard cuts
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
     if (!coords?.length) return []
     if (!characterSegments?.length) {
@@ -363,9 +363,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     const totalDist = routeData?.distance || 15000
     const segments = []
-    const transitionLength = 0.03 // 3% of route for color transition
     
-    characterSegments.forEach((seg, segIndex) => {
+    characterSegments.forEach((seg) => {
       const startProgress = Math.max(0, seg.startDistance / totalDist)
       const endProgress = Math.min(1, seg.endDistance / totalDist)
       const startIdx = Math.floor(startProgress * coords.length)
@@ -374,53 +373,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (endIdx > startIdx) {
         const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.spirited
         
-        // Check if there's a next segment for transition
-        const nextSeg = characterSegments[segIndex + 1]
-        const nextColors = nextSeg ? (CHARACTER_COLORS[nextSeg.character] || CHARACTER_COLORS.spirited) : null
-        
-        if (nextColors && segIndex < characterSegments.length - 1) {
-          // Split this segment: main part + transition part
-          const transitionStartIdx = Math.floor(endIdx - (coords.length * transitionLength))
-          
-          // Main segment (before transition)
-          if (transitionStartIdx > startIdx) {
-            segments.push({
-              coords: coords.slice(startIdx, transitionStartIdx + 1),
-              color: colors.primary,
-              character: seg.character,
-              isTransition: false
-            })
-          }
-          
-          // Transition segment - just 3 steps for smoother gradient
-          const transitionCoords = coords.slice(Math.max(startIdx, transitionStartIdx), endIdx + 1)
-          if (transitionCoords.length > 1) {
-            const steps = 3
-            for (let i = 0; i < steps; i++) {
-              const t = (i + 0.5) / steps // Center of each step
-              const blendedColor = interpolateColor(colors.primary, nextColors.primary, t)
-              const stepStart = Math.floor((i / steps) * (transitionCoords.length - 1))
-              const stepEnd = Math.floor(((i + 1) / steps) * (transitionCoords.length - 1))
-              const stepCoords = transitionCoords.slice(stepStart, stepEnd + 2) // +2 for overlap
-              if (stepCoords.length > 1) {
-                segments.push({
-                  coords: stepCoords,
-                  color: blendedColor,
-                  character: seg.character,
-                  isTransition: true
-                })
-              }
-            }
-          }
-        } else {
-          // No next segment, just add normally
-          segments.push({
-            coords: coords.slice(startIdx, endIdx + 1),
-            color: colors.primary,
-            character: seg.character,
-            isTransition: false
-          })
-        }
+        // Simple segment - no transition blending
+        segments.push({
+          coords: coords.slice(startIdx, endIdx + 1),
+          color: colors.primary,
+          character: seg.character
+        })
       }
     })
     
@@ -544,7 +502,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             paint: { 
               'line-color': seg.color, 
               'line-width': 40, 
-              'line-opacity': seg.isTransition ? 0.2 : 0.25  // Slightly less opacity on transitions
+              'line-opacity': 0.25
             } 
           })
         }
