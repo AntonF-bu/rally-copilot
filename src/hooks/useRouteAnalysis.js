@@ -5,7 +5,7 @@ import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWit
 
 // ================================
 // Route Analysis Hook
-// Manual reroute only - no auto rerouting
+// Manual reroute only - uses store for destination
 // ================================
 
 export function useRouteAnalysis() {
@@ -17,13 +17,13 @@ export function useRouteAnalysis() {
     routeData,
     setRouteData,
     setUpcomingCurves,
-    setActiveCurve
+    setActiveCurve,
+    setDestination
   } = useStore()
 
   const allCurvesRef = useRef([])
   const lastFetchPositionRef = useRef(null)
   const isFetchingRef = useRef(false)
-  const destinationRef = useRef(null)
 
   // Process route and detect curves
   const processRoute = useCallback((coordinates) => {
@@ -42,22 +42,22 @@ export function useRouteAnalysis() {
   // Manual reroute - call this from UI button
   const reroute = useCallback(async () => {
     const currentPosition = useStore.getState().position
-    const destination = destinationRef.current
+    const dest = useStore.getState().destination
     
     if (!currentPosition) {
       console.log('Cannot reroute: no current position')
       return false
     }
 
-    if (!destination) {
+    if (!dest) {
       console.log('Cannot reroute: no destination saved')
       return false
     }
 
-    console.log('🔄 Manual reroute from', currentPosition, 'to', destination.name)
+    console.log('🔄 Manual reroute from', currentPosition, 'to', dest.name)
 
     try {
-      const route = await getRoute(currentPosition, destination.coordinates)
+      const route = await getRoute(currentPosition, dest.coordinates)
       if (!route) {
         console.error('Reroute failed: could not get new route')
         return false
@@ -70,13 +70,12 @@ export function useRouteAnalysis() {
       setRouteData({
         coordinates: route.coordinates,
         curves,
-        destination: destination.name,
+        destination: dest.name,
         distance: route.distance,
         duration: route.duration,
         rerouted: true
       })
 
-      // Set initial upcoming curves
       if (curves.length > 0) {
         setUpcomingCurves(curves.slice(0, 5).map((c, i) => ({
           ...c,
@@ -111,11 +110,11 @@ export function useRouteAnalysis() {
 
       const destCoords = results[0].coordinates
 
-      // Save destination for manual rerouting
-      destinationRef.current = {
+      // Save destination for manual rerouting (in store)
+      setDestination({
         name: results[0].name,
         coordinates: destCoords
-      }
+      })
 
       const route = await getRoute(currentPosition, destCoords)
       if (!route) {
@@ -145,7 +144,7 @@ export function useRouteAnalysis() {
       console.error('Error initializing destination route:', error)
       return false
     }
-  }, [processRoute, setRouteData, setUpcomingCurves])
+  }, [processRoute, setRouteData, setUpcomingCurves, setDestination])
 
   // Initialize route from Google Maps import
   const initImportedRoute = useCallback(async (url) => {
@@ -183,7 +182,6 @@ export function useRouteAnalysis() {
           if (wp.coords) {
             waypoints.push(wp.coords)
           } else if (wp.name) {
-            // Check for "your location" type strings
             if (wp.name.toLowerCase().includes('your location') || 
                 wp.name.toLowerCase().includes('my location')) {
               if (currentPosition) {
@@ -200,28 +198,28 @@ export function useRouteAnalysis() {
         
         if (waypoints.length >= 2) {
           const lastWp = parsed.waypoints[parsed.waypoints.length - 1]
-          destinationRef.current = {
+          setDestination({
             name: lastWp.name || 'Destination',
             coordinates: waypoints[waypoints.length - 1]
-          }
+          })
         }
       }
       // Direct coordinates
       else if (parsed.coordinates && parsed.coordinates.length >= 2) {
         waypoints = parsed.coordinates
-        destinationRef.current = {
+        setDestination({
           name: 'Destination',
           coordinates: waypoints[waypoints.length - 1]
-        }
+        })
       }
       // Single coordinate, need origin
       else if (parsed.coordinates && parsed.coordinates.length === 1 && parsed.needsOrigin) {
         if (currentPosition) {
           waypoints = [currentPosition, parsed.coordinates[0]]
-          destinationRef.current = {
+          setDestination({
             name: 'Destination',
             coordinates: parsed.coordinates[0]
-          }
+          })
         }
       }
       // Origin coords + destination name
@@ -229,10 +227,10 @@ export function useRouteAnalysis() {
         const destResults = await geocodeAddress(parsed.destination)
         if (destResults?.length) {
           waypoints = [parsed.originCoordinates, destResults[0].coordinates]
-          destinationRef.current = {
+          setDestination({
             name: destResults[0].name,
             coordinates: destResults[0].coordinates
-          }
+          })
         }
       }
       // Both need geocoding
@@ -243,19 +241,19 @@ export function useRouteAnalysis() {
           
           if (originResults?.length && destResults?.length) {
             waypoints = [originResults[0].coordinates, destResults[0].coordinates]
-            destinationRef.current = {
+            setDestination({
               name: destResults[0].name,
               coordinates: destResults[0].coordinates
-            }
+            })
           }
         } else if (parsed.destination && currentPosition) {
           const destResults = await geocodeAddress(parsed.destination)
           if (destResults?.length) {
             waypoints = [currentPosition, destResults[0].coordinates]
-            destinationRef.current = {
+            setDestination({
               name: destResults[0].name,
               coordinates: destResults[0].coordinates
-            }
+            })
           }
         }
       }
@@ -295,7 +293,7 @@ export function useRouteAnalysis() {
       console.error('Error importing route:', error)
       return false
     }
-  }, [processRoute, setRouteData, setUpcomingCurves])
+  }, [processRoute, setRouteData, setUpcomingCurves, setDestination])
 
   // Look-ahead mode: fetch road ahead
   const fetchRoadAhead = useCallback(async () => {
@@ -374,7 +372,7 @@ export function useRouteAnalysis() {
     initImportedRoute,
     fetchRoadAhead,
     processRoute,
-    reroute // Manual reroute function
+    reroute
   }
 }
 
