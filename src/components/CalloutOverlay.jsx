@@ -1,10 +1,11 @@
 import { useMemo, useState, useEffect } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
+import { getBehaviorForCurve, CHARACTER_COLORS } from '../services/zoneService'
 
 // ================================
-// Racing HUD - v7
-// Fixed chicane directions + Technical sections
+// Racing HUD - v8
+// With route character indicator
 // ================================
 
 export default function CalloutOverlay() {
@@ -20,6 +21,7 @@ export default function CalloutOverlay() {
     simulationProgress,
     routeData,
     routeMode,
+    routeZones, // Character segments
     gpsAccuracy,
     altitude,
     speed
@@ -47,6 +49,18 @@ export default function CalloutOverlay() {
   const curve = activeCurve || upcomingCurves[0]
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+
+  // Get current route character based on next curve position
+  const currentCharacter = useMemo(() => {
+    if (!routeZones?.length || !curve) return null
+    const curveDistance = curve.distanceFromStart || 0
+    const segment = routeZones.find(s => 
+      curveDistance >= s.startDistance && curveDistance <= s.endDistance
+    )
+    return segment?.character || null
+  }, [routeZones, curve])
+  
+  const characterColors = currentCharacter ? CHARACTER_COLORS[currentCharacter] : null
 
   const getBrakingZone = (severity) => {
     if (severity <= 2) return { show: false, start: 0 }
@@ -129,7 +143,16 @@ export default function CalloutOverlay() {
               <span className="text-white/50 text-sm">
                 {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
               </span>
-              <span className="text-white/30 text-xs">• No curves ahead</span>
+              {/* Character badge */}
+              {characterColors && (
+                <span 
+                  className="px-2 py-0.5 rounded text-[9px] font-bold"
+                  style={{ background: `${characterColors.primary}25`, color: characterColors.primary }}
+                >
+                  {characterColors.label}
+                </span>
+              )}
+              {!characterColors && <span className="text-white/30 text-xs">• No curves ahead</span>}
             </div>
             {settings.showSpeedometer !== false && (
               <div className="text-right">
