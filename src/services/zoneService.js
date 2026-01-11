@@ -407,22 +407,47 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
     
     console.log(`  📍 Checking TRANSIT segment ${seg.id} (${seg.startDistance.toFixed(0)}m - ${seg.endDistance.toFixed(0)}m): found ${segmentCurves.length} curves`)
     
-    // Check for sharp curves (including chicanes with high severity)
+    // Log first curve to see structure
+    if (segmentCurves.length > 0) {
+      console.log('    Sample curve structure:', JSON.stringify(segmentCurves[0], null, 2).slice(0, 500))
+    }
+    
+    // Check for sharp curves - check ALL possible severity indicators
     const hasSharpCurve = segmentCurves.some(c => {
-      // Regular curve
-      if (c.severity >= 4) {
-        console.log(`    🚨 Sharp curve: severity ${c.severity} at ${c.distanceFromStart}m`)
-        return true
-      }
-      // Chicane - check severity sequence
-      if (c.isChicane && c.severitySequence) {
-        const severities = c.severitySequence.split('-').map(Number)
-        const maxSev = Math.max(...severities)
-        if (maxSev >= 4) {
-          console.log(`    🚨 Sharp chicane: ${c.severitySequence} (max ${maxSev}) at ${c.distanceFromStart}m`)
-          return true
+      // Get max severity from any possible property
+      let maxSeverity = c.severity || 0
+      
+      // Check severitySequence (e.g., "3-6-5")
+      if (c.severitySequence) {
+        const severities = String(c.severitySequence).split('-').map(Number).filter(n => !isNaN(n))
+        if (severities.length > 0) {
+          maxSeverity = Math.max(maxSeverity, ...severities)
         }
       }
+      
+      // Check sequence property (alternative name)
+      if (c.sequence) {
+        const severities = String(c.sequence).split('-').map(Number).filter(n => !isNaN(n))
+        if (severities.length > 0) {
+          maxSeverity = Math.max(maxSeverity, ...severities)
+        }
+      }
+      
+      // Check severities array
+      if (Array.isArray(c.severities)) {
+        maxSeverity = Math.max(maxSeverity, ...c.severities)
+      }
+      
+      // Check maxSeverity property directly
+      if (c.maxSeverity) {
+        maxSeverity = Math.max(maxSeverity, c.maxSeverity)
+      }
+      
+      if (maxSeverity >= 4) {
+        console.log(`    🚨 Sharp curve found: maxSeverity=${maxSeverity}, severity=${c.severity}, severitySequence=${c.severitySequence}, isChicane=${c.isChicane}`)
+        return true
+      }
+      
       return false
     })
     
