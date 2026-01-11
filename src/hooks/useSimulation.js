@@ -194,27 +194,22 @@ export function useSimulation(enabled) {
       setHeading(heading)
 
       // Find upcoming curves and calculate distances
-      // Calculate actual distance (can be negative if we've passed it)
-      const curvesWithActualDistance = curves.map(curve => {
-        const actualDistance = (curve.distanceFromStart || 0) - currentDistanceAlong
-        return {
-          ...curve,
-          distance: Math.max(0, actualDistance), // Display distance (never negative)
-          actualDistance // Keep actual for filtering
-        }
-      })
+      const curvesWithActualDistance = curves
+        .filter(curve => (curve.distanceFromStart || 0) > 50) // Skip curves at very start of route
+        .map(curve => {
+          const actualDistance = (curve.distanceFromStart || 0) - currentDistanceAlong
+          return {
+            ...curve,
+            distance: Math.max(0, actualDistance),
+            actualDistance
+          }
+        })
       
-      // Only include curves ahead of us (actualDistance > -20 means we haven't fully passed)
+      // Only include curves ahead of us (actualDistance > -30 means we haven't fully passed)
       const upcomingCurvesWithDist = curvesWithActualDistance
-        .filter(c => c.actualDistance > -20 && c.actualDistance < 2000)
-        .sort((a, b) => a.actualDistance - b.actualDistance) // Sort by actual distance
+        .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
+        .sort((a, b) => a.actualDistance - b.actualDistance)
         .slice(0, 5)
-
-      // Debug: Log current position and first curve
-      if (Math.random() < 0.01) {
-        const firstCurve = curvesWithActualDistance.find(c => c.id === 1)
-        console.log(`📍 Position: ${Math.round(currentDistanceAlong)}m along route | Curve 1 distanceFromStart: ${firstCurve?.distanceFromStart}m | actual: ${Math.round(firstCurve?.actualDistance || 0)}m`)
-      }
 
       setUpcomingCurves(upcomingCurvesWithDist)
 
