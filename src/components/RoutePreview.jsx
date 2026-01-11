@@ -361,21 +361,33 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       return [{ coords, color: CHARACTER_COLORS.spirited.primary, character: 'spirited' }]
     }
     
-    const totalDist = routeData?.distance || 15000
     const segments = []
     
     characterSegments.forEach((seg) => {
-      const startProgress = Math.max(0, seg.startDistance / totalDist)
-      const endProgress = Math.min(1, seg.endDistance / totalDist)
-      const startIdx = Math.floor(startProgress * coords.length)
-      const endIdx = Math.min(Math.ceil(endProgress * coords.length), coords.length)
+      // Use the pre-computed coordinates if available
+      // Otherwise fall back to index-based slicing
+      let segCoords
       
-      if (endIdx > startIdx) {
+      if (seg.coordinates?.length > 1) {
+        // Segment already has coordinates from zoneService
+        segCoords = seg.coordinates
+      } else if (seg.startIndex !== undefined && seg.endIndex !== undefined) {
+        // Use indices directly
+        segCoords = coords.slice(seg.startIndex, seg.endIndex + 1)
+      } else {
+        // Fallback to distance-based calculation
+        const totalDist = routeData?.distance || 15000
+        const startProgress = Math.max(0, seg.startDistance / totalDist)
+        const endProgress = Math.min(1, seg.endDistance / totalDist)
+        const startIdx = Math.floor(startProgress * coords.length)
+        const endIdx = Math.min(Math.ceil(endProgress * coords.length), coords.length)
+        segCoords = coords.slice(startIdx, endIdx + 1)
+      }
+      
+      if (segCoords?.length > 1) {
         const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.spirited
-        
-        // Simple segment - no transition blending
         segments.push({
-          coords: coords.slice(startIdx, endIdx + 1),
+          coords: segCoords,
           color: colors.primary,
           character: seg.character
         })
