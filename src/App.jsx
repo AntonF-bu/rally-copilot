@@ -192,7 +192,9 @@ export default function App() {
 
   // Handle starting navigation from preview
   const handleStartNavigation = () => {
-    announcedCurvesRef.current = new Set()
+    earlyWarningsRef.current = new Set()
+    mainCalloutsRef.current = new Set()
+    finalWarningsRef.current = new Set()
     goToDriving()
   }
 
