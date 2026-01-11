@@ -67,6 +67,7 @@ const DENSITY_THRESHOLDS = {
 /**
  * Fetch census tract data for a route corridor
  * Called ONCE when route is loaded, returns cached tract data
+ * Uses our API proxy to avoid CORS issues
  */
 export async function fetchCensusCorridorData(routeCoordinates) {
   if (!routeCoordinates?.length || routeCoordinates.length < 2) {
@@ -77,31 +78,30 @@ export async function fetchCensusCorridorData(routeCoordinates) {
   console.log('🏛️ Fetching Census corridor data...')
 
   try {
-    // Step 1: Get tract geometries that intersect route buffer
-    const tractGeometries = await fetchTractGeometries(routeCoordinates)
-    
-    if (!tractGeometries.length) {
+    // Use our API proxy to fetch census data (avoids CORS)
+    const response = await fetch('/api/census', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coordinates: routeCoordinates })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || `API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+
+    if (!data.success || !data.tracts?.length) {
       console.warn('⚠️ No census tracts found for route')
       return { tracts: [], success: false }
     }
 
-    console.log(`  Found ${tractGeometries.length} census tracts`)
-
-    // Step 2: Get population data for those tracts
-    const tractsWithPopulation = await fetchTractPopulations(tractGeometries)
-    
-    // Step 3: Calculate density for each tract
-    const tractsWithDensity = tractsWithPopulation.map(tract => ({
-      ...tract,
-      density: calculateDensity(tract.population, tract.areaLand),
-      densityCategory: categorizeDensity(calculateDensity(tract.population, tract.areaLand))
-    }))
-
-    console.log('✅ Census data loaded:', 
-      tractsWithDensity.map(t => `${t.geoid.slice(-4)}:${t.densityCategory}`).join(', '))
+    console.log(`✅ Census data loaded: ${data.tracts.length} tracts`)
+    console.log('  ', data.tracts.map(t => `${t.geoid?.slice(-4)}:${t.densityCategory}`).join(', '))
 
     return { 
-      tracts: tractsWithDensity, 
+      tracts: data.tracts, 
       success: true 
     }
 
