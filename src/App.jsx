@@ -62,7 +62,23 @@ export default function App() {
 
   // Progressive Callout Logic
   useEffect(() => {
+    // Always log state for debugging
+    console.log('🔊 Callout check:', {
+      isRunning,
+      voiceEnabled: settings.voiceEnabled,
+      curvesCount: upcomingCurves.length,
+      nextCurve: upcomingCurves[0] ? {
+        id: upcomingCurves[0].id,
+        distance: upcomingCurves[0].distance,
+        severity: upcomingCurves[0].severity
+      } : null,
+      currentSpeed,
+      earlySet: Array.from(earlyWarningsRef.current),
+      mainSet: Array.from(mainCalloutsRef.current)
+    })
+
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
+      console.log('🔊 Skipping - isRunning:', isRunning, 'voiceEnabled:', settings.voiceEnabled, 'curves:', upcomingCurves.length)
       return
     }
 
@@ -70,6 +86,7 @@ export default function App() {
     const MIN_CALLOUT_INTERVAL = 1500 // Reduced for progressive warnings
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
+      console.log('🔊 Skipping - too soon, wait', MIN_CALLOUT_INTERVAL - (now - lastCalloutTimeRef.current), 'ms')
       return
     }
 
@@ -84,6 +101,8 @@ export default function App() {
     const mainDistance = Math.max(200, speedMps * 5)      // ~5 seconds out  
     const finalDistance = Math.max(50, speedMps * 1.5)    // ~1.5 seconds out
 
+    console.log('🔊 Distances:', { distance, earlyDistance, mainDistance, finalDistance, speedMps })
+
     const isHardCurve = nextCurve.severity >= 4
     const curveId = nextCurve.id
 
@@ -93,7 +112,7 @@ export default function App() {
         distance > mainDistance &&
         !earlyWarningsRef.current.has(curveId)) {
       
-      const callout = generateEarlyWarning(nextCurve, mode)
+      const callout = generateEarlyWarning(nextCurve, mode, settings.speedUnit)
       console.log('🔊 EARLY:', callout)
       speak(callout, 'normal')
       
@@ -139,7 +158,7 @@ export default function App() {
         mainCalloutsRef.current.has(curveId) &&
         !finalWarningsRef.current.has(curveId)) {
       
-      const callout = generateFinalWarning(nextCurve, mode)
+      const callout = generateFinalWarning(nextCurve, mode, settings.speedUnit)
       console.log('🔊 FINAL:', callout)
       speak(callout, 'high')
       
