@@ -4,6 +4,7 @@ import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useRouteAnalysis } from './hooks/useRouteAnalysis'
 import { useSpeech, generateCallout, generateEarlyWarning, generateFinalWarning, generateStraightCallout, generateInSectionCallout } from './hooks/useSpeech'
+import { getBehaviorForCurve, shouldAnnounceCurve, CHARACTER_BEHAVIORS } from './services/zoneService'
 
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
@@ -15,8 +16,8 @@ import RoutePreview from './components/RoutePreview'
 import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 
-// Rally Co-Pilot App - v12
-// With Route Editor + Zones
+// Rally Co-Pilot App - v13
+// With smart route character-based callouts
 
 export default function App() {
   const { speak } = useSpeech()
@@ -33,6 +34,7 @@ export default function App() {
     showTripSummary,
     routeMode,
     routeData,
+    routeZones, // Character segments
     goToMenu,
     goToPreview,
     goToDriving,
@@ -49,10 +51,7 @@ export default function App() {
   const lastCalloutTimeRef = useRef(0)
   const inTechnicalSectionRef = useRef(null)
   const lastTripUpdateRef = useRef(0)
-  const announcedCurvesRef = useRef(new Set())
-  
-  // Route Editor state (local to App since it's a temporary screen)
-  const [showEditor, setShowEditor] = useState(false)
+  const announcedCurvesRef = useRef(new Set()) // Track curves we've passed for trip stats
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -61,19 +60,6 @@ export default function App() {
 
   const currentSpeed = getDisplaySpeed()
 
-  // Update trip stats periodically
-  useEffect(() => {
-    if (!isRunning) return
-    
-    const now = Date.now()
-    if (now - lastTripUpdateRef.current < 1000) return
-    lastTripUpdateRef.current = now
-    
-    if (position && speed !== undefined) {
-      updateTripStats(position, speed)
-    }
-  }, [isRunning, position, speed, updateTripStats])
-
   // Reset callout tracking when route changes
   useEffect(() => {
     earlyWarningsRef.current = new Set()
@@ -81,41 +67,111 @@ export default function App() {
     finalWarningsRef.current = new Set()
     straightCalledRef.current = new Set()
     inTechnicalSectionRef.current = null
-    announcedCurvesRef.current = new Set()
     lastCalloutTimeRef.current = Date.now()
+    announcedCurvesRef.current = new Set()
   }, [routeMode, routeData])
 
-  // Progressive Callout Logic
+  // Update trip stats periodically
+  useEffect(() => {
+    if (!isRunning) return
+    
+    const now = Date.now()
+    // Update every 500ms
+    if (now - lastTripUpdateRef.current < 500) return
+    lastTripUpdateRef.current = now
+    
+    // Check if any curves were just passed (distance < 20m and we announced them)
+    let passedCurve = null
+    if (upcomingCurves.length > 0) {
+      const firstCurve = upcomingCurves[0]
+      if (firstCurve.distance < 20 && 
+          mainCalloutsRef.current.has(firstCurve.id) && 
+          !announcedCurvesRef.current.has(firstCurve.id)) {
+        passedCurve = firstCurve
+        announcedCurvesRef.current.add(firstCurve.id)
+      }
+    }
+    
+    updateTripStats(position, speed, passedCurve)
+  }, [isRunning, position, speed, upcomingCurves, updateTripStats])
+
+  // Progressive Callout Logic with Route Character support
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) return
 
     const now = Date.now()
-    const MIN_CALLOUT_INTERVAL = 1200
+    const MIN_CALLOUT_INTERVAL = 1000
+    
+    // Get speed unit for voice callouts
+    const speedUnit = settings.units === 'metric' ? 'kmh' : 'mph'
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) return
 
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
+    
+    // Get behavior for this curve based on route character
+    const behavior = getBehaviorForCurve(routeZones, nextCurve)
+    
+    // Check if curve should be announced based on character behavior
+    if (!shouldAnnounceCurve(routeZones, nextCurve)) {
+      // Still allow chicanes through if they have any severity 3+ curve
+      if (nextCurve.isChicane) {
+        const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
+        const maxSev = Math.max(...severities)
+        if (maxSev < behavior.minSeverity) return
+      } else {
+        return // Skip this curve - below character threshold
+      }
+    }
 
     const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 8)
     const distance = nextCurve.distance
     
-    const earlyDistance = Math.max(400, speedMps * 10)
-    const mainDistance = Math.max(200, speedMps * 5)
-    const finalDistance = Math.max(50, speedMps * 1.5)
+    // Tighter timing - announce closer to the curve
+    const earlyDistance = Math.max(350, speedMps * 8)
+    const mainDistance = Math.max(150, speedMps * 4)
+    const finalDistance = Math.max(40, speedMps * 1.2)
 
     const isHardCurve = nextCurve.severity >= 4
     const curveId = nextCurve.id
 
+    // Handle technical sections
+    if (nextCurve.isTechnicalSection) {
+      // Announce entry to technical section
+      if (distance <= mainDistance && !mainCalloutsRef.current.has(curveId)) {
+        const callout = generateCallout(nextCurve, mode, speedUnit, null, 'main')
+        speak(callout, 'high')
+        mainCalloutsRef.current.add(curveId)
+        setLastAnnouncedCurveId(curveId)
+        lastCalloutTimeRef.current = now
+        inTechnicalSectionRef.current = nextCurve
+        
+        if (settings.hapticFeedback && 'vibrate' in navigator) {
+          navigator.vibrate([100, 50, 100])
+        }
+        return
+      }
+      
+      // Final warning for technical section
+      if (distance <= finalDistance && !finalWarningsRef.current.has(curveId) && mainCalloutsRef.current.has(curveId)) {
+        const callout = generateFinalWarning(nextCurve, mode, speedUnit)
+        speak(callout, 'high')
+        finalWarningsRef.current.add(curveId)
+        lastCalloutTimeRef.current = now
+        return
+      }
+    }
+
+    // Regular curve callouts
     // EARLY WARNING
     if (isHardCurve && 
         distance <= earlyDistance && 
         distance > mainDistance &&
         !earlyWarningsRef.current.has(curveId)) {
       
-      const callout = generateEarlyWarning(nextCurve, mode, settings.units === 'metric' ? 'kmh' : 'mph')
+      const callout = generateEarlyWarning(nextCurve, mode, speedUnit)
       speak(callout, 'normal')
-      
       earlyWarningsRef.current.add(curveId)
       lastCalloutTimeRef.current = now
       return
@@ -129,19 +185,30 @@ export default function App() {
       const secondCurve = upcomingCurves[1]
       let includeSecond = null
       
-      if (secondCurve && !secondCurve.isChicane) {
-        const distanceToSecond = secondCurve.distanceFromStart - (nextCurve.distanceFromStart + nextCurve.length)
-        if (distanceToSecond < 150 && distanceToSecond >= 0) {
+      // Check if second curve is close enough to include in callout
+      if (secondCurve && !secondCurve.isChicane && !secondCurve.isTechnicalSection) {
+        // Use the distance from upcoming curves (already calculated relative to position)
+        const gapToSecond = secondCurve.distance - distance
+        
+        // If second curve is within 200m of first, include it
+        if (gapToSecond < 200 && gapToSecond > 0) {
           includeSecond = secondCurve
+          console.log(`🔊 Including close curve: ${secondCurve.direction} ${secondCurve.severity} (gap: ${Math.round(gapToSecond)}m)`)
         }
       }
       
-      const callout = generateCallout(nextCurve, mode, settings.units === 'metric' ? 'kmh' : 'mph', includeSecond, 'main')
+      const callout = generateCallout(nextCurve, mode, speedUnit, includeSecond, 'main')
       speak(callout, 'high')
       
       mainCalloutsRef.current.add(curveId)
       setLastAnnouncedCurveId(curveId)
       lastCalloutTimeRef.current = now
+      
+      // IMPORTANT: If we included the second curve in the callout, mark it as announced too
+      if (includeSecond) {
+        mainCalloutsRef.current.add(includeSecond.id)
+        console.log(`🔊 Marked curve ${includeSecond.id} as announced (included in combo callout)`)
+      }
 
       if (settings.hapticFeedback && 'vibrate' in navigator) {
         const pattern = nextCurve.severity >= 5 ? [100, 50, 100] : [50]
@@ -157,7 +224,7 @@ export default function App() {
         mainCalloutsRef.current.has(curveId) &&
         !finalWarningsRef.current.has(curveId)) {
       
-      const callout = generateFinalWarning(nextCurve, mode, settings.units === 'metric' ? 'kmh' : 'mph')
+      const callout = generateFinalWarning(nextCurve, mode, speedUnit)
       speak(callout, 'high')
       
       finalWarningsRef.current.add(curveId)
@@ -169,7 +236,7 @@ export default function App() {
       return
     }
 
-    // SECOND CURVE
+    // Check second curve
     const secondCurve = upcomingCurves[1]
     if (secondCurve && 
         mainCalloutsRef.current.has(curveId) &&
@@ -179,7 +246,7 @@ export default function App() {
       const secondMainDistance = Math.max(200, speedMps * 5)
       
       if (secondDistance <= secondMainDistance && secondDistance > 50) {
-        const callout = generateCallout(secondCurve, mode, settings.units === 'metric' ? 'kmh' : 'mph', upcomingCurves[2], 'main')
+        const callout = generateCallout(secondCurve, mode, speedUnit, upcomingCurves[2], 'main')
         speak(callout, 'high')
         
         mainCalloutsRef.current.add(secondCurve.id)
@@ -189,16 +256,9 @@ export default function App() {
       }
     }
 
-    // STRAIGHT SECTION
+    // STRAIGHT SECTION CALLOUTS
     if (distance > 600 && !straightCalledRef.current.has(`straight-${curveId}`)) {
-      const nextCharacter = nextCurve ? getCurveCharacter(nextCurve) : ''
-      const nextDir = nextCurve?.direction === 'LEFT' ? 'left' : 'right'
-      const distText = getDistanceText(distance, settings.units === 'metric' ? 'kmh' : 'mph')
-      
-      const callout = nextCurve 
-        ? `Clear ahead. ${nextCharacter} ${nextDir} in ${distText}.`
-        : `Clear ahead for ${distText}.`
-      
+      const callout = generateStraightCallout(distance, mode, speedUnit, nextCurve)
       speak(callout, 'normal')
       straightCalledRef.current.add(`straight-${curveId}`)
       lastCalloutTimeRef.current = now
@@ -206,7 +266,7 @@ export default function App() {
 
   }, [isRunning, upcomingCurves, currentSpeed, mode, settings, setLastAnnouncedCurveId, speak])
 
-  // Cleanup passed curves
+  // Clear old curve warnings when passed
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
@@ -239,16 +299,20 @@ export default function App() {
     goToMenu()
   }
 
+  // Route Editor state (local to App since it's a temporary screen)
+  const [showEditor, setShowEditor] = useState(false)
+  
   const handleEditRoute = () => setShowEditor(true)
   
   const handleSaveEdits = (editedRoute) => {
+    // Route is already updated in store via editor actions
     setShowEditor(false)
   }
 
   // SCREEN 1: Route Selector
   if (showRouteSelector) return <RouteSelector />
 
-  // SCREEN 2: Trip Summary
+  // SCREEN 2: Trip Summary (Strava-style)
   if (showTripSummary) return <TripSummary />
 
   // SCREEN 3: Route Editor
@@ -282,42 +346,4 @@ export default function App() {
       <SettingsPanel />
     </div>
   )
-}
-
-// Helper functions
-function getDistanceText(distanceMeters, speedUnit = 'mph') {
-  if (!distanceMeters || distanceMeters < 0) return 'ahead'
-  
-  if (speedUnit === 'kmh') {
-    if (distanceMeters >= 1000) {
-      const km = Math.round(distanceMeters / 100) / 10
-      return `${km} kilometers`
-    } else if (distanceMeters >= 200) {
-      return `${Math.round(distanceMeters / 50) * 50} meters`
-    }
-    return `${Math.round(distanceMeters)} meters`
-  } else {
-    const feet = distanceMeters * 3.28084
-    if (feet >= 2640) {
-      const miles = Math.round(feet / 528) / 10
-      return `${miles} miles`
-    } else if (feet >= 1000) {
-      return `${Math.round(feet / 100) * 100} feet`
-    }
-    return `${Math.round(feet / 50) * 50} feet`
-  }
-}
-
-function getCurveCharacter(curve) {
-  if (!curve) return ''
-  const severity = curve.severity
-  const length = curve.length || 0
-  
-  if (severity <= 2 && length > 150) return 'sweeping'
-  if (severity <= 1) return 'gentle'
-  if (severity === 2) return 'easy'
-  if (severity === 3) return 'moderate'
-  if (severity === 4) return 'tight'
-  if (severity === 5) return 'sharp'
-  return 'very sharp'
 }
