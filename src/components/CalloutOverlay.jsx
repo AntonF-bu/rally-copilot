@@ -1,10 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Racing HUD - v5
-// Fixed display and positioning
+// Racing HUD - v6
+// With status indicators
 // ================================
 
 export default function CalloutOverlay() {
@@ -17,8 +17,28 @@ export default function CalloutOverlay() {
     getRecommendedSpeed, 
     simulationProgress,
     routeData,
-    routeMode
+    routeMode,
+    gpsAccuracy,
+    altitude,
+    speed
   } = useStore()
+
+  const [isOnline, setIsOnline] = useState(true)
+
+  // Monitor network status
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    setIsOnline(navigator.onLine)
+    
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   const curve = activeCurve || upcomingCurves[0]
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
@@ -32,57 +52,69 @@ export default function CalloutOverlay() {
     return { show: true, start: 40 }
   }
 
-  // Generate elevation data
-  const { elevationData, totalElevation, currentElevation, elevationPosition } = useMemo(() => {
-    const coords = routeData?.coordinates || []
-    const points = []
+  // Current elevation from GPS (convert meters to feet)
+  const currentElevationFt = altitude !== null ? Math.round(altitude * 3.28084) : null
+
+  // Generate simple elevation profile for route (estimated from start/end if no real data)
+  const { elevationData, totalElevation, elevationPosition } = useMemo(() => {
     const numPoints = 20
+    const points = []
     
-    let minElev = Infinity
-    let maxElev = -Infinity
+    // If we have real altitude, use it as reference
+    const baseElev = altitude !== null ? altitude : 50 // default 50m if no GPS
     
-    if (coords.length > 0) {
-      for (let i = 0; i < numPoints; i++) {
-        const idx = Math.floor((i / numPoints) * coords.length)
-        const coord = coords[Math.min(idx, coords.length - 1)]
-        const elev = 800 + Math.sin(coord[0] * 100) * 150 + Math.cos(coord[1] * 80) * 100
-        points.push(elev)
-        minElev = Math.min(minElev, elev)
-        maxElev = Math.max(maxElev, elev)
-      }
-    } else {
-      for (let i = 0; i < numPoints; i++) {
-        const elev = 800 + Math.sin(i * 0.5) * 100
-        points.push(elev)
-        minElev = Math.min(minElev, elev)
-        maxElev = Math.max(maxElev, elev)
-      }
+    // Generate a simple profile (in real app, would fetch from Mapbox Terrain API)
+    for (let i = 0; i < numPoints; i++) {
+      // Simple variation around current altitude
+      const variation = Math.sin(i * 0.5) * 20 + Math.cos(i * 0.3) * 10
+      points.push(baseElev + variation)
     }
     
+    const minElev = Math.min(...points)
+    const maxElev = Math.max(...points)
     const pos = Math.min(Math.floor(simulationProgress * numPoints), numPoints - 1)
-    const currentElev = points[pos] || points[0]
     
     return {
       elevationData: points,
-      totalElevation: Math.round(maxElev - minElev),
-      currentElevation: Math.round(currentElev),
+      totalElevation: Math.round((maxElev - minElev) * 3.28084), // to feet
       elevationPosition: pos
     }
-  }, [routeData, simulationProgress])
+  }, [altitude, simulationProgress])
 
   if (!isRunning) return null
+
+  // Status warnings
+  const hasGpsIssue = routeMode !== 'demo' && gpsAccuracy && gpsAccuracy > 30
+  const hasNetworkIssue = !isOnline
 
   // Minimal HUD when no curves ahead
   if (!curve) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        {/* Status Warnings */}
+        {(hasGpsIssue || hasNetworkIssue) && (
+          <StatusWarnings hasGpsIssue={hasGpsIssue} hasNetworkIssue={hasNetworkIssue} gpsAccuracy={gpsAccuracy} />
+        )}
+        
         <div className="hud-glass rounded-2xl px-4 py-3">
-          <div className="flex items-center justify-center gap-3">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            <span className="text-white/50 text-sm">
-              {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
-            </span>
-            <span className="text-white/30 text-xs">• No curves ahead</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <span className="text-white/50 text-sm">
+                {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
+              </span>
+              <span className="text-white/30 text-xs">• No curves ahead</span>
+            </div>
+            
+            {/* Current Speed */}
+            <div className="text-right">
+              <span className="text-2xl font-bold" style={{ color: modeColor }}>
+                {Math.round(speed || 0)}
+              </span>
+              <span className="text-xs text-white/40 ml-1">
+                {settings.speedUnit?.toUpperCase() || 'MPH'}
+              </span>
+            </div>
           </div>
         </div>
         
@@ -90,7 +122,7 @@ export default function CalloutOverlay() {
         <ElevationWidget 
           elevationData={elevationData}
           totalElevation={totalElevation}
-          currentElevation={currentElevation}
+          currentElevation={currentElevationFt}
           elevationPosition={elevationPosition}
           modeColor={modeColor}
         />
@@ -112,6 +144,11 @@ export default function CalloutOverlay() {
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       
+      {/* Status Warnings */}
+      {(hasGpsIssue || hasNetworkIssue) && (
+        <StatusWarnings hasGpsIssue={hasGpsIssue} hasNetworkIssue={hasNetworkIssue} gpsAccuracy={gpsAccuracy} />
+      )}
+
       {/* Main HUD Bar */}
       <div className="hud-glass rounded-2xl overflow-hidden">
         <div className="px-4 py-3">
@@ -238,7 +275,7 @@ export default function CalloutOverlay() {
 
       {/* Upcoming Curves - Left side */}
       {upcomingCurves.length > 1 && (
-        <div className="absolute top-20 left-3 hud-glass rounded-xl px-3 py-2">
+        <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
           <div className="flex flex-col gap-1">
             {upcomingCurves.slice(1, 4).map((next) => {
@@ -287,7 +324,7 @@ export default function CalloutOverlay() {
       <ElevationWidget 
         elevationData={elevationData}
         totalElevation={totalElevation}
-        currentElevation={currentElevation}
+        currentElevation={currentElevationFt}
         elevationPosition={elevationPosition}
         modeColor={modeColor}
       />
@@ -297,13 +334,43 @@ export default function CalloutOverlay() {
   )
 }
 
+// Status Warnings Component
+function StatusWarnings({ hasGpsIssue, hasNetworkIssue, gpsAccuracy }) {
+  return (
+    <div className="mb-2 flex gap-2">
+      {hasNetworkIssue && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/20 border border-red-500/30">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff3366" strokeWidth="2">
+            <path d="M1 1l22 22M9.7 4.7a10 10 0 0 1 12.6 2.6M4.7 9.7a10 10 0 0 1 2-2M16.2 8.2a6 6 0 0 1 3.5 5.8M8.2 11a6 6 0 0 1 3.2-2.8M12 17h.01"/>
+          </svg>
+          <span className="text-xs font-semibold text-red-400">OFFLINE</span>
+        </div>
+      )}
+      {hasGpsIssue && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/20 border border-yellow-500/30">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffd500" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8v4m0 4h.01"/>
+          </svg>
+          <span className="text-xs font-semibold text-yellow-400">GPS ±{Math.round(gpsAccuracy)}m</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Elevation Widget Component
 function ElevationWidget({ elevationData, totalElevation, currentElevation, elevationPosition, modeColor }) {
+  // Calculate min/max for proper scaling
+  const minElev = Math.min(...elevationData)
+  const maxElev = Math.max(...elevationData)
+  const range = maxElev - minElev || 1
+  
   return (
-    <div className="absolute top-20 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
+    <div className="absolute top-24 right-3 hud-glass rounded-xl px-2 py-2 w-[100px]">
       <div className="flex items-center justify-between mb-1">
         <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-        <span className="text-[8px] text-white/40">+{totalElevation}ft</span>
+        <span className="text-[8px] text-white/40">Δ{totalElevation}ft</span>
       </div>
       <div className="h-8">
         <svg viewBox="0 0 80 24" className="w-full h-full" preserveAspectRatio="none">
@@ -314,22 +381,24 @@ function ElevationWidget({ elevationData, totalElevation, currentElevation, elev
             </linearGradient>
           </defs>
           <path
-            d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')} L 80 24 Z`}
+            d={`M 0 24 ${elevationData.map((el, i) => `L ${(i / 19) * 80} ${24 - ((el - minElev) / range) * 18}`).join(' ')} L 80 24 Z`}
             fill="url(#elevGradHud)"
           />
           <path
-            d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - 700) / 300) * 18}`).join(' ')}`}
+            d={`M ${elevationData.map((el, i) => `${i === 0 ? '' : 'L '}${(i / 19) * 80} ${24 - ((el - minElev) / range) * 18}`).join(' ')}`}
             fill="none" stroke={modeColor} strokeWidth="1.5" strokeLinecap="round"
           />
           <circle 
             cx={(elevationPosition / 19) * 80} 
-            cy={24 - ((elevationData[elevationPosition] - 700) / 300) * 18} 
+            cy={24 - ((elevationData[elevationPosition] - minElev) / range) * 18} 
             r="2.5" 
             fill={modeColor}
           />
         </svg>
       </div>
-      <div className="text-[9px] text-white/50 text-center mt-0.5">{currentElevation}ft</div>
+      <div className="text-[9px] text-white/50 text-center mt-0.5">
+        {currentElevation !== null ? `${currentElevation}ft` : '-- ft'}
+      </div>
     </div>
   )
 }
