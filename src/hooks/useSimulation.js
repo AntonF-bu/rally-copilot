@@ -194,14 +194,26 @@ export function useSimulation(enabled) {
       setHeading(heading)
 
       // Find upcoming curves and calculate distances
-      const upcomingCurvesWithDist = curves
-        .map(curve => ({
+      // Calculate actual distance (can be negative if we've passed it)
+      const curvesWithActualDistance = curves.map(curve => {
+        const actualDistance = (curve.distanceFromStart || 0) - currentDistanceAlong
+        return {
           ...curve,
-          distance: Math.max(0, (curve.distanceFromStart || 0) - currentDistanceAlong)
-        }))
-        .filter(c => c.distance >= -50 && c.distance < 2000)
-        .sort((a, b) => a.distance - b.distance)
+          distance: Math.max(0, actualDistance), // Display distance (never negative)
+          actualDistance // Keep actual for filtering
+        }
+      })
+      
+      // Only include curves ahead of us (actualDistance > -20 means we haven't fully passed)
+      const upcomingCurvesWithDist = curvesWithActualDistance
+        .filter(c => c.actualDistance > -20 && c.actualDistance < 2000)
+        .sort((a, b) => a.actualDistance - b.actualDistance) // Sort by actual distance
         .slice(0, 5)
+
+      // Debug: Log the curve queue
+      if (upcomingCurvesWithDist.length > 0 && Math.random() < 0.02) {
+        console.log(`🚗 Curve queue: ${upcomingCurvesWithDist.map(c => `id${c.id}@${Math.round(c.actualDistance)}m`).join(', ')}`)
+      }
 
       setUpcomingCurves(upcomingCurvesWithDist)
 
