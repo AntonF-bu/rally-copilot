@@ -54,8 +54,8 @@ export function useGeolocation(enabled = false) {
     }
 
     // *** THROTTLE UPDATES ***
-    // Don't update more than 4x per second
-    if (now - lastUpdateTimeRef.current < 250) {
+    // Don't update more than 2x per second for smoother map animations
+    if (now - lastUpdateTimeRef.current < 500) {
       return
     }
 
