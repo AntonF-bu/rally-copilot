@@ -327,6 +327,27 @@ export function useRouteAnalysis() {
     }
   }, [processRoute, setRouteData])
 
+  // Initialize upcoming curves when route is loaded (before position is available)
+  useEffect(() => {
+    if (!isRunning || routeMode === 'demo') return
+    if (!routeData?.curves?.length) return
+    
+    // Store curves in ref
+    allCurvesRef.current = routeData.curves
+    
+    // Initialize upcoming curves with first 5 curves if not set yet
+    const currentUpcoming = useStore.getState().upcomingCurves
+    if (currentUpcoming.length === 0) {
+      // Use actual distanceFromStart, or start at 500m+ to avoid immediate callout
+      const initial = routeData.curves.slice(0, 5).map((c, i) => ({
+        ...c,
+        distance: c.distanceFromStart || (500 + i * 300) // Start at 500m to avoid immediate callout
+      }))
+      setUpcomingCurves(initial)
+      console.log('📍 Initialized', initial.length, 'upcoming curves')
+    }
+  }, [isRunning, routeMode, routeData, setUpcomingCurves])
+
   // Update upcoming curves based on position (non-demo modes)
   useEffect(() => {
     if (!isRunning || !position || routeMode === 'demo') return
@@ -342,7 +363,10 @@ export function useRouteAnalysis() {
       1000
     )
 
-    setUpcomingCurves(upcoming)
+    // Only update if we got results, otherwise keep existing
+    if (upcoming.length > 0) {
+      setUpcomingCurves(upcoming)
+    }
 
     if (upcoming.length > 0 && upcoming[0].distance < 300) {
       setActiveCurve(upcoming[0])
