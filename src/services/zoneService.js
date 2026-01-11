@@ -392,7 +392,42 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
   }))
 
   // Segment into contiguous character zones
-  const segments = segmentByCharacter(classifiedPoints, coordinates)
+  let segments = segmentByCharacter(classifiedPoints, coordinates)
+  
+  // POST-PROCESSING: Check each segment for sharp curves
+  // If a TRANSIT (highway) segment contains ANY severity 4+ curve, reclassify it
+  segments = segments.map(seg => {
+    if (seg.character !== ROUTE_CHARACTER.TRANSIT) return seg
+    
+    // Find all curves within this segment
+    const segmentCurves = curves.filter(c => {
+      const curveDist = c.distanceFromStart || 0
+      return curveDist >= seg.startDistance && curveDist <= seg.endDistance
+    })
+    
+    // Check for sharp curves (including chicanes with high severity)
+    const hasSharpCurve = segmentCurves.some(c => {
+      // Regular curve
+      if (c.severity >= 4) return true
+      // Chicane - check severity sequence
+      if (c.isChicane && c.severitySequence) {
+        const severities = c.severitySequence.split('-').map(Number)
+        return severities.some(s => s >= 4)
+      }
+      return false
+    })
+    
+    if (hasSharpCurve) {
+      console.log(`  🚨 Segment ${seg.id} has sharp curve - reclassifying from TRANSIT to SPIRITED`)
+      return {
+        ...seg,
+        character: ROUTE_CHARACTER.SPIRITED,
+        behavior: CHARACTER_BEHAVIORS[ROUTE_CHARACTER.SPIRITED]
+      }
+    }
+    
+    return seg
+  })
   
   // Generate summary
   const summary = generateSummary(segments, coordinates)
