@@ -99,6 +99,9 @@ export default function App() {
     const now = Date.now()
     const MIN_CALLOUT_INTERVAL = 1000
     
+    // Get speed unit for voice callouts
+    const speedUnit = speedUnit
+    
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) return
 
     const nextCurve = upcomingCurves[0]
@@ -141,7 +144,7 @@ export default function App() {
     if (nextCurve.isTechnicalSection) {
       // Announce entry to technical section
       if (distance <= mainDistance && !mainCalloutsRef.current.has(curveId)) {
-        const callout = generateCallout(nextCurve, mode, settings.speedUnit, null, 'main')
+        const callout = generateCallout(nextCurve, mode, speedUnit, null, 'main')
         speak(callout, 'high')
         mainCalloutsRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
@@ -156,7 +159,7 @@ export default function App() {
       
       // Final warning for technical section
       if (distance <= finalDistance && !finalWarningsRef.current.has(curveId) && mainCalloutsRef.current.has(curveId)) {
-        const callout = generateFinalWarning(nextCurve, mode, settings.speedUnit)
+        const callout = generateFinalWarning(nextCurve, mode, speedUnit)
         speak(callout, 'high')
         finalWarningsRef.current.add(curveId)
         lastCalloutTimeRef.current = now
@@ -171,7 +174,7 @@ export default function App() {
         distance > mainDistance &&
         !earlyWarningsRef.current.has(curveId)) {
       
-      const callout = generateEarlyWarning(nextCurve, mode, settings.speedUnit)
+      const callout = generateEarlyWarning(nextCurve, mode, speedUnit)
       speak(callout, 'normal')
       earlyWarningsRef.current.add(curveId)
       lastCalloutTimeRef.current = now
@@ -198,7 +201,7 @@ export default function App() {
         }
       }
       
-      const callout = generateCallout(nextCurve, mode, settings.speedUnit, includeSecond, 'main')
+      const callout = generateCallout(nextCurve, mode, speedUnit, includeSecond, 'main')
       speak(callout, 'high')
       
       mainCalloutsRef.current.add(curveId)
@@ -225,7 +228,7 @@ export default function App() {
         mainCalloutsRef.current.has(curveId) &&
         !finalWarningsRef.current.has(curveId)) {
       
-      const callout = generateFinalWarning(nextCurve, mode, settings.speedUnit)
+      const callout = generateFinalWarning(nextCurve, mode, speedUnit)
       speak(callout, 'high')
       
       finalWarningsRef.current.add(curveId)
@@ -247,7 +250,7 @@ export default function App() {
       const secondMainDistance = Math.max(200, speedMps * 5)
       
       if (secondDistance <= secondMainDistance && secondDistance > 50) {
-        const callout = generateCallout(secondCurve, mode, settings.speedUnit, upcomingCurves[2], 'main')
+        const callout = generateCallout(secondCurve, mode, speedUnit, upcomingCurves[2], 'main')
         speak(callout, 'high')
         
         mainCalloutsRef.current.add(secondCurve.id)
@@ -259,7 +262,7 @@ export default function App() {
 
     // STRAIGHT SECTION CALLOUTS
     if (distance > 600 && !straightCalledRef.current.has(`straight-${curveId}`)) {
-      const callout = generateStraightCallout(distance, mode, settings.speedUnit, nextCurve)
+      const callout = generateStraightCallout(distance, mode, speedUnit, nextCurve)
       speak(callout, 'normal')
       straightCalledRef.current.add(`straight-${curveId}`)
       lastCalloutTimeRef.current = now
