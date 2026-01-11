@@ -44,12 +44,21 @@ const useStore = create(
       currentCallout: '',
       
       settings: {
+        // Voice
         voiceEnabled: true,
         volume: 1.0,
-        calloutTiming: 6,
-        speedUnit: 'mph',
-        mapStyle: 'dark',
+        calloutTiming: 'normal', // 'early', 'normal', 'late'
+        
+        // Units - this affects HUD, voice, and all displays
+        units: 'imperial', // 'imperial' (mph, ft) or 'metric' (kmh, m)
+        
+        // Display
         keepScreenOn: true,
+        showSpeedometer: true,
+        showElevation: true,
+        hudStyle: 'full', // 'full', 'minimal'
+        
+        // Feedback
         hapticFeedback: false,
       },
       
@@ -208,8 +217,31 @@ const useStore = create(
       
       getDisplaySpeed: () => {
         const { speed, settings } = get()
-        if (settings.speedUnit === 'kmh') return Math.round(speed * 1.609)
-        return Math.round(speed)
+        const isMetric = settings.units === 'metric'
+        return isMetric ? Math.round(speed * 1.609) : Math.round(speed)
+      },
+      
+      getSpeedUnit: () => {
+        const { settings } = get()
+        return settings.units === 'metric' ? 'KM/H' : 'MPH'
+      },
+      
+      getDistanceUnit: () => {
+        const { settings } = get()
+        return settings.units === 'metric' ? 'm' : 'ft'
+      },
+      
+      // Convert meters to display unit
+      formatDistance: (meters) => {
+        const { settings } = get()
+        if (settings.units === 'metric') {
+          if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`
+          return `${Math.round(meters)} m`
+        } else {
+          const feet = meters * 3.28084
+          if (feet >= 5280) return `${(feet / 5280).toFixed(1)} mi`
+          return `${Math.round(feet / 50) * 50} ft`
+        }
       },
       
       getRecommendedSpeed: (curve) => {
@@ -217,7 +249,7 @@ const useStore = create(
         const { mode, settings } = get()
         const speedKey = `speed${mode.charAt(0).toUpperCase() + mode.slice(1)}`
         let speed = curve[speedKey] || curve.speedCruise || 45
-        if (settings.speedUnit === 'kmh') speed = Math.round(speed * 1.609)
+        if (settings.units === 'metric') speed = Math.round(speed * 1.609)
         return speed
       },
       
@@ -234,15 +266,16 @@ const useStore = create(
         // Convert units if needed
         const distanceMiles = tripStats.distance / 1609.34
         const distanceKm = tripStats.distance / 1000
+        const isMetric = settings.units === 'metric'
         
         return {
           duration,
           durationFormatted: formatDuration(duration),
-          distance: settings.speedUnit === 'kmh' ? distanceKm : distanceMiles,
-          distanceUnit: settings.speedUnit === 'kmh' ? 'km' : 'mi',
-          avgSpeed: settings.speedUnit === 'kmh' ? Math.round(avgSpeed * 1.609) : Math.round(avgSpeed),
-          maxSpeed: settings.speedUnit === 'kmh' ? Math.round(tripStats.maxSpeed * 1.609) : Math.round(tripStats.maxSpeed),
-          speedUnit: settings.speedUnit === 'kmh' ? 'km/h' : 'mph',
+          distance: isMetric ? distanceKm : distanceMiles,
+          distanceUnit: isMetric ? 'km' : 'mi',
+          avgSpeed: isMetric ? Math.round(avgSpeed * 1.609) : Math.round(avgSpeed),
+          maxSpeed: isMetric ? Math.round(tripStats.maxSpeed * 1.609) : Math.round(tripStats.maxSpeed),
+          speedUnit: isMetric ? 'km/h' : 'mph',
           curvesCompleted: tripStats.curvesCompleted,
           totalCurves: routeData?.curves?.length || 0,
           sharpestCurve: tripStats.sharpestCurve,
