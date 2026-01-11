@@ -3,7 +3,7 @@ import useStore from './store'
 import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useRouteAnalysis } from './hooks/useRouteAnalysis'
-import { useSpeech, generateCallout } from './hooks/useSpeech'
+import { useSpeech, generateCallout, generateEarlyWarning, generateFinalWarning } from './hooks/useSpeech'
 
 // Components
 import Map from './components/Map'
@@ -15,8 +15,8 @@ import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
 
 // ================================
-// Rally Co-Pilot App - v7
-// Uses goToMenu, goToPreview, goToDriving
+// Rally Co-Pilot App - v8
+// Progressive callouts: early, main, final
 // ================================
 
 export default function App() {
@@ -39,7 +39,10 @@ export default function App() {
     clearRouteData
   } = useStore()
 
-  const announcedCurvesRef = useRef(new Set())
+  // Track which curves have had which callout phases
+  const earlyWarningsRef = useRef(new Set())   // Early "heads up" given
+  const mainCalloutsRef = useRef(new Set())    // Main callout given
+  const finalWarningsRef = useRef(new Set())   // Final "NOW" given
   const lastCalloutTimeRef = useRef(0)
   
   const isDemoMode = routeMode === 'demo'
@@ -49,114 +52,141 @@ export default function App() {
 
   const currentSpeed = getDisplaySpeed()
 
-  // Reset announced curves when route changes
+  // Reset callout tracking when route changes
   useEffect(() => {
-    announcedCurvesRef.current = new Set()
-    lastCalloutTimeRef.current = Date.now() // Prevent immediate callout after route change
+    earlyWarningsRef.current = new Set()
+    mainCalloutsRef.current = new Set()
+    finalWarningsRef.current = new Set()
+    lastCalloutTimeRef.current = Date.now()
   }, [routeMode, routeData])
 
-  // Callout Logic
+  // Progressive Callout Logic
   useEffect(() => {
-    // Debug logging
-    if (isRunning && upcomingCurves.length > 0) {
-      console.log('🔊 Callout check:', {
-        voiceEnabled: settings.voiceEnabled,
-        curves: upcomingCurves.length,
-        nextDistance: upcomingCurves[0]?.distance,
-        nextId: upcomingCurves[0]?.id,
-        announced: Array.from(announcedCurvesRef.current)
-      })
-    }
-
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
 
     const now = Date.now()
-    const MIN_CALLOUT_INTERVAL = 2500
+    const MIN_CALLOUT_INTERVAL = 1500 // Reduced for progressive warnings
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
-      console.log('🔊 Skipping - too soon since last callout')
       return
     }
 
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
+
+    const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 8) // min 8 m/s for calculations
+    const distance = nextCurve.distance
     
-    // Don't announce if we're too close (likely already passed or at the curve)
-    if (nextCurve.distance < 20) {
-      // Mark as announced so we don't try again
-      announcedCurvesRef.current.add(nextCurve.id)
-      console.log('🔊 Skipping curve', nextCurve.id, '- too close:', nextCurve.distance, 'm')
-      return
-    }
-    
-    if (announcedCurvesRef.current.has(nextCurve.id)) {
-      const secondCurve = upcomingCurves[1]
-      if (secondCurve && !announcedCurvesRef.current.has(secondCurve.id)) {
-        const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
-        const timeBasedDistance = speedMps * (settings.calloutTiming || 6)
-        const announceDistance = Math.max(200, timeBasedDistance)
-        
-        if (secondCurve.distance <= announceDistance) {
-          const callout = generateCallout(secondCurve, mode, settings.speedUnit)
-          speak(callout, 'high')
-          announcedCurvesRef.current.add(secondCurve.id)
-          setLastAnnouncedCurveId(secondCurve.id)
-          lastCalloutTimeRef.current = now
-          
-          if (settings.hapticFeedback && 'vibrate' in navigator) {
-            navigator.vibrate([50])
-          }
-        }
-      }
+    // Calculate dynamic distances based on speed
+    const earlyDistance = Math.max(400, speedMps * 10)    // ~10 seconds out
+    const mainDistance = Math.max(200, speedMps * 5)      // ~5 seconds out  
+    const finalDistance = Math.max(50, speedMps * 1.5)    // ~1.5 seconds out
+
+    const isHardCurve = nextCurve.severity >= 4
+    const curveId = nextCurve.id
+
+    // EARLY WARNING - Heads up for what's coming (only for harder curves)
+    if (isHardCurve && 
+        distance <= earlyDistance && 
+        distance > mainDistance &&
+        !earlyWarningsRef.current.has(curveId)) {
+      
+      const callout = generateEarlyWarning(nextCurve, mode)
+      console.log('🔊 EARLY:', callout)
+      speak(callout, 'normal')
+      
+      earlyWarningsRef.current.add(curveId)
+      lastCalloutTimeRef.current = now
       return
     }
 
-    const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 10)
-    const timeBasedDistance = speedMps * (settings.calloutTiming || 6)
-    const announceDistance = Math.max(250, timeBasedDistance)
-
-    if (nextCurve.distance <= announceDistance) {
+    // MAIN CALLOUT - Full details with distance
+    if (distance <= mainDistance && 
+        distance > finalDistance &&
+        !mainCalloutsRef.current.has(curveId)) {
+      
       const secondCurve = upcomingCurves[1]
       let includeSecond = null
       
       if (secondCurve && !secondCurve.isChicane) {
         const distanceToSecond = secondCurve.distanceFromStart - (nextCurve.distanceFromStart + nextCurve.length)
-        if (distanceToSecond < 100 && distanceToSecond >= 0) {
+        if (distanceToSecond < 150 && distanceToSecond >= 0) {
           includeSecond = secondCurve
         }
       }
       
-      const callout = generateCallout(nextCurve, mode, settings.speedUnit, includeSecond)
-      console.log('🔊 SPEAKING:', callout)
+      const callout = generateCallout(nextCurve, mode, settings.speedUnit, includeSecond, 'main')
+      console.log('🔊 MAIN:', callout)
       speak(callout, 'high')
       
-      announcedCurvesRef.current.add(nextCurve.id)
-      if (includeSecond) {
-        announcedCurvesRef.current.add(includeSecond.id)
-      }
-      
-      setLastAnnouncedCurveId(nextCurve.id)
+      mainCalloutsRef.current.add(curveId)
+      setLastAnnouncedCurveId(curveId)
       lastCalloutTimeRef.current = now
 
       if (settings.hapticFeedback && 'vibrate' in navigator) {
         const pattern = nextCurve.severity >= 5 ? [100, 50, 100] : [50]
         navigator.vibrate(pattern)
       }
+      return
     }
+
+    // FINAL WARNING - Action cue (only for hard curves, only if main was given)
+    if (isHardCurve &&
+        distance <= finalDistance && 
+        distance > 15 &&
+        mainCalloutsRef.current.has(curveId) &&
+        !finalWarningsRef.current.has(curveId)) {
+      
+      const callout = generateFinalWarning(nextCurve, mode)
+      console.log('🔊 FINAL:', callout)
+      speak(callout, 'high')
+      
+      finalWarningsRef.current.add(curveId)
+      lastCalloutTimeRef.current = now
+
+      if (settings.hapticFeedback && 'vibrate' in navigator) {
+        navigator.vibrate([150])
+      }
+      return
+    }
+
+    // Check second curve if first is already fully announced
+    const secondCurve = upcomingCurves[1]
+    if (secondCurve && 
+        mainCalloutsRef.current.has(curveId) &&
+        !mainCalloutsRef.current.has(secondCurve.id)) {
+      
+      const secondDistance = secondCurve.distance
+      const secondMainDistance = Math.max(200, speedMps * 5)
+      
+      if (secondDistance <= secondMainDistance && secondDistance > 50) {
+        const callout = generateCallout(secondCurve, mode, settings.speedUnit, upcomingCurves[2], 'main')
+        console.log('🔊 MAIN (2nd):', callout)
+        speak(callout, 'high')
+        
+        mainCalloutsRef.current.add(secondCurve.id)
+        setLastAnnouncedCurveId(secondCurve.id)
+        lastCalloutTimeRef.current = now
+      }
+    }
+
   }, [isRunning, upcomingCurves, currentSpeed, mode, settings, setLastAnnouncedCurveId, speak])
 
-  // Clear announced curves when passed
+  // Clear old curve warnings when passed
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
     const upcomingIds = new Set(upcomingCurves.map(c => c.id))
     
-    announcedCurvesRef.current.forEach(id => {
-      if (!upcomingIds.has(id)) {
-        announcedCurvesRef.current.delete(id)
-      }
+    // Clean up refs for curves no longer in view
+    ;[earlyWarningsRef, mainCalloutsRef, finalWarningsRef].forEach(ref => {
+      ref.current.forEach(id => {
+        if (!upcomingIds.has(id)) {
+          ref.current.delete(id)
+        }
+      })
     })
   }, [isRunning, upcomingCurves])
 
