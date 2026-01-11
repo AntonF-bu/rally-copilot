@@ -109,6 +109,9 @@ export default function CalloutOverlay() {
   }
 
   const recommendedSpeed = getRecommendedSpeed(curve)
+  const currentSpeedDisplay = settings.speedUnit === 'kmh' 
+    ? Math.round((speed || 0) * 1.609) 
+    : Math.round(speed || 0)
   const severityColor = getCurveColor(curve.severity)
   const brakingZone = getBrakingZone(curve.severity)
   
@@ -175,12 +178,31 @@ export default function CalloutOverlay() {
               </div>
             </div>
 
-            <div className="text-right pl-2">
-              <div className="text-4xl font-bold tracking-tight leading-none" style={{ color: modeColor, textShadow: `0 0 30px ${modeColor}50` }}>
-                {recommendedSpeed}
+            {/* Speed Display - Current + Recommended */}
+            <div className="text-right pl-2 flex flex-col items-end">
+              {/* Current Speed (large) */}
+              <div className="flex items-baseline gap-1">
+                <div 
+                  className="text-4xl font-bold tracking-tight leading-none"
+                  style={{ 
+                    color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' : 
+                           currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white',
+                    textShadow: '0 0 20px rgba(255,255,255,0.3)'
+                  }}
+                >
+                  {currentSpeedDisplay}
+                </div>
+                <span className="text-xs text-white/40">{settings.speedUnit?.toUpperCase() || 'MPH'}</span>
               </div>
-              <div className="text-[10px] font-semibold text-white/40 tracking-wider mt-0.5">
-                {settings.speedUnit?.toUpperCase() || 'MPH'}
+              {/* Recommended Speed (small, below) */}
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="text-[10px] text-white/40">TARGET</span>
+                <span 
+                  className="text-sm font-bold"
+                  style={{ color: modeColor }}
+                >
+                  {recommendedSpeed}
+                </span>
               </div>
             </div>
           </div>
