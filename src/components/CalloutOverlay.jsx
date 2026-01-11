@@ -261,20 +261,24 @@ export default function CalloutOverlay({ currentDrivingMode }) {
       {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
 
       <div className="hud-glass rounded-2xl overflow-hidden">
-        {/* Zone badge row */}
+        {/* Top row: Zone badge + stats */}
         <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-white/5">
           <div className="flex items-center gap-2">
             {characterColors && characterLabel && (
               <ZoneBadge colors={characterColors} label={characterLabel.label} />
             )}
           </div>
-          <div className="flex items-center gap-3 text-white/40 text-xs">
+          <div className="flex items-center gap-4 text-white/40 text-xs">
             <span>{routeProgress.curvesPassed}/{routeProgress.totalCurves} curves</span>
-            <span>•</span>
-            <span>{routeProgress.remainingTime}min left</span>
+            <span>{routeProgress.remainingTime}min</span>
+            {/* Mini elevation inline */}
+            {settings.showElevation !== false && (
+              <span style={{ color: modeColor }}>↑{elevationStats.current}{elevationUnit}</span>
+            )}
           </div>
         </div>
 
+        {/* Main curve info */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-4">
             
@@ -361,7 +365,7 @@ export default function CalloutOverlay({ currentDrivingMode }) {
         </div>
       </div>
 
-      {/* Upcoming curves */}
+      {/* Upcoming curves - left side */}
       {upcomingCurves.length > 1 && (
         <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
@@ -371,17 +375,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
             ))}
           </div>
         </div>
-      )}
-
-      {/* Elevation widget */}
-      {settings.showElevation !== false && (
-        <ElevationWidget 
-          elevationData={elevationPoints}
-          stats={elevationStats}
-          currentIdx={currentElevationIdx}
-          modeColor={modeColor}
-          unit={elevationUnit}
-        />
       )}
 
       <style>{hudStyles}</style>
@@ -517,45 +510,6 @@ function UpcomingCurveRow({ curve }) {
       </svg>
       <span className="text-sm font-bold" style={{ color }}>{curve.severity}</span>
       <span className="text-[10px] text-white/40">{dist}{unit}</span>
-    </div>
-  )
-}
-
-function ElevationWidget({ elevationData, stats, currentIdx, modeColor, unit }) {
-  if (!elevationData?.length) return null
-  
-  const minElev = Math.min(...elevationData)
-  const maxElev = Math.max(...elevationData)
-  const range = maxElev - minElev || 1
-  
-  return (
-    <div className="absolute top-3 right-3 hud-glass rounded-xl p-2 min-w-[100px]">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[8px] font-semibold text-white/30 tracking-wider">ELEV</span>
-        <span className="text-[10px] font-bold" style={{ color: modeColor }}>↑{stats.gain}{unit}</span>
-      </div>
-      <div className="h-6 relative">
-        <svg width="100%" height="24" viewBox="0 0 80 24" preserveAspectRatio="none">
-          <path 
-            d={`M 0 ${24 - ((elevationData[0] - minElev) / range) * 18} ${elevationData.map((el, i) => 
-              `L ${(i / (elevationData.length - 1)) * 80} ${24 - ((el - minElev) / range) * 18}`).join(' ')}`}
-            fill="none" 
-            stroke={modeColor} 
-            strokeWidth="1.5" 
-            strokeLinecap="round"
-            opacity="0.6"
-          />
-          <circle 
-            cx={(currentIdx / (elevationData.length - 1)) * 80} 
-            cy={24 - ((elevationData[currentIdx] - minElev) / range) * 18} 
-            r="3" 
-            fill={modeColor}
-          />
-        </svg>
-      </div>
-      <div className="text-[10px] text-white/50 text-center mt-0.5">
-        {stats.current}{unit}
-      </div>
     </div>
   )
 }
