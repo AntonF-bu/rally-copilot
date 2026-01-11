@@ -55,25 +55,25 @@ export const VOICE_CONFIG = {
   highway: {
     speed: 0.9,           // Slower speech
     stability: 0.85,      // Smooth, consistent
-    minPauseBetween: 3000, // ms between callouts (reduced from 8000)
+    minPauseBetween: 1500, // ms between callouts (reduced for demo responsiveness)
     style: 'relaxed'
   },
   spirited: {
     speed: 1.0,
     stability: 0.75,
-    minPauseBetween: 2500,  // reduced from 4000
+    minPauseBetween: 1200,
     style: 'alert'
   },
   technical: {
     speed: 1.15,          // Faster speech
     stability: 0.65,      // More urgent variation
-    minPauseBetween: 1500,
+    minPauseBetween: 800,
     style: 'rapid'
   },
   urban: {
     speed: 0.9,
     stability: 0.85,
-    minPauseBetween: 6000,
+    minPauseBetween: 1500, // reduced from 6000
     style: 'casual'
   }
 }
