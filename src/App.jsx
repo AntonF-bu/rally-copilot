@@ -387,7 +387,8 @@ export default function App() {
     clearCalledRef.current = new Set()
     zoneTransitionAnnouncedRef.current = new Set()
     currentZoneRef.current = null
-    lastCalloutTimeRef.current = Date.now()
+    // Set to past time so first callout can fire immediately
+    lastCalloutTimeRef.current = Date.now() - 10000
     goToDriving()
   }
 
