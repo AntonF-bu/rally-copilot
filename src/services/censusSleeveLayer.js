@@ -1,9 +1,16 @@
 // ================================
 // Census Sleeve Layer
 // Renders census tract polygons as a colored, semi-transparent sleeve
+// Uses DISTINCT colors from route line to avoid confusion
 // ================================
 
-import { CHARACTER_COLORS } from './zoneService'
+// Sleeve colors - intentionally different from route line colors
+const SLEEVE_COLORS = {
+  urban: '#a855f7',      // Purple (route uses red)
+  suburban: '#f97316',   // Orange (route uses yellow)
+  rural: '#14b8a6',      // Teal (route uses green)
+  unknown: '#6b7280'     // Gray fallback
+}
 
 /**
  * Add census tract polygons to map as a colored sleeve
@@ -19,14 +26,6 @@ export function addCensusSleeveToMap(map, censusTracts, existingLayerIds = []) {
   
   const newLayerIds = []
 
-  // Color mapping for density categories
-  const densityColors = {
-    urban: CHARACTER_COLORS.urban.primary,      // Red - #f87171
-    suburban: CHARACTER_COLORS.spirited.primary, // Yellow - #fbbf24
-    rural: CHARACTER_COLORS.technical.primary,   // Green - #22c55e
-    unknown: '#9ca3af'                           // Gray fallback
-  }
-
   // Add each tract as a polygon layer
   censusTracts.forEach((tract, i) => {
     if (!tract.geometry) return
@@ -35,7 +34,7 @@ export function addCensusSleeveToMap(map, censusTracts, existingLayerIds = []) {
     const fillId = `census-fill-${i}`
     const outlineId = `census-outline-${i}`
     
-    const color = densityColors[tract.densityCategory] || densityColors.unknown
+    const color = SLEEVE_COLORS[tract.densityCategory] || SLEEVE_COLORS.unknown
 
     try {
       // Add source
@@ -159,7 +158,7 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
       }
     })
 
-    // Add fill layer with data-driven color
+    // Add fill layer with data-driven color using SLEEVE_COLORS
     map.addLayer({
       id: fillId,
       type: 'fill',
@@ -168,12 +167,12 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
         'fill-color': [
           'match',
           ['get', 'densityCategory'],
-          'urban', CHARACTER_COLORS.urban.primary,
-          'suburban', CHARACTER_COLORS.spirited.primary,
-          'rural', CHARACTER_COLORS.technical.primary,
-          '#9ca3af'  // default gray
+          'urban', SLEEVE_COLORS.urban,
+          'suburban', SLEEVE_COLORS.suburban,
+          'rural', SLEEVE_COLORS.rural,
+          SLEEVE_COLORS.unknown
         ],
-        'fill-opacity': 0.18
+        'fill-opacity': 0.2
       }
     }, 'road-label')
 
@@ -186,13 +185,13 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
         'line-color': [
           'match',
           ['get', 'densityCategory'],
-          'urban', CHARACTER_COLORS.urban.primary,
-          'suburban', CHARACTER_COLORS.spirited.primary,
-          'rural', CHARACTER_COLORS.technical.primary,
-          '#9ca3af'
+          'urban', SLEEVE_COLORS.urban,
+          'suburban', SLEEVE_COLORS.suburban,
+          'rural', SLEEVE_COLORS.rural,
+          SLEEVE_COLORS.unknown
         ],
-        'line-width': 1.5,
-        'line-opacity': 0.5,
+        'line-width': 2,
+        'line-opacity': 0.6,
         'line-dasharray': [4, 2]
       }
     }, 'road-label')
@@ -210,9 +209,9 @@ export function addCensusSleeveAsCollection(map, censusTracts, layerPrefix = 'ce
  */
 export function getCensusLegendItems() {
   return [
-    { label: 'Urban (>10k/mi²)', color: CHARACTER_COLORS.urban.primary, category: 'urban' },
-    { label: 'Suburban (2-10k/mi²)', color: CHARACTER_COLORS.spirited.primary, category: 'suburban' },
-    { label: 'Rural (<2k/mi²)', color: CHARACTER_COLORS.technical.primary, category: 'rural' }
+    { label: 'Urban (>8k/mi²)', color: SLEEVE_COLORS.urban, category: 'urban' },
+    { label: 'Suburban (2.5-8k/mi²)', color: SLEEVE_COLORS.suburban, category: 'suburban' },
+    { label: 'Rural (<2.5k/mi²)', color: SLEEVE_COLORS.rural, category: 'rural' }
   ]
 }
 
