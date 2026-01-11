@@ -207,24 +207,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current) {
       const visibility = newVisibility ? 'visible' : 'none'
       
-      // Toggle fill layers
+      // Toggle all sleeve and border layers
       for (let i = 0; i < 100; i++) {
-        try {
-          if (mapRef.current.getLayer(`sleeve-${i}`)) {
-            mapRef.current.setLayoutProperty(`sleeve-${i}`, 'visibility', visibility)
-          }
-        } catch (e) {}
+        ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-'].forEach(prefix => {
+          try {
+            if (mapRef.current.getLayer(`${prefix}${i}`)) {
+              mapRef.current.setLayoutProperty(`${prefix}${i}`, 'visibility', visibility)
+            }
+          } catch (e) {}
+        })
       }
-      
-      // Toggle border layers
-      try {
-        if (mapRef.current.getLayer('sleeve-border-top')) {
-          mapRef.current.setLayoutProperty('sleeve-border-top', 'visibility', visibility)
-        }
-        if (mapRef.current.getLayer('sleeve-border-bottom')) {
-          mapRef.current.setLayoutProperty('sleeve-border-bottom', 'visibility', visibility)
-        }
-      } catch (e) {}
     }
   }, [showSleeve])
 
@@ -371,7 +363,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     const totalDist = routeData?.distance || 15000
     const segments = []
-    const transitionLength = 0.02 // 2% of route for color transition
+    const transitionLength = 0.03 // 3% of route for color transition
     
     characterSegments.forEach((seg, segIndex) => {
       const startProgress = Math.max(0, seg.startDistance / totalDist)
@@ -400,17 +392,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             })
           }
           
-          // Transition segment (blend to next color)
+          // Transition segment - just 3 steps for smoother gradient
           const transitionCoords = coords.slice(Math.max(startIdx, transitionStartIdx), endIdx + 1)
           if (transitionCoords.length > 1) {
-            // Create multiple small segments for gradient effect
-            const steps = Math.min(transitionCoords.length - 1, 10)
+            const steps = 3
             for (let i = 0; i < steps; i++) {
-              const t = i / steps
+              const t = (i + 0.5) / steps // Center of each step
               const blendedColor = interpolateColor(colors.primary, nextColors.primary, t)
               const stepStart = Math.floor((i / steps) * (transitionCoords.length - 1))
-              const stepEnd = Math.floor(((i + 1) / steps) * (transitionCoords.length - 1)) + 1
-              const stepCoords = transitionCoords.slice(stepStart, stepEnd + 1)
+              const stepEnd = Math.floor(((i + 1) / steps) * (transitionCoords.length - 1))
+              const stepCoords = transitionCoords.slice(stepStart, stepEnd + 2) // +2 for overlap
               if (stepCoords.length > 1) {
                 segments.push({
                   coords: stepCoords,
@@ -544,12 +535,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
         if (showSleeve) {
-          // Light transparent fill
+          // Light transparent fill - use butt caps to avoid circles
           map.addLayer({ 
             id: sleeve, 
             type: 'line', 
             source: src, 
-            layout: { 'line-join': 'round', 'line-cap': 'round' }, 
+            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
             paint: { 
               'line-color': seg.color, 
               'line-width': 40, 
@@ -560,46 +551,50 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
     })
     
-    // Add OUTER DASHED BORDERS - one continuous line on each side
-    // We'll use offset to create top and bottom borders
-    if (showSleeve && coords.length > 1) {
-      const borderSrc = 'sleeve-border-src'
-      if (!map.getSource(borderSrc)) {
-        map.addSource(borderSrc, { 
-          type: 'geojson', 
-          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } } 
-        })
+    // Add COLORED DASHED BORDERS - matching each segment color
+    if (showSleeve) {
+      sleeveSegs.forEach((seg, i) => {
+        const borderSrc = `sleeve-border-src-${i}`
+        const borderTop = `sleeve-border-top-${i}`
+        const borderBottom = `sleeve-border-bottom-${i}`
         
-        // Top border (positive offset)
-        map.addLayer({ 
-          id: 'sleeve-border-top', 
-          type: 'line', 
-          source: borderSrc, 
-          layout: { 'line-join': 'round', 'line-cap': 'round' }, 
-          paint: { 
-            'line-color': '#ffffff',
-            'line-width': 1.5,
-            'line-opacity': 0.4,
-            'line-dasharray': [4, 6],
-            'line-offset': 20
-          } 
-        })
-        
-        // Bottom border (negative offset)
-        map.addLayer({ 
-          id: 'sleeve-border-bottom', 
-          type: 'line', 
-          source: borderSrc, 
-          layout: { 'line-join': 'round', 'line-cap': 'round' }, 
-          paint: { 
-            'line-color': '#ffffff',
-            'line-width': 1.5,
-            'line-opacity': 0.4,
-            'line-dasharray': [4, 6],
-            'line-offset': -20
-          } 
-        })
-      }
+        if (!map.getSource(borderSrc)) {
+          map.addSource(borderSrc, { 
+            type: 'geojson', 
+            data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } 
+          })
+          
+          // Top border (positive offset) - same color as segment
+          map.addLayer({ 
+            id: borderTop, 
+            type: 'line', 
+            source: borderSrc, 
+            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
+            paint: { 
+              'line-color': seg.color,
+              'line-width': 1.5,
+              'line-opacity': 0.5,
+              'line-dasharray': [4, 6],
+              'line-offset': 20
+            } 
+          })
+          
+          // Bottom border (negative offset)
+          map.addLayer({ 
+            id: borderBottom, 
+            type: 'line', 
+            source: borderSrc, 
+            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
+            paint: { 
+              'line-color': seg.color,
+              'line-width': 1.5,
+              'line-opacity': 0.5,
+              'line-dasharray': [4, 6],
+              'line-offset': -20
+            } 
+          })
+        }
+      })
     }
     
     // Add ROUTE LINE layers (severity gradient)
@@ -640,17 +635,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     // Clean up all layer types
     for (let i = 0; i < 100; i++) {
-      ['sleeve-', 'glow-', 'line-'].forEach(p => { 
+      ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-', 'glow-', 'line-'].forEach(p => { 
         if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
       })
       if (mapRef.current.getSource('sleeve-src-' + i)) mapRef.current.removeSource('sleeve-src-' + i)
+      if (mapRef.current.getSource('sleeve-border-src-' + i)) mapRef.current.removeSource('sleeve-border-src-' + i)
       if (mapRef.current.getSource('route-src-' + i)) mapRef.current.removeSource('route-src-' + i)
     }
-    
-    // Clean up continuous border layers
-    if (mapRef.current.getLayer('sleeve-border-top')) mapRef.current.removeLayer('sleeve-border-top')
-    if (mapRef.current.getLayer('sleeve-border-bottom')) mapRef.current.removeLayer('sleeve-border-bottom')
-    if (mapRef.current.getSource('sleeve-border-src')) mapRef.current.removeSource('sleeve-border-src')
     
     addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
     addMarkers(mapRef.current, data.curves, data.coordinates)
