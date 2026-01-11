@@ -78,17 +78,14 @@ export default function Map() {
     })
 
     // User interaction = show recenter button
+    // Only trigger on drag - the clearest signal user wants manual control
     const showRecenterBtn = () => {
       isFollowingRef.current = false
       setShowRecenter(true)
+      console.log('📍 User dragged map - following disabled')
     }
 
     map.current.on('dragstart', showRecenterBtn)
-    map.current.on('zoomstart', (e) => {
-      if (e.originalEvent) showRecenterBtn()
-    })
-    map.current.on('pitchstart', showRecenterBtn)
-    map.current.on('rotatestart', showRecenterBtn)
 
     return () => {
       map.current?.remove()
