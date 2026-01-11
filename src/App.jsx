@@ -71,6 +71,13 @@ export default function App() {
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
     
+    // Don't announce if we're too close (likely already passed or at the curve)
+    if (nextCurve.distance < 20) {
+      // Mark as announced so we don't try again
+      announcedCurvesRef.current.add(nextCurve.id)
+      return
+    }
+    
     if (announcedCurvesRef.current.has(nextCurve.id)) {
       const secondCurve = upcomingCurves[1]
       if (secondCurve && !announcedCurvesRef.current.has(secondCurve.id)) {
