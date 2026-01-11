@@ -55,13 +55,13 @@ export const VOICE_CONFIG = {
   highway: {
     speed: 0.9,           // Slower speech
     stability: 0.85,      // Smooth, consistent
-    minPauseBetween: 8000, // ms between callouts
+    minPauseBetween: 3000, // ms between callouts (reduced from 8000)
     style: 'relaxed'
   },
   spirited: {
     speed: 1.0,
     stability: 0.75,
-    minPauseBetween: 4000,
+    minPauseBetween: 2500,  // reduced from 4000
     style: 'alert'
   },
   technical: {
