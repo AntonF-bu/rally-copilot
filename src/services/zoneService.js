@@ -55,9 +55,9 @@ export const CHARACTER_BEHAVIORS = {
 
 // Population density thresholds (people per square mile)
 const DENSITY_THRESHOLDS = {
-  HIGH: 10000,    // Urban: > 10k/sq mi (Boston, NYC density)
-  MEDIUM: 2000,   // Suburban: 2k - 10k/sq mi
-  LOW: 2000       // Rural: < 2k/sq mi
+  HIGH: 8000,     // Urban: > 8k/sq mi (dense city cores)
+  MEDIUM: 2500,   // Suburban: 2.5k - 8k/sq mi
+  LOW: 2500       // Rural: < 2.5k/sq mi (Weston ~1.5k, should be rural/technical)
 }
 
 // ================================
@@ -406,7 +406,7 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
  * Final classification considering census density + road characteristics + curves
  */
 function finalClassifyPoint(point) {
-  const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity } = point
+  const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity } = point
   
   // Highway override: always TRANSIT regardless of density
   const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
@@ -418,13 +418,17 @@ function finalClassifyPoint(point) {
     return ROUTE_CHARACTER.TRANSIT
   }
 
-  // High curve density in low-density area = TECHNICAL
-  if (densityCategory === 'rural' && curveDensity >= 2) {
+  // TECHNICAL: Rural/low-density areas = the fun twisty roads
+  if (densityCategory === 'rural') {
+    // Rural areas default to TECHNICAL (like Weston, Concord, etc.)
     return ROUTE_CHARACTER.TECHNICAL
   }
 
-  // Suburban with good curves = SPIRITED
+  // Suburban with good curves could upgrade to TECHNICAL
   if (densityCategory === 'suburban') {
+    if (curveDensity >= 3 && (curveAvgSeverity || 0) >= 3) {
+      return ROUTE_CHARACTER.TECHNICAL
+    }
     return ROUTE_CHARACTER.SPIRITED
   }
 
@@ -433,12 +437,7 @@ function finalClassifyPoint(point) {
     return ROUTE_CHARACTER.URBAN
   }
 
-  // Rural default
-  if (densityCategory === 'rural') {
-    return curveDensity >= 1 ? ROUTE_CHARACTER.TECHNICAL : ROUTE_CHARACTER.SPIRITED
-  }
-
-  // Fallback to density-based or SPIRITED
+  // Fallback to SPIRITED
   return point.character || ROUTE_CHARACTER.SPIRITED
 }
 
