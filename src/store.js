@@ -14,6 +14,7 @@ const useStore = create(
       position: null,
       heading: 0,
       speed: 0,
+      altitude: null, // GPS altitude in meters
       gpsAccuracy: null,
       
       // ========== Screen State ==========
@@ -135,6 +136,7 @@ const useStore = create(
       setPosition: (position) => set({ position }),
       setHeading: (heading) => set({ heading }),
       setSpeed: (speed) => set({ speed }),
+      setAltitude: (altitude) => set({ altitude }),
       setGpsAccuracy: (gpsAccuracy) => set({ gpsAccuracy }),
       
       // ========== Route Actions ==========
