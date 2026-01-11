@@ -23,7 +23,7 @@ export default function RouteSelector() {
     removeFavoriteRoute,
   } = useStore()
   
-  const { initDestinationRoute, initImportedRoute } = useRouteAnalysis()
+  const { initDestinationRoute, initImportedRoute, initMultiStopRoute } = useRouteAnalysis()
 
   const [activeTab, setActiveTab] = useState('new')
   const [showDestination, setShowDestination] = useState(false)
@@ -166,6 +166,31 @@ export default function RouteSelector() {
     setShowRoutePreview(true)
   }
 
+  const handleMultiStopRoute = async (coords) => {
+    if (!coords || coords.length < 2) return
+    setError(null)
+    setIsLoading(true)
+    setShowTripBuilder(false)
+
+    try {
+      clearRouteData()
+      setRouteMode('multistop')
+      const success = await initMultiStopRoute(coords)
+      
+      if (success) {
+        setShowRouteSelector(false)
+        setShowRoutePreview(true)
+      } else {
+        setError('Could not create route. Try different locations.')
+      }
+    } catch (err) {
+      setError('Error creating route.')
+      console.error(err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const timeAgo = (timestamp) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
     if (seconds < 60) return 'Just now'
@@ -186,6 +211,7 @@ export default function RouteSelector() {
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col">
+      {/* Header */}
       <div className="p-4 pt-12 safe-top">
         <h1 className="text-2xl font-bold text-white tracking-tight">Rally Co-Pilot</h1>
         <div className="flex items-center gap-2 mt-1">
@@ -196,6 +222,7 @@ export default function RouteSelector() {
         </div>
       </div>
 
+      {/* Error Banner */}
       {error && (
         <div className="mx-4 mb-2 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center justify-between">
           <p className="text-red-400 text-sm">{error}</p>
@@ -207,6 +234,7 @@ export default function RouteSelector() {
         </div>
       )}
 
+      {/* Tab Navigation */}
       <div className="px-4 mb-3">
         <div className="flex bg-white/5 rounded-xl p-1">
           {[
@@ -236,8 +264,10 @@ export default function RouteSelector() {
         </div>
       </div>
 
+      {/* Tab Content */}
       <div className="flex-1 px-4 pb-4 overflow-auto">
         
+        {/* NEW ROUTE TAB */}
         {activeTab === 'new' && (
           <div className="flex flex-col gap-3">
             <button
@@ -340,6 +370,7 @@ export default function RouteSelector() {
           </div>
         )}
 
+        {/* RECENT ROUTES TAB */}
         {activeTab === 'recent' && (
           <div className="flex flex-col gap-2">
             {(!recentRoutes || recentRoutes.length === 0) ? (
@@ -390,6 +421,7 @@ export default function RouteSelector() {
           </div>
         )}
 
+        {/* FAVORITES TAB */}
         {activeTab === 'favorites' && (
           <div className="flex flex-col gap-2">
             {(!favoriteRoutes || favoriteRoutes.length === 0) ? (
@@ -439,6 +471,7 @@ export default function RouteSelector() {
         )}
       </div>
 
+      {/* Destination Search Modal */}
       {showDestination && (
         <SearchModal
           title="Set Destination"
@@ -453,24 +486,63 @@ export default function RouteSelector() {
         />
       )}
 
+      {/* Import Route Modal */}
       {showImport && (
-        <ImportModal
-          value={importUrl}
-          onChange={setImportUrl}
-          isLoading={isLoading}
-          onImport={handleImport}
-          onClose={() => { setShowImport(false); setImportUrl('') }}
-        />
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col">
+          <div className="flex-1" onClick={() => setShowImport(false)} />
+          <div className="w-full bg-[#12121a] rounded-t-3xl p-4 pb-8 safe-bottom">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold text-lg">Import Route</h2>
+              <button onClick={() => setShowImport(false)} className="text-white/40 p-2">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-3">
+              <p className="text-white/50 text-xs">
+                <strong className="text-white/70">How to get the URL:</strong><br/>
+                1. Open Google Maps and create your route<br/>
+                2. Click Share, then Copy link<br/>
+                3. Open the link in your browser<br/>
+                4. Copy the full URL from the address bar
+              </p>
+            </div>
+            <input
+              type="text"
+              value={importUrl}
+              onChange={(e) => setImportUrl(e.target.value)}
+              placeholder="Paste the full Google Maps URL..."
+              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 text-sm"
+              autoFocus
+            />
+            <button
+              onClick={handleImport}
+              disabled={!importUrl.trim() || isLoading}
+              className="w-full mt-3 bg-purple-500 text-white font-semibold py-3 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isLoading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Importing...</span>
+                </>
+              ) : 'Import Route'}
+            </button>
+          </div>
+        </div>
       )}
 
+      {/* Trip Builder Modal */}
       {showTripBuilder && (
         <TripBuilderModal
           position={position}
           onClose={() => setShowTripBuilder(false)}
+          onStartRoute={handleMultiStopRoute}
         />
       )}
 
-      {isLoading && !showDestination && !showImport && !showTripBuilder && (
+      {/* Loading Overlay */}
+      {isLoading && !showDestination && !showImport && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 flex items-center justify-center">
           <div className="bg-[#12121a] rounded-2xl p-6 flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-3 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
@@ -487,6 +559,7 @@ export default function RouteSelector() {
           transition: all 0.2s ease;
         }
         .hud-card:hover { border-color: rgba(255,255,255,0.1); }
+        .hud-card:active { transform: scale(0.98); }
         .border-dashed { border-style: dashed; }
         .safe-top { padding-top: max(12px, env(safe-area-inset-top)); }
         .safe-bottom { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
@@ -495,7 +568,7 @@ export default function RouteSelector() {
   )
 }
 
-// Search Modal
+// Search Modal Component
 function SearchModal({ title, placeholder, value, onChange, results, isSearching, isLoading, onSelect, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col">
@@ -523,7 +596,10 @@ function SearchModal({ title, placeholder, value, onChange, results, isSearching
             autoFocus
           />
           {value && (
-            <button onClick={() => onChange('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/50">
+            <button 
+              onClick={() => onChange('')}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/50"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12"/>
               </svg>
@@ -573,67 +649,16 @@ function SearchModal({ title, placeholder, value, onChange, results, isSearching
   )
 }
 
-// Import Modal
-function ImportModal({ value, onChange, isLoading, onImport, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col">
-      <div className="flex-1" onClick={onClose} />
-      <div className="w-full bg-[#12121a] rounded-t-3xl p-4 pb-8 safe-bottom">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-white font-semibold text-lg">Import Route</h2>
-          <button onClick={onClose} className="text-white/40 p-2">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-        <div className="bg-white/5 border border-white/10 rounded-xl p-3 mb-3">
-          <p className="text-white/50 text-xs">
-            <strong className="text-white/70">How to get the URL:</strong><br/>
-            1. Open Google Maps and create your route<br/>
-            2. Click Share, then Copy link<br/>
-            3. Open the link in your browser<br/>
-            4. Copy the full URL from the address bar
-          </p>
-        </div>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Paste the full Google Maps URL..."
-          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 text-sm"
-          autoFocus
-        />
-        <button
-          onClick={onImport}
-          disabled={!value.trim() || isLoading}
-          className="w-full mt-3 bg-purple-500 text-white font-semibold py-3 rounded-xl disabled:opacity-30 flex items-center justify-center gap-2"
-        >
-          {isLoading ? (
-            <>
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Importing...</span>
-            </>
-          ) : 'Import Route'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 // Trip Builder Modal
-function TripBuilderModal({ position, onClose }) {
-  const { setShowRouteSelector, setShowRoutePreview, setRouteMode, clearRouteData } = useStore()
-  const { initMultiStopRoute } = useRouteAnalysis()
-  
+function TripBuilderModal({ position, onClose, onStartRoute }) {
   const [waypoints, setWaypoints] = useState([
     { id: 1, type: 'start', name: 'Current Location', coordinates: position },
   ])
   const [showAddStop, setShowAddStop] = useState(false)
+  const [editingIndex, setEditingIndex] = useState(null) // Which waypoint we're editing
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
     if (!searchQuery || searchQuery.length < 3) {
@@ -650,16 +675,35 @@ function TripBuilderModal({ position, onClose }) {
   }, [searchQuery])
 
   const addStop = (result) => {
-    const newWaypoint = {
-      id: Date.now(),
-      type: waypoints.length === 1 ? 'end' : 'stop',
-      name: result.name,
-      coordinates: result.coordinates,
+    if (editingIndex !== null) {
+      // Editing existing waypoint
+      const updated = [...waypoints]
+      updated[editingIndex] = {
+        ...updated[editingIndex],
+        name: result.name,
+        coordinates: result.coordinates,
+      }
+      setWaypoints(updated)
+      setEditingIndex(null)
+    } else {
+      // Adding new waypoint
+      const newWaypoint = {
+        id: Date.now(),
+        type: waypoints.length === 1 ? 'end' : 'stop',
+        name: result.name,
+        coordinates: result.coordinates,
+      }
+      setWaypoints([...waypoints, newWaypoint])
     }
-    setWaypoints([...waypoints, newWaypoint])
     setShowAddStop(false)
     setSearchQuery('')
     setSearchResults([])
+  }
+
+  const editWaypoint = (index) => {
+    setEditingIndex(index)
+    setShowAddStop(true)
+    setSearchQuery('')
   }
 
   const removeStop = (id) => {
@@ -672,24 +716,9 @@ function TripBuilderModal({ position, onClose }) {
 
   const handleStartRoute = async () => {
     if (waypoints.length < 2) return
-    
-    setIsLoading(true)
-    try {
-      clearRouteData()
-      setRouteMode('multistop')
-      
-      const coords = waypoints.map(w => w.coordinates).filter(Boolean)
-      const success = await initMultiStopRoute(coords)
-      
-      if (success) {
-        onClose()
-        setShowRouteSelector(false)
-        setShowRoutePreview(true)
-      }
-    } catch (err) {
-      console.error('Multi-stop route error:', err)
-    } finally {
-      setIsLoading(false)
+    const coords = waypoints.map(w => w.coordinates).filter(Boolean)
+    if (coords.length >= 2) {
+      onStartRoute(coords)
     }
   }
 
@@ -708,6 +737,7 @@ function TripBuilderModal({ position, onClose }) {
           </button>
         </div>
 
+        {/* Waypoints List */}
         <div className="flex-1 overflow-auto mb-4">
           <div className="space-y-2">
             {waypoints.map((waypoint, index) => (
@@ -722,21 +752,32 @@ function TripBuilderModal({ position, onClose }) {
                   )}
                 </div>
                 
-                <div className="flex-1 bg-white/5 rounded-xl p-3 flex items-center gap-3">
+                <button
+                  onClick={() => editWaypoint(index)}
+                  className="flex-1 bg-white/5 rounded-xl p-3 flex items-center gap-3 text-left hover:bg-white/10 transition-colors"
+                >
                   <div className="flex-1 min-w-0">
                     <div className="text-[10px] text-white/40 uppercase tracking-wider">
                       {waypoint.type === 'start' ? 'Start' : waypoint.type === 'end' ? 'Destination' : `Stop ${index}`}
                     </div>
                     <div className="text-white text-sm truncate">{waypoint.name}</div>
                   </div>
-                  {waypoint.type !== 'start' && (
-                    <button onClick={() => removeStop(waypoint.id)} className="p-1.5 text-white/30 hover:text-white/50">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="opacity-30">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                </button>
+                
+                {waypoint.type !== 'start' && (
+                  <button
+                    onClick={() => removeStop(waypoint.id)}
+                    className="p-1.5 text-white/30 hover:text-white/50"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -755,14 +796,21 @@ function TripBuilderModal({ position, onClose }) {
 
           {showAddStop && (
             <div className="mt-3 bg-white/5 rounded-xl p-3">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search for a place..."
-                className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-white/30 focus:outline-none focus:border-cyan-500/50 mb-2"
-                autoFocus
-              />
+              <div className="text-xs text-white/50 mb-2">
+                {editingIndex !== null 
+                  ? `Change ${waypoints[editingIndex]?.type === 'start' ? 'start location' : waypoints[editingIndex]?.type === 'end' ? 'destination' : 'stop'}`
+                  : 'Add a stop'}
+              </div>
+              <div className="relative mb-2">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search for a place..."
+                  className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-white/30 focus:outline-none focus:border-cyan-500/50"
+                  autoFocus
+                />
+              </div>
               
               {isSearching && (
                 <div className="flex items-center justify-center py-4">
@@ -785,7 +833,7 @@ function TripBuilderModal({ position, onClose }) {
               )}
               
               <button
-                onClick={() => { setShowAddStop(false); setSearchQuery(''); setSearchResults([]) }}
+                onClick={() => { setShowAddStop(false); setSearchQuery(''); setSearchResults([]); setEditingIndex(null) }}
                 className="w-full mt-2 text-white/40 text-xs"
               >
                 Cancel
@@ -797,12 +845,12 @@ function TripBuilderModal({ position, onClose }) {
         <button
           onClick={handleStartRoute}
           disabled={!canStartRoute || isLoading}
-          className="w-full bg-cyan-500 text-white font-semibold py-3 rounded-xl disabled:opacity-30 flex items-center justify-center gap-2"
+          className="w-full bg-cyan-500 text-white font-semibold py-3 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isLoading ? (
             <>
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Planning route...</span>
+              <span>Building route...</span>
             </>
           ) : (
             <>
