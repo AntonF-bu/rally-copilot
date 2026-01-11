@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook - iOS Fixed
+// Speech Hook v2 - Technical Sections
 // Native speech with timeout fallback
 // ================================
 
@@ -24,7 +24,6 @@ export function useSpeech() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create audio element
     const audio = new Audio()
     audio.playsInline = true
     audioRef.current = audio
@@ -41,7 +40,6 @@ export function useSpeech() {
       setSpeaking(false, '')
     }
 
-    // Native speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -65,8 +63,6 @@ export function useSpeech() {
 
       loadVoices()
       synthRef.current.onvoiceschanged = loadVoices
-      
-      // iOS hack: voices may not load immediately
       setTimeout(loadVoices, 100)
       setTimeout(loadVoices, 500)
     }
@@ -78,13 +74,11 @@ export function useSpeech() {
     }
   }, [setSpeaking])
 
-  // Clear speaking state after timeout (iOS safety)
   const setSpeakingWithTimeout = useCallback((speaking, text, duration = 5000) => {
     clearTimeout(timeoutRef.current)
     setSpeaking(speaking, text)
     
     if (speaking) {
-      // Auto-clear after timeout in case events don't fire (iOS issue)
       timeoutRef.current = setTimeout(() => {
         isPlayingRef.current = false
         setSpeaking(false, '')
@@ -92,7 +86,6 @@ export function useSpeech() {
     }
   }, [setSpeaking])
 
-  // Native speech
   const speakNative = useCallback((text) => {
     if (!synthRef.current) {
       console.log('🔊 No speech synthesis available')
@@ -100,10 +93,8 @@ export function useSpeech() {
     }
 
     try {
-      // Cancel any ongoing speech
       synthRef.current.cancel()
       
-      // iOS fix: need small delay after cancel
       setTimeout(() => {
         const utterance = new SpeechSynthesisUtterance(text)
         
@@ -143,9 +134,7 @@ export function useSpeech() {
     }
   }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
-  // ElevenLabs TTS
   const speakElevenLabs = useCallback(async (text) => {
-    // Check cache
     if (AUDIO_CACHE.has(text)) {
       try {
         audioRef.current.src = AUDIO_CACHE.get(text)
@@ -194,18 +183,15 @@ export function useSpeech() {
     }
   }, [setSpeaking, setSpeakingWithTimeout, settings.volume])
 
-  // Main speak function
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled || !text) return false
 
     const now = Date.now()
     
-    // Don't repeat within 2 seconds
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 2000) {
       return false
     }
 
-    // Handle priority
     if (priority === 'high') {
       clearTimeout(timeoutRef.current)
       audioRef.current?.pause()
@@ -218,18 +204,14 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try ElevenLabs first (better voice)
     const success = await speakElevenLabs(text)
     if (success) return true
     
-    // Fallback to native speech
     return speakNative(text)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
-  // Initialize audio (call from user interaction)
   const initAudio = useCallback(async () => {
     try {
-      // Unlock audio context
       if (audioRef.current) {
         audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
         audioRef.current.volume = 0.01
@@ -241,7 +223,6 @@ export function useSpeech() {
         }
       }
       
-      // Unlock speech synthesis
       if (synthRef.current) {
         try {
           const u = new SpeechSynthesisUtterance('')
@@ -257,7 +238,7 @@ export function useSpeech() {
       return true
     } catch (e) {
       console.log('Audio init error:', e.message)
-      return true // Return true anyway to not block navigation
+      return true
     }
   }, [])
 
@@ -282,7 +263,10 @@ async function preloadRouteAudio(curves) {
 
   const callouts = new Set()
   curves.forEach(curve => {
-    if (curve.isChicane) {
+    if (curve.isTechnicalSection) {
+      callouts.add(`Technical section ahead`)
+      callouts.add(`${curve.sectionCharacter} section, ${curve.curveCount} curves`)
+    } else if (curve.isChicane) {
       const dir = curve.startDirection === 'LEFT' ? 'left' : 'right'
       callouts.add(`Chicane ${dir} ${curve.severitySequence}`)
     } else {
@@ -320,40 +304,54 @@ async function preloadRouteAudio(curves) {
   return { success: cached > 0, cached, total: list.length }
 }
 
-// Generate callout - ADAPTIVE LENGTH based on time available
+/**
+ * Generate callout for a curve, chicane, or technical section
+ */
 export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main', options = {}) {
   if (!curve) return ''
 
+  // Handle technical sections
+  if (curve.isTechnicalSection) {
+    return generateTechnicalSectionCallout(curve, mode, speedUnit, phase)
+  }
+
   const getSpeed = (severity) => {
-    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }
-    const mult = { cruise: 1.0, fast: 1.15, race: 1.3 }
-    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 1.0))
+    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
+    const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
+    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 0.92))
     if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
     return speed
   }
 
-  const dir = curve.direction === 'LEFT' ? 'left' : 'right'
-  const Dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-  const speed = getSpeed(curve.severity)
+  // FIXED: Always use startDirection for chicanes, direction for regular curves
+  const dir = curve.isChicane 
+    ? (curve.startDirection === 'LEFT' ? 'left' : 'right')
+    : (curve.direction === 'LEFT' ? 'left' : 'right')
+  const Dir = dir.charAt(0).toUpperCase() + dir.slice(1)
+  
+  const speed = curve.isChicane 
+    ? getSpeed(Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity])))
+    : getSpeed(curve.severity)
+  
   const isHard = curve.severity >= 4
   const isVeryHard = curve.severity >= 5
   const isGentle = curve.severity <= 2
   
-  // Distance text
   const distText = getDistanceText(curve.distance, speedUnit)
   
-  // Check gap to next curve - determines callout length
   let gapToNext = 999
   if (nextCurve) {
     gapToNext = (nextCurve.distanceFromStart || 0) - ((curve.distanceFromStart || 0) + (curve.length || 0))
   }
-  const hasTimeForDetail = gapToNext > 150 // More than 150m to next curve = time for details
+  const hasTimeForDetail = gapToNext > 150
   
-  // Curve character description
   const curveCharacter = getCurveCharacter(curve)
   
   // PHASE: EARLY WARNING
   if (phase === 'early') {
+    if (curve.isChicane) {
+      return `Chicane ahead starting ${dir}. Severity ${curve.severitySequence}. Prepare for ${speed}.`
+    }
     if (isVeryHard) {
       return `Caution ahead. ${curveCharacter} ${dir} ${curve.severity} in ${distText}. Prepare to slow to ${speed}.`
     }
@@ -363,27 +361,25 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
     return `${curveCharacter} ${dir} ${curve.severity} ahead in ${distText}.`
   }
   
-  // PHASE: FINAL WARNING - always short
+  // PHASE: FINAL WARNING
   if (phase === 'final') {
+    if (curve.isChicane) {
+      return `Chicane now! ${Dir} first, ${speed}!`
+    }
     if (isVeryHard) {
       return `${Dir} ${curve.severity} now! ${speed}!`
     }
     return `${Dir} ${curve.severity} now.`
   }
   
-  // PHASE: MAIN CALLOUT - length depends on time available
+  // PHASE: MAIN CALLOUT
   const sentences = []
   
   if (curve.isChicane) {
-    const chicaneDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
-    const maxSev = Math.max(...(curve.severitySequence?.split('-').map(Number) || [curve.severity]))
-    const chicaneSpeed = getSpeed(maxSev)
-    
-    sentences.push(`In ${distText}, chicane starting ${chicaneDir}.`)
-    sentences.push(`Severity ${curve.severitySequence}, take at ${chicaneSpeed}.`)
+    sentences.push(`In ${distText}, chicane starting ${dir}.`)
+    sentences.push(`Severity ${curve.severitySequence}, take at ${speed}.`)
     
   } else {
-    // Opening with action and curve info
     if (isVeryHard) {
       sentences.push(`Slow to ${speed}.`)
       sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}.`)
@@ -396,9 +392,7 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
       sentences.push(`In ${distText}, ${curveCharacter} ${dir} ${curve.severity}. Target ${speed}.`)
     }
     
-    // Add details ONLY if we have time (next curve is far)
     if (hasTimeForDetail) {
-      // Curve behavior
       if (curve.modifier) {
         switch (curve.modifier) {
           case 'HAIRPIN': 
@@ -419,7 +413,6 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
         }
       }
       
-      // Length info for long curves
       if (curve.length > 150) {
         const lengthText = speedUnit === 'kmh' 
           ? `${Math.round(curve.length)} meters long`
@@ -430,15 +423,25 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   }
   
   // Next curve preview
-  if (nextCurve && !curve.isChicane) {
-    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
+  if (nextCurve && !curve.isChicane && !nextCurve.isTechnicalSection) {
+    const nextDir = nextCurve.isChicane 
+      ? (nextCurve.startDirection === 'LEFT' ? 'left' : 'right')
+      : (nextCurve.direction === 'LEFT' ? 'left' : 'right')
     const nextSpeed = getSpeed(nextCurve.severity)
     const nextCharacter = getCurveCharacter(nextCurve)
     
     if (gapToNext < 50) {
-      sentences.push(`Immediately into ${nextDir} ${nextCurve.severity}.`)
+      if (nextCurve.isChicane) {
+        sentences.push(`Immediately into chicane ${nextDir}.`)
+      } else {
+        sentences.push(`Immediately into ${nextDir} ${nextCurve.severity}.`)
+      }
     } else if (gapToNext < 150) {
-      sentences.push(`Then ${nextDir} ${nextCurve.severity} at ${nextSpeed}.`)
+      if (nextCurve.isChicane) {
+        sentences.push(`Then chicane ${nextDir} at ${nextSpeed}.`)
+      } else {
+        sentences.push(`Then ${nextDir} ${nextCurve.severity} at ${nextSpeed}.`)
+      }
     } else if (gapToNext < 300 && hasTimeForDetail) {
       sentences.push(`${nextCharacter} ${nextDir} ${nextCurve.severity} follows.`)
     }
@@ -447,18 +450,82 @@ export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextC
   return sentences.join(' ')
 }
 
+/**
+ * Generate callout for technical section (sustained windy stretch)
+ */
+function generateTechnicalSectionCallout(section, mode, speedUnit, phase) {
+  const getSpeed = (severity) => {
+    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
+    const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
+    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 0.92))
+    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
+    return speed
+  }
+  
+  const dir = section.direction === 'LEFT' ? 'left' : 'right'
+  const speed = getSpeed(section.severity)
+  const distText = getDistanceText(section.distance, speedUnit)
+  const lengthText = getLengthText(section.length, speedUnit)
+  
+  // Character descriptions
+  const characterDesc = {
+    'switchbacks': 'switchback section',
+    'sweeping': 'sweeping curves',
+    'technical': 'technical section',
+    'windy': 'windy stretch'
+  }
+  const character = characterDesc[section.sectionCharacter] || 'windy section'
+  
+  if (phase === 'early') {
+    return `${character} ahead. ${section.curveCount} curves over ${lengthText}. Max severity ${section.severity}. Hold ${speed}.`
+  }
+  
+  if (phase === 'final') {
+    return `${character} now! Starting ${dir}. Hold ${speed}.`
+  }
+  
+  // Main callout - comprehensive summary
+  const sentences = []
+  
+  sentences.push(`In ${distText}, ${character}.`)
+  sentences.push(`${section.curveCount} curves over ${lengthText}, starting ${dir}.`)
+  sentences.push(`Max severity ${section.severity}. Maintain ${speed} through.`)
+  
+  // Add direction sequence hint for complex sections
+  if (section.directionChanges >= 3) {
+    const seqHint = section.directionSequence.slice(0, 5) // First 5 directions
+    const readable = seqHint.split('').map(d => d === 'L' ? 'left' : 'right').join(', ')
+    sentences.push(`Pattern: ${readable}.`)
+  }
+  
+  return sentences.join(' ')
+}
+
+/**
+ * Generate abbreviated callout for curves WITHIN a technical section
+ * Used after the initial section announcement
+ */
+export function generateInSectionCallout(curve, mode, speedUnit) {
+  const dir = curve.direction === 'LEFT' ? 'left' : 'right'
+  const Dir = dir.charAt(0).toUpperCase() + dir.slice(1)
+  
+  // Very short callouts within section
+  if (curve.severity >= 5) {
+    return `${Dir} ${curve.severity}!`
+  }
+  return `${Dir} ${curve.severity}`
+}
+
 // Get curve character description
 function getCurveCharacter(curve) {
   if (!curve) return ''
+  if (curve.isChicane) return 'chicane'
+  if (curve.isTechnicalSection) return curve.sectionCharacter || 'technical'
   
   const severity = curve.severity
   const length = curve.length || 0
   
-  // Wide sweeper
-  if (severity <= 2 && length > 150) {
-    return 'sweeping'
-  }
-  
+  if (severity <= 2 && length > 150) return 'sweeping'
   if (severity <= 1) return 'gentle'
   if (severity === 2) return 'easy'
   if (severity === 3) return 'moderate'
@@ -467,52 +534,11 @@ function getCurveCharacter(curve) {
   return 'very sharp'
 }
 
-// Short distance text
-function getShortDistanceText(distanceMeters, speedUnit = 'mph') {
-  if (!distanceMeters || distanceMeters < 0) return 'ahead'
-  
-  if (speedUnit === 'kmh') {
-    if (distanceMeters >= 500) {
-      return `${Math.round(distanceMeters / 100) * 100}m`
-    }
-    return `${Math.round(distanceMeters / 50) * 50}m`
-  } else {
-    const feet = distanceMeters * 3.28084
-    if (feet >= 1000) {
-      return `${Math.round(feet / 100) * 100} feet`
-    }
-    return `${Math.round(feet / 50) * 50} feet`
-  }
-}
-
-// Generate straight section callout - SHORT
-export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const distText = getShortDistanceText(distanceMeters, speedUnit)
-  
-  if (nextCurve) {
-    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
-  }
-  return `Clear for ${distText}.`
-}
-
-// Generate "after curve" callout - SHORT
-export function generatePostCurveCallout(straightDistance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
-  const distText = getShortDistanceText(straightDistance, speedUnit)
-  
-  if (nextCurve) {
-    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
-  }
-  return `Clear for ${distText}.`
-}
-
 // Convert distance to natural speech
 function getDistanceText(distanceMeters, speedUnit = 'mph') {
   if (!distanceMeters || distanceMeters < 0) return 'ahead'
   
   if (speedUnit === 'kmh') {
-    // Metric
     if (distanceMeters >= 1000) {
       const km = Math.round(distanceMeters / 100) / 10
       return `${km} kilometers`
@@ -523,9 +549,8 @@ function getDistanceText(distanceMeters, speedUnit = 'mph') {
     }
     return `${Math.round(distanceMeters)} meters`
   } else {
-    // Imperial - convert to feet
     const feet = distanceMeters * 3.28084
-    if (feet >= 2640) { // Half mile+
+    if (feet >= 2640) {
       const miles = Math.round(feet / 528) / 10
       return `${miles} miles`
     } else if (feet >= 1000) {
@@ -534,6 +559,26 @@ function getDistanceText(distanceMeters, speedUnit = 'mph') {
       return `${Math.round(feet / 50) * 50} feet`
     }
     return `${Math.round(feet / 25) * 25} feet`
+  }
+}
+
+// Convert length to natural speech (for section lengths)
+function getLengthText(lengthMeters, speedUnit = 'mph') {
+  if (speedUnit === 'kmh') {
+    if (lengthMeters >= 1000) {
+      const km = Math.round(lengthMeters / 100) / 10
+      return `${km} km`
+    }
+    return `${Math.round(lengthMeters / 50) * 50} meters`
+  } else {
+    const feet = lengthMeters * 3.28084
+    if (feet >= 2640) {
+      const miles = Math.round(feet / 528) / 10
+      return `${miles} miles`
+    } else if (feet >= 1320) {
+      return 'quarter mile'
+    }
+    return `${Math.round(feet / 100) * 100} feet`
   }
 }
 
@@ -547,12 +592,38 @@ export function generateFinalWarning(curve, mode = 'cruise', speedUnit = 'mph') 
   return generateCallout(curve, mode, speedUnit, null, 'final')
 }
 
+// Generate straight section callout
+export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+  const distText = getDistanceText(distanceMeters, speedUnit)
+  
+  if (nextCurve) {
+    const nextDir = nextCurve.isChicane 
+      ? (nextCurve.startDirection === 'LEFT' ? 'left' : 'right')
+      : (nextCurve.direction === 'LEFT' ? 'left' : 'right')
+    
+    if (nextCurve.isTechnicalSection) {
+      return `Clear. ${nextCurve.sectionCharacter} section in ${distText}.`
+    }
+    return `Clear. ${nextDir} ${nextCurve.severity} in ${distText}.`
+  }
+  return `Clear for ${distText}.`
+}
+
+// Generate post-curve callout
+export function generatePostCurveCallout(straightDistance, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+  return generateStraightCallout(straightDistance, mode, speedUnit, nextCurve)
+}
+
 export function generateShortCallout(curve, mode = 'cruise') {
   if (!curve) return ''
-  const speeds = { 1: 65, 2: 55, 3: 45, 4: 35, 5: 28, 6: 20 }
-  const mult = { cruise: 0.9, fast: 1.0, race: 1.15 }
-  const speed = Math.round((speeds[curve.severity] || 40) * (mult[mode] || 1.0))
-  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
+  const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
+  const speed = Math.round((speeds[curve.severity] || 40) * (mult[mode] || 0.92))
+  
+  const dir = curve.isChicane 
+    ? (curve.startDirection === 'LEFT' ? 'Left' : 'Right')
+    : (curve.direction === 'LEFT' ? 'Left' : 'Right')
+  
   return `${dir} ${curve.severity}, ${speed}`
 }
 
