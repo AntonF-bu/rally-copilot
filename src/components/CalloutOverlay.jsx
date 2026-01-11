@@ -354,9 +354,9 @@ export default function CalloutOverlay({ currentDrivingMode }) {
         </div>
       </div>
 
-      {/* Upcoming curves - left side */}
+      {/* Upcoming curves - left side, below main HUD */}
       {upcomingCurves.length > 1 && (
-        <div className="absolute top-24 left-3 hud-glass rounded-xl px-3 py-2">
+        <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
           <div className="flex flex-col gap-1">
             {upcomingCurves.slice(1, 4).map((next) => (
