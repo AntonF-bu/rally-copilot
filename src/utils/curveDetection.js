@@ -1,13 +1,13 @@
 // ================================
-// Curve Detection Algorithm v5.1
-// Full featured: sliding window, merging, S-curves, tightening/opening
-// Improved: lower thresholds, better "already passed" detection
+// Curve Detection Algorithm v6
+// Maximum sensitivity for wide sweeping bends
+// Clear communication focus
 // ================================
 
-const SAMPLE_INTERVAL = 15 // meters between samples (was 20)
-const SLIDING_WINDOW_DISTANCE = 100 // meters for gradual curve detection (was 120)
-const MIN_CURVE_SEPARATION = 75 // meters - closer curves get merged
-const CHICANE_MAX_DISTANCE = 100 // meters - max distance for S-curve/chicane detection
+const SAMPLE_INTERVAL = 10 // meters between samples (was 15) - finer granularity
+const SLIDING_WINDOW_DISTANCE = 150 // meters for gradual curve detection (was 100) - longer window catches wider bends
+const MIN_CURVE_SEPARATION = 60 // meters - closer curves get merged
+const CHICANE_MAX_DISTANCE = 120 // meters - max distance for S-curve/chicane detection
 
 /**
  * Main entry point - detect all curves with full analysis
@@ -15,6 +15,7 @@ const CHICANE_MAX_DISTANCE = 100 // meters - max distance for S-curve/chicane de
 export function detectCurves(coordinates) {
   if (!coordinates || coordinates.length < 3) return []
 
+  console.log(`🛣️ Curve Detection v6 - Maximum Sensitivity`)
   console.log(`Original route has ${coordinates.length} points`)
 
   // Step 1: Interpolate to fixed intervals
@@ -132,10 +133,10 @@ function detectAllCurves(points, headings) {
 function detectSharpCurves(points, headings, usedPoints) {
   const curves = []
   
-  // Lowered thresholds for better detection
-  const CURVE_START_THRESHOLD = 4  // was 5
-  const CURVE_CONTINUE_THRESHOLD = 1.5  // was 2
-  const MIN_CURVE_ANGLE = 10  // was 12
+  // Maximum sensitivity thresholds
+  const CURVE_START_THRESHOLD = 2.5  // was 4 - detect even subtle direction changes
+  const CURVE_CONTINUE_THRESHOLD = 1  // was 1.5 - keep tracking very gentle curves
+  const MIN_CURVE_ANGLE = 8  // was 10 - capture gentler bends
 
   let i = 0
   while (i < headings.length - 1) {
@@ -160,8 +161,9 @@ function detectSharpCurves(points, headings, usedPoints) {
           segmentChanges.push({ index: curveEnd, change: nextChange })
           curveEnd++
         } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
+          // Look ahead further to bridge gaps in wide bends
           let lookAhead = 0
-          for (let j = 1; j <= 4 && curveEnd + j < headings.length; j++) {  // Look ahead 4 instead of 3
+          for (let j = 1; j <= 6 && curveEnd + j < headings.length; j++) {  // Look ahead 6 instead of 4
             lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
           }
           if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
@@ -195,11 +197,12 @@ function detectSharpCurves(points, headings, usedPoints) {
 
 /**
  * Detect gradual curves using sliding window
+ * Optimized for wide sweeping bends
  */
 function detectGradualCurves(points, headings, usedPoints) {
   const curves = []
-  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL)
-  const MIN_GRADUAL_ANGLE = 20 // was 25 - lower for gentle sweeping curves
+  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL) // 15 samples at 10m = 150m window
+  const MIN_GRADUAL_ANGLE = 12 // was 20 - much lower to catch wide sweepers
   
   let i = 0
   while (i < headings.length - windowSize) {
@@ -208,7 +211,7 @@ function detectGradualCurves(points, headings, usedPoints) {
     for (let j = i; j < i + windowSize && !hasUsedPoint; j++) {
       if (usedPoints.has(j)) hasUsedPoint = true
     }
-    if (hasUsedPoint) { i += Math.floor(windowSize / 2); continue }
+    if (hasUsedPoint) { i += Math.floor(windowSize / 3); continue } // Smaller skip to not miss curves
     
     // Calculate total heading change over window
     let windowHeadingChange = 0
@@ -225,10 +228,10 @@ function detectGradualCurves(points, headings, usedPoints) {
       let totalChange = windowHeadingChange
       const direction = Math.sign(windowHeadingChange)
       
-      // Expand backwards
+      // Expand backwards - very sensitive
       while (curveStart > 0 && !usedPoints.has(curveStart - 1)) {
         const change = getHeadingChange(headings[curveStart - 1], headings[curveStart])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.5) {  // was 1
+        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {  // was 0.5 - even more sensitive
           totalChange += change
           curveStart--
         } else {
@@ -236,10 +239,10 @@ function detectGradualCurves(points, headings, usedPoints) {
         }
       }
       
-      // Expand forwards
+      // Expand forwards - very sensitive
       while (curveEnd < headings.length - 1 && !usedPoints.has(curveEnd + 1)) {
         const change = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.5) {  // was 1
+        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {  // was 0.5 - even more sensitive
           totalChange += change
           curveEnd++
         } else {
@@ -572,17 +575,20 @@ function estimateRadius(arcLength, angleDegrees) {
 
 function getSeverityFromRadius(radius, totalAngle) {
   let severity
-  // Adjusted thresholds for better gradual curve detection
-  if (radius > 250) severity = 1  // was 200
-  else if (radius > 150) severity = 2  // was 120
-  else if (radius > 90) severity = 3  // was 70
-  else if (radius > 50) severity = 4  // was 40
-  else if (radius > 25) severity = 5  // was 20
-  else severity = 6
+  // Extended thresholds to capture very wide bends
+  if (radius > 400) severity = 1  // Very gentle sweeper
+  else if (radius > 250) severity = 1  // Gentle sweeper
+  else if (radius > 150) severity = 2  // Easy curve
+  else if (radius > 90) severity = 3   // Moderate
+  else if (radius > 50) severity = 4   // Tight
+  else if (radius > 25) severity = 5   // Very tight
+  else severity = 6                     // Extreme
 
+  // Adjust severity based on total angle (longer curves need more attention)
   if (totalAngle > 150) severity = Math.max(severity, 5)
   else if (totalAngle > 120) severity = Math.max(severity, 4)
-  else if (totalAngle > 90) severity = Math.min(6, Math.max(severity, severity + 1))
+  else if (totalAngle > 90) severity = Math.max(severity, Math.min(6, severity + 1))
+  else if (totalAngle > 60) severity = Math.max(severity, Math.min(5, severity + 1))
   
   return Math.min(6, severity)
 }
