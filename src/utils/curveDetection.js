@@ -1,13 +1,12 @@
 // ================================
-// Curve Detection Algorithm v6
-// Maximum sensitivity for wide sweeping bends
-// Clear communication focus
+// Curve Detection Algorithm v7
+// MAXIMUM sensitivity for long wide curves
 // ================================
 
-const SAMPLE_INTERVAL = 10 // meters between samples (was 15) - finer granularity
-const SLIDING_WINDOW_DISTANCE = 150 // meters for gradual curve detection (was 100) - longer window catches wider bends
-const MIN_CURVE_SEPARATION = 60 // meters - closer curves get merged
-const CHICANE_MAX_DISTANCE = 120 // meters - max distance for S-curve/chicane detection
+const SAMPLE_INTERVAL = 8 // meters between samples - very fine granularity
+const SLIDING_WINDOW_DISTANCE = 200 // meters for gradual curve detection - catches very wide bends
+const MIN_CURVE_SEPARATION = 50 // meters - closer curves get merged
+const CHICANE_MAX_DISTANCE = 150 // meters - max distance for S-curve/chicane detection
 
 /**
  * Main entry point - detect all curves with full analysis
@@ -15,7 +14,7 @@ const CHICANE_MAX_DISTANCE = 120 // meters - max distance for S-curve/chicane de
 export function detectCurves(coordinates) {
   if (!coordinates || coordinates.length < 3) return []
 
-  console.log(`🛣️ Curve Detection v6 - Maximum Sensitivity`)
+  console.log(`🛣️ Curve Detection v7 - MAXIMUM Sensitivity for Long Curves`)
   console.log(`Original route has ${coordinates.length} points`)
 
   // Step 1: Interpolate to fixed intervals
@@ -133,10 +132,10 @@ function detectAllCurves(points, headings) {
 function detectSharpCurves(points, headings, usedPoints) {
   const curves = []
   
-  // Maximum sensitivity thresholds
-  const CURVE_START_THRESHOLD = 2.5  // was 4 - detect even subtle direction changes
-  const CURVE_CONTINUE_THRESHOLD = 1  // was 1.5 - keep tracking very gentle curves
-  const MIN_CURVE_ANGLE = 8  // was 10 - capture gentler bends
+  // ULTRA sensitivity thresholds - detect everything
+  const CURVE_START_THRESHOLD = 1.0  // Detect even 1 degree changes
+  const CURVE_CONTINUE_THRESHOLD = 0.3  // Keep tracking micro-curves
+  const MIN_CURVE_ANGLE = 5  // Capture very slight bends
 
   let i = 0
   while (i < headings.length - 1) {
@@ -161,9 +160,9 @@ function detectSharpCurves(points, headings, usedPoints) {
           segmentChanges.push({ index: curveEnd, change: nextChange })
           curveEnd++
         } else if (Math.abs(nextChange) <= CURVE_CONTINUE_THRESHOLD) {
-          // Look ahead further to bridge gaps in wide bends
+          // Look ahead even further to bridge gaps in very wide bends
           let lookAhead = 0
-          for (let j = 1; j <= 6 && curveEnd + j < headings.length; j++) {  // Look ahead 6 instead of 4
+          for (let j = 1; j <= 10 && curveEnd + j < headings.length; j++) {  // Look ahead 10 samples
             lookAhead += getHeadingChange(headings[curveEnd + j - 1], headings[curveEnd + j])
           }
           if (Math.sign(lookAhead) === direction && Math.abs(lookAhead) > CURVE_START_THRESHOLD) {
@@ -197,12 +196,12 @@ function detectSharpCurves(points, headings, usedPoints) {
 
 /**
  * Detect gradual curves using sliding window
- * Optimized for wide sweeping bends
+ * ULTRA sensitivity for even the slightest bends
  */
 function detectGradualCurves(points, headings, usedPoints) {
   const curves = []
-  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL) // 15 samples at 10m = 150m window
-  const MIN_GRADUAL_ANGLE = 12 // was 20 - much lower to catch wide sweepers
+  const windowSize = Math.floor(SLIDING_WINDOW_DISTANCE / SAMPLE_INTERVAL) // 25 samples at 8m = 200m window
+  const MIN_GRADUAL_ANGLE = 5 // Detect even 5 degree changes over 200m - ULTRA sensitive
   
   let i = 0
   while (i < headings.length - windowSize) {
@@ -211,7 +210,7 @@ function detectGradualCurves(points, headings, usedPoints) {
     for (let j = i; j < i + windowSize && !hasUsedPoint; j++) {
       if (usedPoints.has(j)) hasUsedPoint = true
     }
-    if (hasUsedPoint) { i += Math.floor(windowSize / 3); continue } // Smaller skip to not miss curves
+    if (hasUsedPoint) { i += Math.floor(windowSize / 5); continue } // Very small skip
     
     // Calculate total heading change over window
     let windowHeadingChange = 0
@@ -228,10 +227,10 @@ function detectGradualCurves(points, headings, usedPoints) {
       let totalChange = windowHeadingChange
       const direction = Math.sign(windowHeadingChange)
       
-      // Expand backwards - very sensitive
+      // Expand backwards - extremely sensitive
       while (curveStart > 0 && !usedPoints.has(curveStart - 1)) {
         const change = getHeadingChange(headings[curveStart - 1], headings[curveStart])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {  // was 0.5 - even more sensitive
+        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {  // Ultra sensitive
           totalChange += change
           curveStart--
         } else {
@@ -239,10 +238,10 @@ function detectGradualCurves(points, headings, usedPoints) {
         }
       }
       
-      // Expand forwards - very sensitive
+      // Expand forwards - extremely sensitive
       while (curveEnd < headings.length - 1 && !usedPoints.has(curveEnd + 1)) {
         const change = getHeadingChange(headings[curveEnd], headings[curveEnd + 1])
-        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {  // was 0.5 - even more sensitive
+        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {  // Ultra sensitive
           totalChange += change
           curveEnd++
         } else {
