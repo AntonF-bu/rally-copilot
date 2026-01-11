@@ -220,7 +220,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
-  // Fly animation
+  // Fly animation - SLOWER speed
   const startFlyAnimation = useCallback(() => {
     if (!mapRef.current || !routeData?.coordinates) return
     const coords = routeData.coordinates
@@ -233,12 +233,23 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
     }
     
-    const animate = () => {
+    let lastTime = 0
+    const frameInterval = 120 / flySpeed // ~120ms between frames at 1x speed
+    
+    const animate = (timestamp) => {
       if (flyIndexRef.current >= coords.length - 1) { stopFlyThrough(); return }
+      
+      // Throttle animation frames
+      if (timestamp - lastTime < frameInterval) {
+        flyAnimationRef.current = requestAnimationFrame(animate)
+        return
+      }
+      lastTime = timestamp
+      
       const current = coords[flyIndexRef.current]
-      const next = coords[Math.min(flyIndexRef.current + 5, coords.length - 1)]
-      mapRef.current?.easeTo({ center: current, bearing: getBearing(current, next), pitch: 60, zoom: 15, duration: 80 / flySpeed })
-      flyIndexRef.current += Math.ceil(2 * flySpeed)
+      const next = coords[Math.min(flyIndexRef.current + 10, coords.length - 1)]
+      mapRef.current?.easeTo({ center: current, bearing: getBearing(current, next), pitch: 55, zoom: 15.5, duration: 150 })
+      flyIndexRef.current += Math.max(1, Math.ceil(flySpeed)) // Move 1 coord at 1x, more at higher speeds
       flyAnimationRef.current = requestAnimationFrame(animate)
     }
     flyAnimationRef.current = requestAnimationFrame(animate)
@@ -259,16 +270,27 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     else { setIsPaused(true); if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current) }
   }
 
-  const stopFlyThrough = () => {
+  const stopFlyThrough = useCallback(() => {
     if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
+    flyAnimationRef.current = null
     setIsFlying(false)
     setIsPaused(false)
     flyIndexRef.current = 0
+    
+    // Reset to overview - wait a moment then fit bounds
     if (mapRef.current && routeData?.coordinates) {
-      const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000, pitch: 0 })
+      setTimeout(() => {
+        if (!mapRef.current) return
+        const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+        mapRef.current.fitBounds(bounds, { 
+          padding: { top: 120, bottom: 160, left: 40, right: 40 }, 
+          duration: 1200, 
+          pitch: 0,
+          bearing: 0
+        })
+      }, 100)
     }
-  }
+  }, [routeData])
 
   useEffect(() => {
     if (isFlying && !isPaused) {
@@ -380,8 +402,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     // Remove existing zone layers
     zoneLayersRef.current.forEach(id => {
-      if (map.getLayer(id)) map.removeLayer(id)
-      if (map.getSource(id)) map.removeSource(id)
+      try {
+        if (map.getLayer(id)) map.removeLayer(id)
+        if (map.getSource(id)) map.removeSource(id)
+      } catch (e) {}
     })
     zoneLayersRef.current = []
     
@@ -389,12 +413,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (!zone.coordinates?.length || zone.coordinates.length < 2) return
       
       const colors = ZONE_COLORS[zone.type] || ZONE_COLORS.rural
-      const sourceId = `zone-${i}`
+      const sourceId = `zone-src-${i}`
       const fillId = `zone-fill-${i}`
       const lineId = `zone-line-${i}`
       
-      // Create buffer polygon around route segment
-      const bufferCoords = createRouteBuffer(zone.coordinates, 0.0006)
+      // Create buffer polygon around route segment (bigger buffer)
+      const bufferCoords = createRouteBuffer(zone.coordinates, 0.001)
       if (bufferCoords.length < 4) return
       
       try {
@@ -403,21 +427,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           data: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [bufferCoords] } }
         })
         
+        // Add zone fill layer (no before reference - goes to bottom)
         map.addLayer({
           id: fillId,
           type: 'fill',
           source: sourceId,
-          paint: { 'fill-color': colors.label, 'fill-opacity': 0.08 }
-        }, 'route-line')
+          paint: { 'fill-color': colors.label, 'fill-opacity': 0.15 }
+        })
         
+        // Add zone border
         map.addLayer({
           id: lineId,
           type: 'line',
           source: sourceId,
-          paint: { 'line-color': colors.border, 'line-width': 1.5, 'line-dasharray': [3, 2] }
-        }, 'route-line')
+          paint: { 'line-color': colors.border, 'line-width': 2, 'line-dasharray': [4, 3], 'line-opacity': 0.7 }
+        })
         
         zoneLayersRef.current.push(sourceId, fillId, lineId)
+        console.log(`✓ Added zone overlay: ${zone.type} (${zone.coordinates.length} coords)`)
       } catch (err) {
         console.log('Zone layer error:', err.message)
       }
