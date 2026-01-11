@@ -15,10 +15,10 @@ export const ROUTE_CHARACTER = {
 
 // Character colors for UI
 export const CHARACTER_COLORS = {
-  technical: { primary: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: '🏁 Technical' },
-  spirited: { primary: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', label: '⚡ Spirited' },
-  transit: { primary: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)', label: '🛣️ Transit' },
-  urban: { primary: '#f87171', bg: 'rgba(248, 113, 113, 0.15)', label: '🏙️ Urban' }
+  technical: { primary: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: 'Technical' },
+  spirited: { primary: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)', label: 'Spirited' },
+  transit: { primary: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)', label: 'Transit' },
+  urban: { primary: '#f87171', bg: 'rgba(248, 113, 113, 0.15)', label: 'Urban' }
 }
 
 // Callout behavior per character
