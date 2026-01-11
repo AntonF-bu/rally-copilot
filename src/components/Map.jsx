@@ -19,7 +19,7 @@ export default function Map() {
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
-  const isFollowingRef = useRef(true)
+  const [isFollowing, setIsFollowing] = useState(true)
   
   const {
     position,
@@ -79,13 +79,11 @@ export default function Map() {
 
     // User interaction = show recenter button
     // Only trigger on drag - the clearest signal user wants manual control
-    const showRecenterBtn = () => {
-      isFollowingRef.current = false
-      setShowRecenter(true)
+    map.current.on('dragstart', () => {
       console.log('📍 User dragged map - following disabled')
-    }
-
-    map.current.on('dragstart', showRecenterBtn)
+      // We'll handle this via a custom event since we can't access setState here
+      window.dispatchEvent(new CustomEvent('map-user-drag'))
+    })
 
     return () => {
       map.current?.remove()
@@ -217,6 +215,16 @@ export default function Map() {
 
   }, [mapLoaded])
 
+  // Listen for user drag event
+  useEffect(() => {
+    const handleUserDrag = () => {
+      setIsFollowing(false)
+      setShowRecenter(true)
+    }
+    window.addEventListener('map-user-drag', handleUserDrag)
+    return () => window.removeEventListener('map-user-drag', handleUserDrag)
+  }, [])
+
   // Update position and camera
   useEffect(() => {
     if (!map.current || !mapLoaded || !userMarker.current) return
@@ -232,7 +240,7 @@ export default function Map() {
       }
 
       // Always follow when running (unless user has manually dragged)
-      if (isRunning && isFollowingRef.current) {
+      if (isRunning && isFollowing) {
         map.current.easeTo({
           center: position,
           bearing: heading || 0,
@@ -243,12 +251,13 @@ export default function Map() {
         })
       }
     }
-  }, [position, heading, isRunning, mapLoaded])
+  }, [position, heading, isRunning, mapLoaded, isFollowing])
 
   // Reset following when navigation starts
   useEffect(() => {
     if (isRunning) {
-      isFollowingRef.current = true
+      console.log('📍 Navigation started - enabling follow mode')
+      setIsFollowing(true)
       setShowRecenter(false)
     }
   }, [isRunning])
@@ -260,7 +269,7 @@ export default function Map() {
     const centerPos = position || routeData?.coordinates?.[0]
     if (!centerPos) return
     
-    isFollowingRef.current = true
+    setIsFollowing(true)
     setShowRecenter(false)
     
     map.current.easeTo({
