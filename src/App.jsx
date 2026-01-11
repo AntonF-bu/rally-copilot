@@ -270,10 +270,14 @@ export default function App() {
       return
     }
 
-    // MAIN CALLOUT
-    if (distance <= distances.main && 
-        distance > distances.final &&
-        !mainCalloutsRef.current.has(curveId)) {
+    // MAIN CALLOUT - KEY FIX: Also trigger if we've jumped past the main window
+    // This handles fast simulation where distance can go from 200m to 0m in one frame
+    const hasBeenAnnounced = mainCalloutsRef.current.has(curveId)
+    const inMainWindow = distance <= distances.main && distance > distances.final
+    const jumpedPastWindow = distance <= distances.final && !hasBeenAnnounced && distance >= 0
+    
+    if ((inMainWindow || jumpedPastWindow) && !hasBeenAnnounced) {
+      console.log(`🎯 MAIN CALLOUT TRIGGERED: distance=${distance}m, inMainWindow=${inMainWindow}, jumpedPastWindow=${jumpedPastWindow}`)
       
       let callout
       
