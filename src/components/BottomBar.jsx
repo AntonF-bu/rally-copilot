@@ -4,13 +4,13 @@ import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 
 // ================================
 // Bottom Bar - Navigation Controls
-// With demo playback controls
+// With demo playback controls + Trip summary
 // ================================
 
 export default function BottomBar() {
   const { 
     isRunning, mode, setMode, settings, updateSettings, toggleSettings,
-    goToMenu, goToPreview, routeMode, gpsAccuracy,
+    goToMenu, goToPreview, endTrip, routeMode, gpsAccuracy,
     simulationSpeed, setSimulationSpeed, simulationPaused, toggleSimulationPaused
   } = useStore()
   
@@ -19,7 +19,8 @@ export default function BottomBar() {
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
 
-  const handleStop = () => goToPreview()
+  // STOP now ends trip and shows summary
+  const handleStop = () => endTrip()
   const handleBack = () => goToMenu()
 
   const handleReroute = async () => {
