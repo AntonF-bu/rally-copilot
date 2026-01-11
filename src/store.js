@@ -13,11 +13,14 @@ const useStore = create(
       
       showRouteSelector: true,
       showRoutePreview: false,
-      showTripSummary: false,  // NEW: Show trip summary screen
+      showTripSummary: false,
       
       routeData: null,
       routeMode: null,
       destination: null,
+      
+      // Multi-stop trip planning
+      tripWaypoints: [], // Array of { id, name, coordinates, type: 'start'|'stop'|'end' }
       
       activeCurve: null,
       upcomingCurves: [],
@@ -30,13 +33,19 @@ const useStore = create(
       // Trip tracking stats
       tripStats: {
         startTime: null,
-        distance: 0,           // meters
-        maxSpeed: 0,           // mph
+        distance: 0,
+        maxSpeed: 0,
         curvesCompleted: 0,
-        sharpestCurve: null,   // severity
-        speedSamples: [],      // for average calculation
-        positionHistory: [],   // for distance calculation
+        sharpestCurve: null,
+        speedSamples: [],
+        positionHistory: [],
       },
+      
+      // Recent routes (persisted) - max 10
+      recentRoutes: [],
+      
+      // Favorite routes (persisted)
+      favoriteRoutes: [],
       
       mode: 'cruise',
       showSettings: false,
@@ -47,20 +56,117 @@ const useStore = create(
         // Voice
         voiceEnabled: true,
         volume: 1.0,
-        calloutTiming: 'normal', // 'early', 'normal', 'late'
+        calloutTiming: 'normal',
         
-        // Units - this affects HUD, voice, and all displays
-        units: 'imperial', // 'imperial' (mph, ft) or 'metric' (kmh, m)
+        // Units
+        units: 'imperial',
         
         // Display
         keepScreenOn: true,
         showSpeedometer: true,
         showElevation: true,
-        hudStyle: 'full', // 'full', 'minimal'
+        hudStyle: 'full',
+        
+        // Curve detection
+        curveSensitivity: 'normal', // 'relaxed', 'normal', 'sensitive'
         
         // Feedback
         hapticFeedback: false,
       },
+      
+      // ========== Recent Routes Actions ==========
+      addRecentRoute: (route) => {
+        const { recentRoutes } = get()
+        // Don't add duplicates (check by destination name)
+        const filtered = recentRoutes.filter(r => r.name !== route.name)
+        const updated = [
+          {
+            id: Date.now(),
+            name: route.name,
+            destination: route.destination,
+            origin: route.origin,
+            coordinates: route.coordinates?.slice(0, 2), // Just start/end for storage
+            distance: route.distance,
+            duration: route.duration,
+            curveCount: route.curves?.length || 0,
+            timestamp: Date.now(),
+          },
+          ...filtered
+        ].slice(0, 10) // Keep max 10
+        set({ recentRoutes: updated })
+      },
+      
+      clearRecentRoutes: () => set({ recentRoutes: [] }),
+      
+      removeRecentRoute: (id) => {
+        const { recentRoutes } = get()
+        set({ recentRoutes: recentRoutes.filter(r => r.id !== id) })
+      },
+      
+      // ========== Favorite Routes Actions ==========
+      addFavoriteRoute: (route) => {
+        const { favoriteRoutes } = get()
+        if (favoriteRoutes.some(r => r.name === route.name)) return // Already exists
+        
+        const favorite = {
+          id: Date.now(),
+          name: route.name || 'Unnamed Route',
+          destination: route.destination,
+          origin: route.origin,
+          waypoints: route.waypoints || [],
+          coordinates: route.coordinates?.slice(0, 2),
+          distance: route.distance,
+          duration: route.duration,
+          curveCount: route.curves?.length || 0,
+          createdAt: Date.now(),
+        }
+        set({ favoriteRoutes: [...favoriteRoutes, favorite] })
+      },
+      
+      removeFavoriteRoute: (id) => {
+        const { favoriteRoutes } = get()
+        set({ favoriteRoutes: favoriteRoutes.filter(r => r.id !== id) })
+      },
+      
+      isFavorite: (routeName) => {
+        const { favoriteRoutes } = get()
+        return favoriteRoutes.some(r => r.name === routeName)
+      },
+      
+      toggleFavorite: (route) => {
+        const { favoriteRoutes, addFavoriteRoute, removeFavoriteRoute } = get()
+        const existing = favoriteRoutes.find(r => r.name === route.name)
+        if (existing) {
+          removeFavoriteRoute(existing.id)
+        } else {
+          addFavoriteRoute(route)
+        }
+      },
+      
+      // ========== Multi-stop Trip Actions ==========
+      setTripWaypoints: (waypoints) => set({ tripWaypoints: waypoints }),
+      
+      addWaypoint: (waypoint) => {
+        const { tripWaypoints } = get()
+        set({ tripWaypoints: [...tripWaypoints, { ...waypoint, id: Date.now() }] })
+      },
+      
+      removeWaypoint: (id) => {
+        const { tripWaypoints } = get()
+        set({ tripWaypoints: tripWaypoints.filter(w => w.id !== id) })
+      },
+      
+      reorderWaypoints: (fromIndex, toIndex) => {
+        const { tripWaypoints } = get()
+        const updated = [...tripWaypoints]
+        const [removed] = updated.splice(fromIndex, 1)
+        updated.splice(toIndex, 0, removed)
+        set({ tripWaypoints: updated })
+      },
+      
+      clearTripWaypoints: () => set({ tripWaypoints: [] }),
+      
+      // ========== Navigation Actions ==========
       
       goToMenu: () => {
         set({ 
@@ -287,6 +393,8 @@ const useStore = create(
       partialize: (state) => ({
         settings: state.settings,
         mode: state.mode,
+        recentRoutes: state.recentRoutes,
+        favoriteRoutes: state.favoriteRoutes,
       }),
     }
   )
