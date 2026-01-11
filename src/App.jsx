@@ -71,6 +71,22 @@ export default function App() {
 
     const nextCurve = upcomingCurves[0]
     if (!nextCurve) return
+    
+    // Skip severity 1 curves - they're basically straight road
+    // Also skip chicanes where all curves are severity 1
+    if (nextCurve.severity <= 1) {
+      if (nextCurve.isChicane) {
+        const severities = nextCurve.severitySequence?.split('-').map(Number) || [1]
+        const maxSev = Math.max(...severities)
+        if (maxSev <= 1) {
+          // All severity 1, skip this chicane entirely
+          return
+        }
+      } else {
+        // Regular severity 1 curve, skip
+        return
+      }
+    }
 
     const speedMps = Math.max((currentSpeed * 1609.34) / 3600, 8)
     const distance = nextCurve.distance
