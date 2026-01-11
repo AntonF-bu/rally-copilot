@@ -2,20 +2,26 @@ import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
+import { useSpeech } from '../hooks/useSpeech'
 
 // ================================
 // Route Preview Screen
-// v3: Shows chicanes, modifiers, improved markers
+// v4: Pre-downloads audio for offline use
 // ================================
 
-mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || 'YOUR_MAPBOX_TOKEN_HERE'
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
 export default function RoutePreview({ onStartNavigation, onBack }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   
+  // Download states
+  const [downloadState, setDownloadState] = useState('idle') // idle, downloading, ready, error
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, cached: 0 })
+  
   const { routeData, mode } = useStore()
+  const { preloadRouteAudio, getCacheStatus } = useSpeech()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -34,6 +40,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
     hard: routeData?.curves?.filter(c => c.severity >= 5).length || 0
   }
 
+  // Initialize map
   useEffect(() => {
     if (map.current || !routeData?.coordinates) return
 
@@ -81,7 +88,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       }, new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
 
       map.current.fitBounds(bounds, {
-        padding: { top: 100, bottom: 320, left: 40, right: 40 },
+        padding: { top: 100, bottom: 380, left: 40, right: 40 },
         duration: 1000
       })
 
@@ -96,190 +103,272 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
       new mapboxgl.Marker({ element: endEl }).setLngLat(routeData.coordinates[routeData.coordinates.length - 1]).addTo(map.current)
 
       // Curve markers
-      if (routeData.curves && routeData.curves.length > 0) {
+      if (routeData.curves) {
         routeData.curves.forEach((curve) => {
-          const el = document.createElement('div')
           const color = getCurveColor(curve.severity)
+          const el = document.createElement('div')
           
           if (curve.isChicane) {
-            // Chicane/S-curve marker
             const dirChar = curve.startDirection === 'LEFT' ? '←' : '→'
             const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
-            
             el.innerHTML = `
-              <div style="
-                display: flex; 
-                flex-direction: column;
-                align-items: center; 
-                background: rgba(10,10,15,0.95); 
-                padding: 4px 8px; 
-                border-radius: 8px; 
-                border: 2px solid ${color}; 
-                box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-              ">
-                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 10px; color: ${color}; letter-spacing: 1px;">
-                  ${typeLabel}${dirChar}
-                </span>
-                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 11px; color: ${color};">
-                  ${curve.severitySequence}
-                </span>
+              <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:4px 8px;border-radius:8px;border:2px solid ${color};box-shadow:0 2px 10px ${color}40;">
+                <span style="font-size:8px;font-weight:700;color:${color};letter-spacing:0.5px;">${typeLabel}${dirChar}</span>
+                <span style="font-size:12px;font-weight:700;color:${color};">${curve.severitySequence}</span>
               </div>
             `
           } else {
-            // Regular curve marker
             const isLeft = curve.direction === 'LEFT'
-            let modifierText = ''
-            
-            if (curve.modifier === 'TIGHTENS') modifierText = '⟩'
-            else if (curve.modifier === 'OPENS') modifierText = '⟨'
-            else if (curve.modifier === 'HAIRPIN') modifierText = '↩'
-            else if (curve.modifier === 'LONG') modifierText = '―'
+            let modifierBadge = ''
+            if (curve.modifier === 'TIGHTENS') modifierBadge = '<div style="font-size:7px;color:#f97316;font-weight:700;margin-top:1px;">⟩</div>'
+            else if (curve.modifier === 'OPENS') modifierBadge = '<div style="font-size:7px;color:#22c55e;font-weight:700;margin-top:1px;">⟨</div>'
             
             el.innerHTML = `
-              <div style="
-                display: flex; 
-                align-items: center; 
-                gap: 2px; 
-                background: rgba(10,10,15,0.95); 
-                padding: 4px 8px; 
-                border-radius: 8px; 
-                border: 1.5px solid ${color}; 
-                box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-              ">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
-                  <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-                </svg>
-                <span style="font-family: -apple-system, system-ui; font-weight: 700; font-size: 12px; color: ${color}">
-                  ${curve.severity}
-                </span>
-                ${modifierText ? `<span style="font-size: 10px; color: ${color}; margin-left: 1px;">${modifierText}</span>` : ''}
+              <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:4px 8px;border-radius:8px;border:2px solid ${color};box-shadow:0 2px 10px ${color}40;">
+                <div style="display:flex;align-items:center;gap:2px;">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="${color}" style="transform:${isLeft ? 'scaleX(-1)' : 'none'}">
+                    <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
+                  </svg>
+                  <span style="font-size:14px;font-weight:700;color:${color};">${curve.severity}</span>
+                </div>
+                ${modifierBadge}
               </div>
             `
           }
           
-          new mapboxgl.Marker({ element: el })
+          new mapboxgl.Marker({ element: el, anchor: 'bottom' })
             .setLngLat(curve.position)
             .addTo(map.current)
         })
       }
     })
 
-    return () => { map.current?.remove(); map.current = null }
+    return () => {
+      map.current?.remove()
+      map.current = null
+    }
   }, [routeData, modeColor])
 
-  if (!routeData) {
-    return (
-      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
-        <div className="text-white/50">No route data</div>
-      </div>
-    )
+  // Handle download for offline
+  const handleDownloadAudio = async () => {
+    if (!routeData?.curves || routeData.curves.length === 0) {
+      setDownloadState('ready')
+      return
+    }
+
+    setDownloadState('downloading')
+    
+    try {
+      const result = await preloadRouteAudio(routeData.curves, (current, total, cached) => {
+        setDownloadProgress({ current, total, cached: cached || 0 })
+      })
+
+      if (result.success) {
+        setDownloadState('ready')
+      } else {
+        setDownloadState('error')
+      }
+    } catch (err) {
+      console.error('Download error:', err)
+      setDownloadState('error')
+    }
+  }
+
+  // Start navigation (with or without download)
+  const handleStart = () => {
+    onStartNavigation()
+  }
+
+  // Skip download and start anyway
+  const handleSkipAndStart = () => {
+    onStartNavigation()
   }
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
+      {/* Map */}
       <div ref={mapContainer} className="absolute inset-0" />
 
-      <button onClick={onBack} className="absolute top-4 left-4 z-20 hud-glass w-12 h-12 rounded-xl flex items-center justify-center safe-top">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
+      {/* Back Button */}
+      <button
+        onClick={onBack}
+        className="absolute top-12 left-4 z-20 w-10 h-10 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+          <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
+        </svg>
       </button>
 
-      <div className="absolute bottom-0 left-0 right-0 z-20 safe-bottom">
-        <div className="hud-glass rounded-t-3xl p-4 pb-6">
+      {/* Bottom Panel */}
+      <div className="absolute bottom-0 left-0 right-0 z-20">
+        <div className="bg-gradient-to-t from-[#0a0a0f] via-[#0a0a0f]/95 to-transparent pt-16 pb-6 px-4">
           
-          {routeData.destination && (
-            <div className="mb-4">
-              <div className="text-[10px] font-semibold text-white/40 tracking-wider mb-1">DESTINATION</div>
-              <div className="text-white font-semibold text-lg leading-tight truncate">{routeData.destination}</div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-4 gap-3 mb-3">
+          {/* Route Stats */}
+          <div className="grid grid-cols-4 gap-2 mb-4">
             <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="text-2xl font-bold text-white">{routeStats.distance}</div>
+              <div className="text-xl font-bold text-white">{routeStats.distance}</div>
               <div className="text-[10px] text-white/40 tracking-wider">MILES</div>
             </div>
             <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="text-2xl font-bold text-white">{routeStats.duration}</div>
+              <div className="text-xl font-bold text-white">{routeStats.duration}</div>
               <div className="text-[10px] text-white/40 tracking-wider">MIN</div>
             </div>
             <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="text-2xl font-bold text-white">{routeStats.curves}</div>
+              <div className="text-xl font-bold text-white">{routeStats.curves}</div>
               <div className="text-[10px] text-white/40 tracking-wider">CURVES</div>
             </div>
             <div className="bg-white/5 rounded-xl p-3 text-center">
-              <div className="text-2xl font-bold text-red-400">{routeStats.sharpCurves}</div>
+              <div className="text-xl font-bold text-red-400">{routeStats.sharpCurves}</div>
               <div className="text-[10px] text-white/40 tracking-wider">SHARP</div>
             </div>
           </div>
 
-          {/* Additional stats row */}
-          {routeStats.chicanes > 0 && (
-            <div className="flex items-center gap-2 mb-3 px-1">
-              <div className="flex items-center gap-1 text-[11px]">
-                <span className="text-purple-400 font-semibold">S-curves:</span>
-                <span className="text-white/60">{routeStats.chicanes}</span>
-              </div>
-              {routeData.curves?.filter(c => c.modifier === 'TIGHTENS').length > 0 && (
-                <div className="flex items-center gap-1 text-[11px]">
-                  <span className="text-orange-400 font-semibold">Tightens:</span>
-                  <span className="text-white/60">{routeData.curves.filter(c => c.modifier === 'TIGHTENS').length}</span>
-                </div>
-              )}
-              {routeData.curves?.filter(c => c.modifier === 'OPENS').length > 0 && (
-                <div className="flex items-center gap-1 text-[11px]">
-                  <span className="text-green-400 font-semibold">Opens:</span>
-                  <span className="text-white/60">{routeData.curves.filter(c => c.modifier === 'OPENS').length}</span>
-                </div>
-              )}
+          {/* Severity Breakdown */}
+          <div className="flex gap-2 mb-4">
+            <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden flex">
+              <div className="bg-green-500 h-full" style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100 || 0}%` }} />
+              <div className="bg-yellow-500 h-full" style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100 || 0}%` }} />
+              <div className="bg-red-500 h-full" style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100 || 0}%` }} />
+            </div>
+          </div>
+          <div className="flex justify-between text-[10px] text-white/40 mb-4">
+            <span>{severityBreakdown.easy} Easy</span>
+            <span>{severityBreakdown.medium} Medium</span>
+            <span>{severityBreakdown.hard} Hard</span>
+            {routeStats.chicanes > 0 && <span>{routeStats.chicanes} Chicanes</span>}
+          </div>
+
+          {/* Download / Start Section */}
+          {downloadState === 'idle' && (
+            <div className="space-y-2">
+              {/* Download for Offline Button */}
+              <button
+                onClick={handleDownloadAudio}
+                disabled={!navigator.onLine}
+                className="w-full py-3 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white disabled:opacity-50"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7,10 12,15 17,10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download Voice for Offline Use
+              </button>
+              
+              {/* Skip and Start Button */}
+              <button
+                onClick={handleSkipAndStart}
+                className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
+                style={{ background: modeColor }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                START NAVIGATION
+              </button>
+              
+              <p className="text-center text-[10px] text-white/30">
+                {navigator.onLine 
+                  ? "Download recommended for areas with poor signal" 
+                  : "You're offline - voice will use device speaker"}
+              </p>
             </div>
           )}
 
-          <div className="flex items-center gap-2 mb-5">
-            <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden flex">
-              {severityBreakdown.easy > 0 && <div className="h-full bg-green-500" style={{ width: `${(severityBreakdown.easy / Math.max(1, routeStats.curves)) * 100}%` }}/>}
-              {severityBreakdown.medium > 0 && <div className="h-full bg-yellow-500" style={{ width: `${(severityBreakdown.medium / Math.max(1, routeStats.curves)) * 100}%` }}/>}
-              {severityBreakdown.hard > 0 && <div className="h-full bg-red-500" style={{ width: `${(severityBreakdown.hard / Math.max(1, routeStats.curves)) * 100}%` }}/>}
+          {downloadState === 'downloading' && (
+            <div className="space-y-3">
+              <div className="bg-white/5 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-white/70">Downloading voice callouts...</span>
+                  <span className="text-sm text-white/50">
+                    {downloadProgress.current}/{downloadProgress.total}
+                  </span>
+                </div>
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-cyan-500 transition-all duration-300"
+                    style={{ width: `${(downloadProgress.current / downloadProgress.total) * 100}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-white/30 mt-2">
+                  This ensures voice works even without cell signal
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-[10px]">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span><span className="text-white/40">{severityBreakdown.easy}</span></span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500"></span><span className="text-white/40">{severityBreakdown.medium}</span></span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500"></span><span className="text-white/40">{severityBreakdown.hard}</span></span>
-            </div>
-          </div>
+          )}
 
-          <button
-            onClick={onStartNavigation}
-            className="w-full py-4 rounded-2xl font-semibold text-base tracking-wide flex items-center justify-center gap-3 transition-all duration-200 active:scale-[0.98]"
-            style={{
-              background: `linear-gradient(135deg, ${modeColor}, ${modeColor}dd)`,
-              boxShadow: `0 4px 25px ${modeColor}50, inset 0 1px 0 rgba(255,255,255,0.2)`,
-              color: mode === 'race' ? '#fff' : '#000'
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>
-            <span>Start Navigation</span>
-          </button>
+          {downloadState === 'ready' && (
+            <div className="space-y-2">
+              <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 flex items-center gap-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <div>
+                  <div className="text-sm font-semibold text-green-400">Ready for Offline</div>
+                  <div className="text-[10px] text-white/40">
+                    {downloadProgress.cached || getCacheStatus().cachedCount} callouts downloaded
+                  </div>
+                </div>
+              </div>
+              
+              <button
+                onClick={handleStart}
+                className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
+                style={{ background: modeColor }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                START NAVIGATION
+              </button>
+            </div>
+          )}
+
+          {downloadState === 'error' && (
+            <div className="space-y-2">
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-center gap-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <div>
+                  <div className="text-sm font-semibold text-red-400">Download Failed</div>
+                  <div className="text-[10px] text-white/40">
+                    Voice will fall back to device speaker when offline
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDownloadAudio}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm tracking-wider bg-white/10 border border-white/20 text-white"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={handleStart}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm tracking-wider"
+                  style={{ background: modeColor }}
+                >
+                  Start Anyway
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Loading Overlay */}
       {!mapLoaded && (
-        <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-50">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-10 h-10 border-2 border-white/10 border-t-cyan-500 rounded-full animate-spin" />
-            <span className="text-white/30 text-sm font-medium tracking-wider">LOADING PREVIEW</span>
+        <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-30">
+          <div className="text-center">
+            <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" />
+            <p className="text-gray-400 text-sm">Loading route preview...</p>
           </div>
         </div>
       )}
-
-      <style>{`
-        .hud-glass {
-          background: linear-gradient(135deg, rgba(15,15,20,0.95) 0%, rgba(10,10,15,0.98) 100%);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
-          border: 1px solid rgba(255,255,255,0.06);
-          box-shadow: 0 -4px 30px rgba(0,0,0,0.5);
-        }
-      `}</style>
     </div>
   )
 }
