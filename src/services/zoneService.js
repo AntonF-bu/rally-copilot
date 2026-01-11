@@ -13,13 +13,13 @@ export const ROUTE_CHARACTER = {
   URBAN: 'urban'            // City driving - only important stuff
 }
 
-// SLEEVE colors for UI (COOL spectrum - distinct from route line warm colors)
-// These show WHERE you are (context/mode)
+// SLEEVE colors for UI (distinct from route line warm colors)
+// These show WHERE you are (context/mode) - BOLD and visible
 export const CHARACTER_COLORS = {
-  technical: { primary: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)', label: 'Technical' },  // Cyan
-  spirited: { primary: '#64748b', bg: 'rgba(100, 116, 139, 0.15)', label: 'Spirited' },  // Slate
-  transit: { primary: '#818cf8', bg: 'rgba(129, 140, 248, 0.15)', label: 'Highway' },    // Indigo
-  urban: { primary: '#e879f9', bg: 'rgba(232, 121, 249, 0.15)', label: 'Urban' }         // Magenta
+  technical: { primary: '#22d3ee', bg: 'rgba(34, 211, 238, 0.2)', label: 'Technical' },  // Bright Cyan
+  spirited: { primary: '#fbbf24', bg: 'rgba(251, 191, 36, 0.2)', label: 'Spirited' },    // Amber
+  transit: { primary: '#3b82f6', bg: 'rgba(59, 130, 246, 0.2)', label: 'Highway' },      // Blue
+  urban: { primary: '#f472b6', bg: 'rgba(244, 114, 182, 0.2)', label: 'Urban' }          // Pink
 }
 
 // Callout behavior per character
