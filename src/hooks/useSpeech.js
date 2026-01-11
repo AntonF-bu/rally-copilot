@@ -485,26 +485,6 @@ function getShortDistanceText(distanceMeters, speedUnit = 'mph') {
   }
 }
 
-// Get curve character description based on severity and properties
-function getCurveCharacter(curve) {
-  if (!curve) return ''
-  
-  const severity = curve.severity
-  const length = curve.length || 0
-  
-  // Check for wide sweeper (low severity, long length)
-  if (severity <= 2 && length > 150) {
-    return 'sweeping'
-  }
-  
-  if (severity <= 1) return 'gentle'
-  if (severity === 2) return 'easy'
-  if (severity === 3) return 'moderate'
-  if (severity === 4) return 'tight'
-  if (severity === 5) return 'sharp'
-  return 'very sharp'
-}
-
 // Generate straight section callout - SHORT
 export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
   const distText = getShortDistanceText(distanceMeters, speedUnit)
