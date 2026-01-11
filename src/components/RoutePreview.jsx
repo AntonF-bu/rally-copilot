@@ -244,21 +244,7 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
           {/* Download / Start Section */}
           {downloadState === 'idle' && (
             <div className="space-y-2">
-              {/* Download for Offline Button */}
-              <button
-                onClick={handleDownloadAudio}
-                disabled={!navigator.onLine}
-                className="w-full py-3 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-3 bg-white/10 border border-white/20 text-white disabled:opacity-50"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7,10 12,15 17,10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download Voice for Offline Use
-              </button>
-              
-              {/* Skip and Start Button */}
+              {/* Main Start Button */}
               <button
                 onClick={handleSkipAndStart}
                 className="w-full py-4 rounded-xl font-bold text-sm tracking-wider transition-all flex items-center justify-center gap-2"
@@ -270,11 +256,20 @@ export default function RoutePreview({ onStartNavigation, onBack }) {
                 START NAVIGATION
               </button>
               
-              <p className="text-center text-[10px] text-white/30">
-                {navigator.onLine 
-                  ? "Download recommended for areas with poor signal" 
-                  : "You're offline - voice will use device speaker"}
-              </p>
+              {/* Optional Download Button */}
+              {navigator.onLine && routeStats.curves > 0 && (
+                <button
+                  onClick={handleDownloadAudio}
+                  className="w-full py-3 rounded-xl font-medium text-sm tracking-wider transition-all flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white/60"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7,10 12,15 17,10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Download voice for offline (optional)
+                </button>
+              )}
             </div>
           )}
 
