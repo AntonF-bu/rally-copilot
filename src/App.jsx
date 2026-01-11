@@ -103,8 +103,9 @@ export default function App() {
   const currentSpeed = getDisplaySpeed()
   const speedUnit = settings.units === 'metric' ? 'kmh' : 'mph'
 
-  // Reset callout tracking when route changes
+  // Reset callout tracking when route changes OR when navigation starts
   useEffect(() => {
+    console.log('🔄 Resetting callout refs (routeMode/routeData changed)')
     earlyWarningsRef.current = new Set()
     mainCalloutsRef.current = new Set()
     finalWarningsRef.current = new Set()
@@ -115,6 +116,18 @@ export default function App() {
     lastCalloutTimeRef.current = Date.now() - 10000
     announcedCurvesRef.current = new Set()
   }, [routeMode, routeData])
+
+  // Also reset when navigation starts
+  useEffect(() => {
+    if (isRunning) {
+      console.log('🔄 Resetting callout refs (navigation started)')
+      earlyWarningsRef.current = new Set()
+      mainCalloutsRef.current = new Set()
+      finalWarningsRef.current = new Set()
+      clearCalledRef.current = new Set()
+      lastCalloutTimeRef.current = Date.now() - 10000
+    }
+  }, [isRunning])
 
   // Update trip stats periodically
   useEffect(() => {
@@ -308,11 +321,20 @@ export default function App() {
       }
       
       if (callout) {
-        speak(callout, 'high')
+        console.log(`🔊 Attempting to speak: "${callout}"`)
+        // Mark as announced BEFORE speaking to prevent double-calls
         mainCalloutsRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
         lastCalloutTimeRef.current = now
-        console.log(`🔊 Main callout: ${callout}`)
+        
+        // Fire and forget - don't await in useEffect
+        speak(callout, 'high').then(result => {
+          console.log(`🔊 Speak completed: ${result ? 'success' : 'failed'}`)
+        }).catch(err => {
+          console.error('🔊 Speak error:', err)
+        })
+        
+        console.log(`🔊 Main callout queued: ${callout}`)
         
         if (settings.hapticFeedback && 'vibrate' in navigator) {
           const pattern = nextCurve.severity >= 5 ? [100, 50, 100] : [50]
