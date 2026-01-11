@@ -57,6 +57,17 @@ export default function App() {
 
   // Callout Logic
   useEffect(() => {
+    // Debug logging
+    if (isRunning && upcomingCurves.length > 0) {
+      console.log('🔊 Callout check:', {
+        voiceEnabled: settings.voiceEnabled,
+        curves: upcomingCurves.length,
+        nextDistance: upcomingCurves[0]?.distance,
+        nextId: upcomingCurves[0]?.id,
+        announced: Array.from(announcedCurvesRef.current)
+      })
+    }
+
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
@@ -65,6 +76,7 @@ export default function App() {
     const MIN_CALLOUT_INTERVAL = 2500
     
     if (now - lastCalloutTimeRef.current < MIN_CALLOUT_INTERVAL) {
+      console.log('🔊 Skipping - too soon since last callout')
       return
     }
 
@@ -75,6 +87,7 @@ export default function App() {
     if (nextCurve.distance < 20) {
       // Mark as announced so we don't try again
       announcedCurvesRef.current.add(nextCurve.id)
+      console.log('🔊 Skipping curve', nextCurve.id, '- too close:', nextCurve.distance, 'm')
       return
     }
     
@@ -116,6 +129,7 @@ export default function App() {
       }
       
       const callout = generateCallout(nextCurve, mode, settings.speedUnit, includeSecond)
+      console.log('🔊 SPEAKING:', callout)
       speak(callout, 'high')
       
       announcedCurvesRef.current.add(nextCurve.id)
