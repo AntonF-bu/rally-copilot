@@ -4,10 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v15
-// FIXED: Route line now shows during navigation
-// Issue was stale closure in map.on('load') callback
-// Solution: Use ref for routeData and call addRoute in useEffect
+// Map Component - v16 CLEAN
+// Fixed route visibility, removed problematic LngLatBounds
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -31,34 +29,19 @@ export default function Map() {
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
-  // NEW: Ref to track if route has been added
   const routeAddedRef = useRef(false)
-  // Track the curve IDs we've created markers for to avoid unnecessary recreation
-  const createdCurveIdsRef = useRef(new Set())
-  // Store marker elements for updating active state without recreating
-  const markerElementsRef = useRef(new Map()) // curveId -> { element, curve }
-  // Track last active curve to avoid unnecessary updates
-  const lastActiveCurveIdRef = useRef(null)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
   const [isFollowing, setIsFollowing] = useState(true)
   
-  const {
-    position,
-    heading,
-    speed,
-    isRunning,
-    activeCurve,
-    mode,
-    routeData,
-  } = useStore()
-
-  // NEW: Keep routeData in a ref for access in callbacks
-  const routeDataRef = useRef(routeData)
-  useEffect(() => {
-    routeDataRef.current = routeData
-  }, [routeData])
+  const position = useStore(state => state.position)
+  const heading = useStore(state => state.heading)
+  const speed = useStore(state => state.speed)
+  const isRunning = useStore(state => state.isRunning)
+  const activeCurve = useStore(state => state.activeCurve)
+  const mode = useStore(state => state.mode)
+  const routeData = useStore(state => state.routeData)
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -116,21 +99,13 @@ export default function Map() {
     return segments
   }, [])
 
-  // Add route to map - now takes routeData as parameter to avoid stale closures
-  const addRouteToMap = useCallback((routeDataParam) => {
-    const data = routeDataParam || routeDataRef.current
-    
-    if (!map.current) {
-      console.log('🗺️ addRouteToMap: No map instance')
+  // Add route to map
+  const addRouteToMap = useCallback(() => {
+    if (!map.current || !routeData?.coordinates?.length) {
       return false
     }
     
-    if (!data?.coordinates?.length) {
-      console.log('🗺️ addRouteToMap: No route coordinates', { hasData: !!data })
-      return false
-    }
-    
-    console.log('🗺️ Adding route to map...', data.coordinates.length, 'points')
+    console.log('🗺️ Adding route to map...', routeData.coordinates.length, 'points')
     
     try {
       // Clear any existing route layers
@@ -143,22 +118,19 @@ export default function Map() {
       routeLayersRef.current = []
 
       // Add outline first (underneath)
-      const outlineSourceId = 'route-outline-source'
-      const outlineLayerId = 'route-outline-layer'
-      
-      map.current.addSource(outlineSourceId, {
+      map.current.addSource('route-outline-source', {
         type: 'geojson',
         data: {
           type: 'Feature',
           properties: {},
-          geometry: { type: 'LineString', coordinates: data.coordinates }
+          geometry: { type: 'LineString', coordinates: routeData.coordinates }
         }
       })
       
       map.current.addLayer({
-        id: outlineLayerId,
+        id: 'route-outline-layer',
         type: 'line',
-        source: outlineSourceId,
+        source: 'route-outline-source',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': '#000000',
@@ -166,10 +138,10 @@ export default function Map() {
           'line-opacity': 0.5
         }
       })
-      routeLayersRef.current.push(outlineSourceId, outlineLayerId)
+      routeLayersRef.current.push('route-outline-source', 'route-outline-layer')
 
       // Add severity-colored segments
-      const segments = buildSeveritySegments(data.coordinates, data.curves, data.distance)
+      const segments = buildSeveritySegments(routeData.coordinates, routeData.curves, routeData.distance)
       
       segments.forEach((segment, i) => {
         if (segment.coords.length < 2) return
@@ -187,7 +159,6 @@ export default function Map() {
           }
         })
 
-        // Glow layer
         map.current.addLayer({
           id: glowLayerId,
           type: 'line',
@@ -201,7 +172,6 @@ export default function Map() {
           }
         })
 
-        // Main line
         map.current.addLayer({
           id: lineLayerId,
           type: 'line',
@@ -217,7 +187,7 @@ export default function Map() {
         routeLayersRef.current.push(sourceId, glowLayerId, lineLayerId)
       })
 
-      console.log(`🗺️ Route added: ${segments.length} segments, ${routeLayersRef.current.length} layers`)
+      console.log(`🗺️ Route added: ${segments.length} segments`)
       routeAddedRef.current = true
       return true
       
@@ -225,15 +195,13 @@ export default function Map() {
       console.error('Route rendering error:', e)
       return false
     }
-  }, [buildSeveritySegments])
+  }, [routeData, buildSeveritySegments])
 
-  // Initialize map - only creates the map, doesn't add route
+  // Initialize map
   useEffect(() => {
     if (map.current) return
 
-    const startCoord = routeDataRef.current?.coordinates?.[0] || [-71.0589, 42.3601]
-
-    console.log('🗺️ Initializing map at', startCoord)
+    const startCoord = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -271,12 +239,9 @@ export default function Map() {
         console.log('Terrain setup error:', e)
       }
       
-      // Set mapLoaded AFTER terrain is set up
-      // Route will be added by the useEffect that watches mapLoaded + routeData
       setMapLoaded(true)
     })
 
-    // User interaction handlers
     map.current.on('dragstart', () => {
       setIsFollowing(false)
       setShowRecenter(true)
@@ -293,45 +258,24 @@ export default function Map() {
     }
   }, [])
 
-  // CRITICAL: Add route when BOTH map is loaded AND routeData is available
-  // Use routeData.coordinates as dependency (primitive comparison via length) to avoid object reference issues
+  // Add route when map is loaded and routeData is available
   useEffect(() => {
     if (!mapLoaded) return
     if (!routeData?.coordinates?.length) return
     
-    console.log('🗺️ Route effect: Adding route now', routeData.coordinates.length, 'points')
-    const success = addRouteToMap(routeData)
+    addRouteToMap()
     
-    if (success) {
-      // Fit bounds to show full route initially (only when not running)
-      if (!isRunning && routeData.coordinates.length >= 2) {
-        try {
-          const firstCoord = routeData.coordinates[0]
-          // Ensure we have valid coordinates (array of [lng, lat])
-          if (Array.isArray(firstCoord) && firstCoord.length >= 2) {
-            const bounds = new mapboxgl.LngLatBounds()
-            routeData.coordinates.forEach(coord => {
-              if (Array.isArray(coord) && coord.length >= 2) {
-                bounds.extend(coord)
-              }
-            })
-            if (!bounds.isEmpty()) {
-              map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
-            }
-          }
-        } catch (e) {
-          console.error('Error fitting bounds:', e)
-        }
-      }
+    // Fit bounds - SAFE version using array format instead of LngLatBounds
+    if (!isRunning && routeData.coordinates.length >= 2) {
+      const lngs = routeData.coordinates.map(c => c[0])
+      const lats = routeData.coordinates.map(c => c[1])
+      const bounds = [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)]
+      ]
+      map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
     }
-  }, [routeData?.coordinates?.length, routeData?.curves?.length, mapLoaded, addRouteToMap, isRunning])
-
-  // Reset route added flag when routeData changes (new route)
-  useEffect(() => {
-    routeAddedRef.current = false
-    // Also clear marker tracking so new markers will be created for new route
-    createdCurveIdsRef.current.clear()
-  }, [routeData?.coordinates])
+  }, [mapLoaded, routeData?.coordinates?.length, addRouteToMap, isRunning])
 
   // Create user marker
   useEffect(() => {
@@ -359,7 +303,7 @@ export default function Map() {
       .setLngLat(startPos)
       .addTo(map.current)
 
-  }, [mapLoaded, modeColor, routeData])
+  }, [mapLoaded, modeColor])
 
   // Update user marker color when mode changes
   useEffect(() => {
@@ -380,10 +324,8 @@ export default function Map() {
     if (!map.current || !mapLoaded || !userMarker.current) return
     
     if (position) {
-      // Always update marker position
       userMarker.current.setLngLat(position)
 
-      // Update heading arrow
       if (userMarkerEl.current) {
         const arrow = userMarkerEl.current.querySelector('#heading-arrow')
         if (arrow) {
@@ -391,7 +333,6 @@ export default function Map() {
         }
       }
 
-      // Move camera if following
       if (isRunning && isFollowing && !isAnimatingRef.current) {
         const now = Date.now()
         const timeSinceLastUpdate = now - lastCameraUpdateRef.current
@@ -429,86 +370,60 @@ export default function Map() {
 
   // Recenter handler
   const handleRecenter = useCallback(() => {
-    if (!map.current) return
-    
-    const centerPos = position || routeData?.coordinates?.[0]
-    if (!centerPos) return
+    if (!map.current || !position) return
     
     setIsFollowing(true)
     setShowRecenter(false)
     isAnimatingRef.current = true
     
     map.current.easeTo({
-      center: centerPos,
+      center: position,
       bearing: heading || 0,
       pitch: 60,
       zoom: 16,
       duration: 500
     })
-  }, [position, heading, routeData])
+  }, [position, heading])
 
-  // Create curve markers - only when the ACTUAL curves change (not just distance updates)
-  // We use a stable comparison based on curve IDs to avoid recreation
+  // Add curve markers - simple version
   useEffect(() => {
     if (!map.current || !mapLoaded) return
-
-    const curves = routeData?.curves
-    if (!curves) return
-    
-    const curvesToShow = curves
-    
-    // Check if we actually need to recreate markers
-    // Only recreate if the set of curve IDs has changed
-    const newCurveIds = new Set(curvesToShow.map(c => c.id))
-    const existingIds = createdCurveIdsRef.current
-    
-    const sameMarkers = newCurveIds.size === existingIds.size && 
-      [...newCurveIds].every(id => existingIds.has(id))
-    
-    if (sameMarkers && curveMarkers.current.length > 0) {
-      // Markers already exist for these curves, skip recreation
-      return
-    }
-
-    console.log('🗺️ Creating curve markers:', curvesToShow.length, 'curves')
 
     // Clear existing markers
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
-    markerElementsRef.current.clear()
-    createdCurveIdsRef.current.clear()
 
-    if (curvesToShow.length === 0) return
+    const curves = routeData?.curves
+    if (!curves?.length) return
 
-    curvesToShow.forEach((curve) => {
+    curves.forEach((curve) => {
       if (!curve.position) return
       
       const el = document.createElement('div')
-      el.dataset.curveId = curve.id
+      const isActive = activeCurve?.id === curve.id
       const color = getCurveColor(curve.severity)
       
       const direction = curve.isChicane ? curve.startDirection : curve.direction
       const isLeft = direction === 'LEFT'
       
-      // Create marker with inactive state initially
       if (curve.isChicane) {
         const dirChar = isLeft ? '←' : '→'
         const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
         
         el.innerHTML = `
-          <div class="curve-marker-inner" style="display: flex; flex-direction: column; align-items: center; background: rgba(0,0,0,0.85); padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40; transition: background 0.15s ease;">
-            <span class="marker-text-1" style="font-size: 10px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${typeLabel}${dirChar}</span>
-            <span class="marker-text-2" style="font-size: 11px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${curve.severitySequence}</span>
+          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
+            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color};">${typeLabel}${dirChar}</span>
+            <span style="font-size: 11px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
           </div>
         `
       } else {
         el.innerHTML = `
-          <div class="curve-marker-inner" style="display: flex; align-items: center; gap: 3px; background: rgba(0,0,0,0.85); padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40; transition: background 0.15s ease;">
-            <svg class="marker-icon" width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}; transition: fill 0.15s ease;">
+          <div style="display: flex; align-items: center; gap: 3px; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="${isActive ? 'white' : color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
               <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
             </svg>
-            <span class="marker-text-1" style="font-size: 14px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${curve.severity}</span>
-            ${curve.modifier ? `<span class="marker-text-2" style="font-size: 9px; color: ${color}; opacity: 0.8; transition: color 0.15s ease;">${curve.modifier}</span>` : ''}
+            <span style="font-size: 14px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severity}</span>
+            ${curve.modifier ? `<span style="font-size: 9px; color: ${isActive ? 'white' : color}; opacity: 0.8;">${curve.modifier}</span>` : ''}
           </div>
         `
       }
@@ -518,57 +433,13 @@ export default function Map() {
         .addTo(map.current)
       
       curveMarkers.current.push(marker)
-      markerElementsRef.current.set(curve.id, { element: el, curve, color })
-      createdCurveIdsRef.current.add(curve.id)
     })
-  }, [routeData?.curves?.length, mapLoaded])
-
-  // Update active curve styling - runs frequently but doesn't recreate markers
-  useEffect(() => {
-    const newActiveId = activeCurve?.id || null
-    const oldActiveId = lastActiveCurveIdRef.current
-    
-    // Skip if nothing changed
-    if (newActiveId === oldActiveId) return
-    
-    // Deactivate old marker
-    if (oldActiveId) {
-      const oldData = markerElementsRef.current.get(oldActiveId)
-      if (oldData) {
-        const { element, color } = oldData
-        const inner = element.querySelector('.curve-marker-inner')
-        const texts = element.querySelectorAll('.marker-text-1, .marker-text-2')
-        const icon = element.querySelector('.marker-icon')
-        
-        if (inner) inner.style.background = 'rgba(0,0,0,0.85)'
-        texts.forEach(t => t.style.color = color)
-        if (icon) icon.style.fill = color
-      }
-    }
-    
-    // Activate new marker
-    if (newActiveId) {
-      const newData = markerElementsRef.current.get(newActiveId)
-      if (newData) {
-        const { element, color } = newData
-        const inner = element.querySelector('.curve-marker-inner')
-        const texts = element.querySelectorAll('.marker-text-1, .marker-text-2')
-        const icon = element.querySelector('.marker-icon')
-        
-        if (inner) inner.style.background = color
-        texts.forEach(t => t.style.color = 'white')
-        if (icon) icon.style.fill = 'white'
-      }
-    }
-    
-    lastActiveCurveIdRef.current = newActiveId
-  }, [activeCurve])
+  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded])
 
   return (
     <div className="absolute inset-0">
       <div ref={mapContainer} className="w-full h-full" />
       
-      {/* Recenter button */}
       {showRecenter && (
         <button
           onClick={handleRecenter}
@@ -579,13 +450,6 @@ export default function Map() {
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
         </button>
-      )}
-      
-      {/* Debug info - remove in production */}
-      {!mapLoaded && (
-        <div className="absolute top-20 left-4 bg-black/80 text-white text-xs p-2 rounded">
-          Loading map...
-        </div>
       )}
     </div>
   )
