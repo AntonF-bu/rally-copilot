@@ -215,10 +215,13 @@ export function useHighwayMode() {
     if (!highwayFeatures.progress || !routeData?.distance) return null
 
     const totalDist = routeData.distance
-    const currentDist = (simulationProgress || 0) * totalDist
+    // Use userDistanceAlongRoute for GPS, simulationProgress for demo
+    const currentDist = userDistanceAlongRoute > 0 
+      ? userDistanceAlongRoute 
+      : (simulationProgress || 0) * totalDist
 
     return checkProgressMilestone(currentDist, totalDist, announcedMilestones)
-  }, [highwayFeatures.progress, routeData?.distance, simulationProgress, announcedMilestones])
+  }, [highwayFeatures.progress, routeData?.distance, userDistanceAlongRoute, simulationProgress, announcedMilestones])
 
   // ================================
   // SWEEPER/BEND COMPLETION
