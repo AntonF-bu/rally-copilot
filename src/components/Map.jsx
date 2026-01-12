@@ -440,13 +440,17 @@ export default function Map() {
     })
   }, [position, heading, routeData])
 
-  // Add curve markers
+  // Store marker elements for updating active state without recreating
+  const markerElementsRef = useRef(new Map()) // curveId -> { element, curve }
+
+  // Create curve markers - only when curves change, NOT when activeCurve changes
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
     // Clear existing markers
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
+    markerElementsRef.current.clear()
 
     const curvesToShow = routeData?.curves || []
     if (curvesToShow.length === 0) return
@@ -455,30 +459,31 @@ export default function Map() {
       if (!curve.position) return
       
       const el = document.createElement('div')
-      const isActive = activeCurve?.id === curve.id
+      el.dataset.curveId = curve.id
       const color = getCurveColor(curve.severity)
       
       const direction = curve.isChicane ? curve.startDirection : curve.direction
       const isLeft = direction === 'LEFT'
       
+      // Create marker with inactive state initially
       if (curve.isChicane) {
         const dirChar = isLeft ? '←' : '→'
         const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
         
         el.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
-            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color};">${typeLabel}${dirChar}</span>
-            <span style="font-size: 11px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
+          <div class="curve-marker-inner" style="display: flex; flex-direction: column; align-items: center; background: rgba(0,0,0,0.85); padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40; transition: background 0.15s ease;">
+            <span class="marker-text-1" style="font-size: 10px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${typeLabel}${dirChar}</span>
+            <span class="marker-text-2" style="font-size: 11px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${curve.severitySequence}</span>
           </div>
         `
       } else {
         el.innerHTML = `
-          <div style="display: flex; align-items: center; gap: 3px; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="${isActive ? 'white' : color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
+          <div class="curve-marker-inner" style="display: flex; align-items: center; gap: 3px; background: rgba(0,0,0,0.85); padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40; transition: background 0.15s ease;">
+            <svg class="marker-icon" width="12" height="12" viewBox="0 0 24 24" fill="${color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}; transition: fill 0.15s ease;">
               <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
             </svg>
-            <span style="font-size: 14px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severity}</span>
-            ${curve.modifier ? `<span style="font-size: 9px; color: ${isActive ? 'white' : color}80;">${curve.modifier}</span>` : ''}
+            <span class="marker-text-1" style="font-size: 14px; font-weight: 700; color: ${color}; transition: color 0.15s ease;">${curve.severity}</span>
+            ${curve.modifier ? `<span class="marker-text-2" style="font-size: 9px; color: ${color}; opacity: 0.8; transition: color 0.15s ease;">${curve.modifier}</span>` : ''}
           </div>
         `
       }
@@ -488,8 +493,52 @@ export default function Map() {
         .addTo(map.current)
       
       curveMarkers.current.push(marker)
+      markerElementsRef.current.set(curve.id, { element: el, curve, color })
     })
-  }, [routeData?.curves, activeCurve, mapLoaded])
+  }, [routeData?.curves, mapLoaded])
+
+  // Update active curve styling - runs frequently but doesn't recreate markers
+  const lastActiveCurveIdRef = useRef(null)
+  
+  useEffect(() => {
+    const newActiveId = activeCurve?.id || null
+    const oldActiveId = lastActiveCurveIdRef.current
+    
+    // Skip if nothing changed
+    if (newActiveId === oldActiveId) return
+    
+    // Deactivate old marker
+    if (oldActiveId) {
+      const oldData = markerElementsRef.current.get(oldActiveId)
+      if (oldData) {
+        const { element, color } = oldData
+        const inner = element.querySelector('.curve-marker-inner')
+        const texts = element.querySelectorAll('.marker-text-1, .marker-text-2')
+        const icon = element.querySelector('.marker-icon')
+        
+        if (inner) inner.style.background = 'rgba(0,0,0,0.85)'
+        texts.forEach(t => t.style.color = color)
+        if (icon) icon.style.fill = color
+      }
+    }
+    
+    // Activate new marker
+    if (newActiveId) {
+      const newData = markerElementsRef.current.get(newActiveId)
+      if (newData) {
+        const { element, color } = newData
+        const inner = element.querySelector('.curve-marker-inner')
+        const texts = element.querySelectorAll('.marker-text-1, .marker-text-2')
+        const icon = element.querySelector('.marker-icon')
+        
+        if (inner) inner.style.background = color
+        texts.forEach(t => t.style.color = 'white')
+        if (icon) icon.style.fill = 'white'
+      }
+    }
+    
+    lastActiveCurveIdRef.current = newActiveId
+  }, [activeCurve])
 
   return (
     <div className="absolute inset-0">
