@@ -37,7 +37,6 @@ import RouteEditor from './components/RouteEditor'
 
 const CHARACTER_TO_MODE = {
   [ROUTE_CHARACTER.TRANSIT]: DRIVING_MODE.HIGHWAY,
-  [ROUTE_CHARACTER.SPIRITED]: DRIVING_MODE.SPIRITED,
   [ROUTE_CHARACTER.TECHNICAL]: DRIVING_MODE.TECHNICAL,
   [ROUTE_CHARACTER.URBAN]: DRIVING_MODE.URBAN
 }
@@ -169,7 +168,7 @@ export default function App() {
     )
     
     if (zone) {
-      const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.SPIRITED
+      const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.TECHNICAL
       
       if (newMode !== currentMode) {
         console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
@@ -287,10 +286,19 @@ export default function App() {
     const distance = curve.distance
     const curveId = curve.id
     
-    // Skip if this curve is in a transit zone and we have highway bends
-    // (highway system handles those)
-    if (isHighwayActive && highwayBends?.length > 0) {
-      // Let highway system handle transit zone curves
+    // Helper: Check if a curve is in a highway zone (transit)
+    const isCurveInHighwayZone = (curveDistance) => {
+      if (!routeZones?.length) return false
+      return routeZones.some(zone => 
+        zone.character === 'transit' &&
+        curveDistance >= zone.startDistance && 
+        curveDistance <= zone.endDistance
+      )
+    }
+    
+    // Skip if this curve is in a transit/highway zone - highway system handles those
+    if (curve.distanceFromStart && isCurveInHighwayZone(curve.distanceFromStart)) {
+      // Don't announce - highway mode handles these zones
       return
     }
     
@@ -388,7 +396,7 @@ export default function App() {
       }
     }
 
-  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode, isHighwayActive, highwayBends, userDistanceAlongRoute])
+  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode, routeZones, userDistanceAlongRoute])
 
   // ================================
   // HIGHWAY PROGRESS CALLOUTS
@@ -465,7 +473,6 @@ function getZoneAnnouncement(character) {
   const announcements = {
     [ROUTE_CHARACTER.TECHNICAL]: 'Technical section',
     [ROUTE_CHARACTER.TRANSIT]: 'Highway',
-    [ROUTE_CHARACTER.SPIRITED]: 'Spirited section',
     [ROUTE_CHARACTER.URBAN]: 'Urban area'
   }
   return announcements[character] || null
