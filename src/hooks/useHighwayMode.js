@@ -26,7 +26,8 @@ export function useHighwayMode() {
     routeZones,
     simulationProgress,
     isRunning,
-    speed
+    speed,
+    userDistanceAlongRoute  // ADD: Get GPS distance for live navigation
   } = useStore()
 
   const {
@@ -109,7 +110,10 @@ export function useHighwayMode() {
     if (!isRunning || !routeZones?.length || !routeData?.distance) return
 
     const totalDist = routeData.distance
-    const currentDist = (simulationProgress || 0) * totalDist
+    // Use userDistanceAlongRoute for GPS, simulationProgress for demo
+    const currentDist = userDistanceAlongRoute > 0 
+      ? userDistanceAlongRoute 
+      : (simulationProgress || 0) * totalDist
 
     // Find current zone
     const currentZone = routeZones.find(z => 
@@ -120,9 +124,9 @@ export function useHighwayMode() {
 
     if (nowInHighway !== inHighwayZone) {
       setInHighwayZone(nowInHighway)
-      console.log(`🛣️ Highway zone: ${nowInHighway ? 'ENTERED' : 'EXITED'}`)
+      console.log(`🛣️ Highway zone: ${nowInHighway ? 'ENTERED' : 'EXITED'} @ ${Math.round(currentDist)}m`)
     }
-  }, [isRunning, routeZones, simulationProgress, routeData?.distance, inHighwayZone, setInHighwayZone])
+  }, [isRunning, routeZones, simulationProgress, userDistanceAlongRoute, routeData?.distance, inHighwayZone, setInHighwayZone])
 
   // ================================
   // SPEED SAMPLING
@@ -146,21 +150,24 @@ export function useHighwayMode() {
   // Returns next highway callout if one is due
   // ================================
 
-  const getNextHighwayCallout = useCallback((userDistanceAlongRoute) => {
-    if (!inHighwayZone || !highwayFeatures.sweepers) return null
+  const getNextHighwayCallout = useCallback((currentDistance) => {
+    // Check if sweepers feature is enabled
+    if (!highwayFeatures.sweepers) return null
 
     const config = getHighwayModeConfig(highwayMode)
     const bends = highwayBendsRef.current
+    
+    if (!bends?.length) return null
 
-    // Find upcoming bends
+    // Find upcoming bends within range
     const upcomingBends = bends.filter(bend => {
-      const distanceToBend = bend.distanceFromStart - userDistanceAlongRoute
+      const distanceToBend = bend.distanceFromStart - currentDistance
       return distanceToBend > 0 && distanceToBend < 500 // Look ahead 500m
     })
 
     if (upcomingBends.length === 0) {
       // No bends coming up - check for chatter (Companion mode)
-      if (config.enableChatter) {
+      if (config.enableChatter && inHighwayZone) {
         const chatter = getSilenceBreaker(lastCalloutTime, lastChatterTime)
         if (chatter) {
           recordChatterTime()
@@ -172,10 +179,11 @@ export function useHighwayMode() {
 
     // Get closest bend
     const nextBend = upcomingBends[0]
-    const distanceToBend = nextBend.distanceFromStart - userDistanceAlongRoute
+    const distanceToBend = nextBend.distanceFromStart - currentDistance
 
     // Check announcement windows based on bend type
-    const announceDistance = nextBend.isSSweep ? 400 : 
+    const announceDistance = nextBend.isSection ? 450 :
+                            nextBend.isSSweep ? 400 : 
                             nextBend.angle > 20 ? 350 : 
                             nextBend.angle > 10 ? 300 : 250
 
