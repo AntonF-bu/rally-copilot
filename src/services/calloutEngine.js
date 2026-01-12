@@ -1,6 +1,6 @@
 // ================================
-// Callout Engine v2.2
-// FIXED: Choppy voice - skip sev 1, cap clear distance, longer pauses
+// Callout Engine v2.3
+// FIXED: More lenient curve filtering, disabled clear callouts
 // ================================
 
 import { ROUTE_CHARACTER, CHARACTER_BEHAVIORS } from './zoneService'
@@ -22,10 +22,10 @@ export const DRIVING_MODE = {
 
 const TIMING_CONFIG = {
   highway: {
-    baseDistance: 450,      // meters
-    minReactionTime: 6,     // seconds
-    earlyWarningMult: 1.8,  // early = base * this
-    finalWarningDist: 150,  // meters
+    baseDistance: 450,
+    minReactionTime: 6,
+    earlyWarningMult: 1.8,
+    finalWarningDist: 150,
   },
   spirited: {
     baseDistance: 250,
@@ -34,7 +34,7 @@ const TIMING_CONFIG = {
     finalWarningDist: 80,
   },
   technical: {
-    baseDistance: 120,
+    baseDistance: 150,      // Increased from 120 for earlier warnings
     minReactionTime: 3,
     earlyWarningMult: 1.5,
     finalWarningDist: 40,
@@ -49,32 +49,31 @@ const TIMING_CONFIG = {
 
 // ================================
 // VOICE/PACING CONFIGURATION  
-// FIXED: Increased minPauseBetween to prevent choppy overlapping
 // ================================
 
 export const VOICE_CONFIG = {
   highway: {
     speed: 0.9,
     stability: 0.85,
-    minPauseBetween: 2000,  // Increased from 1500
+    minPauseBetween: 2500,
     style: 'relaxed'
   },
   spirited: {
     speed: 1.0,
     stability: 0.75,
-    minPauseBetween: 1500,  // Increased from 1200
+    minPauseBetween: 2000,
     style: 'alert'
   },
   technical: {
-    speed: 1.1,             // Slightly slower than before (was 1.15)
-    stability: 0.70,        // More stable (was 0.65)
-    minPauseBetween: 1200,  // Increased from 800 - prevents choppy overlap
+    speed: 1.05,
+    stability: 0.80,
+    minPauseBetween: 1500,  // 1.5 seconds minimum between callouts
     style: 'rapid'
   },
   urban: {
     speed: 0.9,
     stability: 0.85,
-    minPauseBetween: 2000,
+    minPauseBetween: 2500,
     style: 'casual'
   }
 }
@@ -87,7 +86,7 @@ const CALLOUT_TEMPLATES = {
   highway: {
     curve: (dir, sev, mod) => {
       if (sev <= 2) return `${mod ? mod + ' ' : ''}${dir}`
-      return `${dir} ${sev}${mod ? ', ' + mod : ''}`
+      return `${dir} ${sev}${mod ? ' ' + mod : ''}`
     },
     exit: (dir, sev) => `Exit ahead, ${dir} ${sev}`,
     straight: (dist) => dist > 1500 ? `Straight for ${Math.round(dist/1000)} kilometers` : null,
@@ -96,22 +95,16 @@ const CALLOUT_TEMPLATES = {
       tunnel: 'Tunnel ahead', 
       climbing: 'Climbing',
       descending: 'Downhill section'
-    },
-    engagement: [
-      'Smooth road ahead',
-      'Nice stretch',
-      'Enjoy the drive'
-    ]
+    }
   },
   spirited: {
-    curve: (dir, sev, mod) => `${dir} ${sev}${mod ? ', ' + mod : ''}`,
+    curve: (dir, sev, mod) => `${dir} ${sev}${mod ? ' ' + mod : ''}`,
     straight: () => null
   },
   technical: {
     curve: (dir, sev, mod, speed) => {
       let call = `${dir} ${sev}`
       if (mod) call += ` ${mod}`
-      if (sev >= 5 && speed) call += `, ${speed}`
       return call
     },
     sequence: (curves) => {
@@ -121,13 +114,7 @@ const CALLOUT_TEMPLATES = {
         return `into ${dir} ${c.severity}`
       }).join(' ')
     },
-    clear: (dist) => {
-      // FIXED: Cap at reasonable distance (2km max)
-      const cappedDist = Math.min(dist, 2000)
-      if (cappedDist > 500) return `Clear, ${Math.round(cappedDist/100)*100} meters`
-      if (cappedDist > 300) return 'Clear ahead'
-      return null
-    },
+    clear: (dist) => null, // DISABLED - clear callouts were causing issues
     push: 'Opens, push',
     breathe: 'Breathe'
   },
@@ -139,14 +126,13 @@ const CALLOUT_TEMPLATES = {
 
 // ================================
 // MINIMUM SEVERITY BY MODE
-// Prevents announcing every tiny curve
 // ================================
 
 export const MIN_SEVERITY_BY_MODE = {
-  highway: 3,    // Only announce sev 3+ on highway
-  spirited: 2,   // Announce sev 2+ in spirited
-  technical: 2,  // FIXED: Skip severity 1 even in technical (was 1)
-  urban: 4       // Only hard curves in urban
+  highway: 3,
+  spirited: 2,
+  technical: 2,  // Announce severity 2+ in technical
+  urban: 4
 }
 
 // ================================
@@ -193,20 +179,24 @@ export function detectDrivingMode(signals) {
  * Check if a curve should be announced based on mode
  */
 export function shouldAnnounceCurveInMode(mode, curve) {
-  const minSeverity = MIN_SEVERITY_BY_MODE[mode] || 2
-  
   // Always announce chicanes
   if (curve.isChicane) return true
   
-  // Always announce severity 4+ regardless of mode
-  if (curve.severity >= 4) return true
+  // Always announce severity 3+ regardless of mode
+  if (curve.severity >= 3) return true
   
-  // Check minimum severity for mode
-  return curve.severity >= minSeverity
+  // In technical mode, also announce severity 2
+  if (mode === DRIVING_MODE.TECHNICAL && curve.severity >= 2) return true
+  
+  // In spirited mode, announce severity 2+
+  if (mode === DRIVING_MODE.SPIRITED && curve.severity >= 2) return true
+  
+  // Skip severity 1 in all modes (too gentle to matter)
+  return false
 }
 
 /**
- * Adjust mode parameters based on user speed vs expected
+ * Adjust mode parameters based on user speed
  */
 export function adjustForUserSpeed(mode, userSpeed, expectedSpeed) {
   const config = { ...TIMING_CONFIG[mode] }
@@ -219,9 +209,8 @@ export function adjustForUserSpeed(mode, userSpeed, expectedSpeed) {
   const speedRatio = userSpeed / expectedSpeed
 
   if (speedRatio > 1.15) {
-    config.baseDistance *= 1.2
-    voice.speed *= 1.05  // Less aggressive speed increase
-    voice.minPauseBetween *= 0.9  // Less aggressive pause decrease
+    config.baseDistance *= 1.3  // Even earlier warnings when fast
+    voice.minPauseBetween *= 0.9
   }
   
   if (speedRatio < 0.85) {
@@ -251,30 +240,11 @@ export function getWarningDistances(mode, userSpeedMph, expectedSpeedMph) {
 
 /**
  * Check if it's time for a "clear" callout
- * FIXED: Much stricter conditions
+ * DISABLED - was causing issues
  */
 export function shouldCallClear(mode, timeSinceLastCallout, distanceToNextCurve) {
-  // ONLY technical mode gets clear callouts
-  if (mode !== DRIVING_MODE.TECHNICAL) {
-    return false
-  }
-  
-  // Must be a REAL straight - at least 600m (was 400m)
-  if (distanceToNextCurve < 600) {
-    return false
-  }
-  
-  // Cap at 2km - anything more is probably a bug
-  if (distanceToNextCurve > 2000) {
-    return false
-  }
-  
-  // Must have been silent for a while - at least 10 seconds (was 8)
-  if (timeSinceLastCallout < 10000) {
-    return false
-  }
-  
-  return true
+  // Clear callouts disabled for now
+  return false
 }
 
 // ================================
@@ -292,7 +262,6 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
     : (curve.direction === 'LEFT' ? 'Left' : 'Right')
   
   const modifier = getModifierText(curve)
-  const speed = getSpeedText(curve.severity, speedUnit)
 
   switch (phase) {
     case 'early':
@@ -304,10 +273,7 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
       return `${dir} ${curve.severity} ahead${modifier ? ', ' + modifier : ''}`
     
     case 'main':
-      if (mode === DRIVING_MODE.TECHNICAL) {
-        return templates.curve(dir, curve.severity, modifier, curve.severity >= 5 ? speed : null)
-      }
-      return templates.curve(dir.toLowerCase(), curve.severity, modifier)
+      return `${dir} ${curve.severity}${modifier ? ' ' + modifier : ''}`
     
     case 'final':
       if (curve.severity >= 5) {
@@ -315,14 +281,8 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
       }
       return `${dir} now`
     
-    case 'clear':
-      if (mode === DRIVING_MODE.TECHNICAL && templates.clear) {
-        return templates.clear(distanceToNext)
-      }
-      return null
-    
     default:
-      return templates.curve(dir.toLowerCase(), curve.severity, modifier)
+      return `${dir} ${curve.severity}${modifier ? ' ' + modifier : ''}`
   }
 }
 
@@ -331,43 +291,18 @@ export function generateChicaneCallout(mode, chicane, phase) {
   const endDir = chicane.endDirection === 'LEFT' ? 'left' : 'right'
   const type = chicane.chicaneType === 'CHICANE' ? 'Chicane' : 'S-curve'
   
-  if (mode === DRIVING_MODE.TECHNICAL) {
-    if (phase === 'final') {
-      return `${type} ${startDir} now!`
-    }
-    return `${type} ${startDir}-${endDir} ${chicane.severitySequence}`
+  if (phase === 'final') {
+    return `${type} ${startDir} now!`
   }
-  
-  if (mode === DRIVING_MODE.HIGHWAY) {
-    return `${type} ahead`
-  }
-  
   return `${type} ${startDir}-${endDir} ${chicane.severitySequence}`
 }
 
 /**
- * Generate straight/clear callout
- * FIXED: Cap distance, require minimum 600m
+ * Generate clear callout - DISABLED
  */
 export function generateClearCallout(mode, distanceMeters, nextCurve, speedUnit) {
-  if (mode !== DRIVING_MODE.TECHNICAL) {
-    return null
-  }
-  
-  // Must be a real straight (600m+) but not ridiculous (2km max)
-  if (distanceMeters < 600 || distanceMeters > 2000) {
-    return null
-  }
-  
-  // Cap the announced distance at 2km
-  const cappedDist = Math.min(distanceMeters, 2000)
-  
-  // Format distance
-  const distText = speedUnit === 'kmh' 
-    ? `${Math.round(cappedDist/100)*100} meters`
-    : `${Math.round(cappedDist * 3.28084 / 500) * 500} feet`
-  
-  return `Clear, ${distText}`
+  // Clear callouts disabled
+  return null
 }
 
 export function generateTerrainCallout(terrainType) {
@@ -376,8 +311,7 @@ export function generateTerrainCallout(terrainType) {
 }
 
 export function generateEngagementCallout() {
-  const options = CALLOUT_TEMPLATES.highway.engagement
-  return options[Math.floor(Math.random() * options.length)]
+  return null // Disabled
 }
 
 // ================================
@@ -412,7 +346,7 @@ function getSpeedText(severity, speedUnit) {
 }
 
 // ================================
-// SEVERITY COLORS (for route line)
+// SEVERITY COLORS
 // ================================
 
 export const SEVERITY_COLORS = {
