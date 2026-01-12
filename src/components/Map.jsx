@@ -294,38 +294,37 @@ export default function Map() {
   }, [])
 
   // CRITICAL: Add route when BOTH map is loaded AND routeData is available
+  // Use routeData.coordinates as dependency (primitive comparison via length) to avoid object reference issues
   useEffect(() => {
-    console.log('🗺️ Route effect triggered', { 
-      mapLoaded, 
-      hasRouteData: !!routeData?.coordinates?.length,
-      routeAddedAlready: routeAddedRef.current 
-    })
+    if (!mapLoaded) return
+    if (!routeData?.coordinates?.length) return
     
-    if (!mapLoaded) {
-      console.log('🗺️ Route effect: Map not loaded yet')
-      return
-    }
-    
-    if (!routeData?.coordinates?.length) {
-      console.log('🗺️ Route effect: No route data yet')
-      return
-    }
-    
-    // Always try to add route when routeData changes (handles re-renders and new routes)
-    console.log('🗺️ Route effect: Adding route now')
+    console.log('🗺️ Route effect: Adding route now', routeData.coordinates.length, 'points')
     const success = addRouteToMap(routeData)
     
     if (success) {
       // Fit bounds to show full route initially (only when not running)
-      if (!isRunning) {
-        const bounds = routeData.coordinates.reduce(
-          (b, c) => b.extend(c),
-          new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
-        )
-        map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
+      if (!isRunning && routeData.coordinates.length >= 2) {
+        try {
+          const firstCoord = routeData.coordinates[0]
+          // Ensure we have valid coordinates (array of [lng, lat])
+          if (Array.isArray(firstCoord) && firstCoord.length >= 2) {
+            const bounds = new mapboxgl.LngLatBounds()
+            routeData.coordinates.forEach(coord => {
+              if (Array.isArray(coord) && coord.length >= 2) {
+                bounds.extend(coord)
+              }
+            })
+            if (!bounds.isEmpty()) {
+              map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
+            }
+          }
+        } catch (e) {
+          console.error('Error fitting bounds:', e)
+        }
       }
     }
-  }, [routeData, mapLoaded, addRouteToMap, isRunning])
+  }, [routeData?.coordinates?.length, routeData?.curves?.length, mapLoaded, addRouteToMap, isRunning])
 
   // Reset route added flag when routeData changes (new route)
   useEffect(() => {
@@ -453,7 +452,10 @@ export default function Map() {
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
-    const curvesToShow = routeData?.curves || []
+    const curves = routeData?.curves
+    if (!curves) return
+    
+    const curvesToShow = curves
     
     // Check if we actually need to recreate markers
     // Only recreate if the set of curve IDs has changed
@@ -519,7 +521,7 @@ export default function Map() {
       markerElementsRef.current.set(curve.id, { element: el, curve, color })
       createdCurveIdsRef.current.add(curve.id)
     })
-  }, [routeData?.curves, mapLoaded])
+  }, [routeData?.curves?.length, mapLoaded])
 
   // Update active curve styling - runs frequently but doesn't recreate markers
   useEffect(() => {
