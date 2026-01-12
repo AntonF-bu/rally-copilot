@@ -16,13 +16,14 @@ export const HIGHWAY_MODE = {
   COMPANION: 'companion' // Full engagement: chatter, stats, gamification
 }
 
-// Highway bend detection thresholds - MORE SENSITIVE than main detection
+// Highway bend detection thresholds - tuned to catch meaningful bends only
 const HIGHWAY_BEND_CONFIG = {
   sampleInterval: 10,       // meters - fine granularity
   slidingWindow: 200,       // meters - window for detecting gradual bends
-  minAngle: 4,              // degrees - very sensitive! (main uses 8 for highway)
+  minAngle: 10,             // degrees - only bends you'd feel at 75mph
   maxAngle: 45,             // degrees - above this it's a real curve
-  minLength: 50,            // meters - minimum bend length
+  minLength: 80,            // meters - minimum bend length (was 50)
+  minSpacing: 400,          // meters - minimum distance between markers
   noMerge: true,            // Never merge highway bends
   noChicane: true           // Don't combine into chicanes - keep each bend separate
 }
@@ -153,10 +154,13 @@ export function analyzeHighwayBends(coordinates, segments) {
   // Post-process: detect S-sweeps (two opposite bends in sequence)
   const processedBends = detectSSweeps(allBends)
   
-  // Add coaching data
-  const coachedBends = addCoachingData(processedBends)
+  // Filter by minimum spacing - don't show markers too close together
+  const spacedBends = enforceMinimumSpacing(processedBends, HIGHWAY_BEND_CONFIG.minSpacing)
   
-  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends total`)
+  // Add coaching data
+  const coachedBends = addCoachingData(spacedBends)
+  
+  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends (filtered from ${allBends.length} raw detections)`)
   
   return coachedBends
 }
@@ -340,6 +344,46 @@ function detectSSweeps(bends) {
     
     result.push(current)
     i++
+  }
+  
+  return result
+}
+
+/**
+ * Enforce minimum spacing between markers
+ * Keeps the most significant bend when multiple are close together
+ */
+function enforceMinimumSpacing(bends, minSpacing) {
+  if (bends.length < 2) return bends
+  
+  const result = []
+  let lastKeptDistance = -Infinity
+  
+  // Sort by distance first
+  const sorted = [...bends].sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+  
+  for (const bend of sorted) {
+    const distanceFromLast = bend.distanceFromStart - lastKeptDistance
+    
+    if (distanceFromLast >= minSpacing) {
+      // Far enough from last marker, keep it
+      result.push(bend)
+      lastKeptDistance = bend.distanceFromStart
+    } else {
+      // Too close - check if this one is more significant
+      const lastKept = result[result.length - 1]
+      if (lastKept) {
+        const currentSignificance = bend.isSSweep ? bend.combinedAngle * 1.5 : bend.angle
+        const lastSignificance = lastKept.isSSweep ? lastKept.combinedAngle * 1.5 : lastKept.angle
+        
+        if (currentSignificance > lastSignificance * 1.3) {
+          // Current is significantly more important, replace the last one
+          result[result.length - 1] = bend
+          lastKeptDistance = bend.distanceFromStart
+        }
+        // Otherwise skip this one (keep the previous)
+      }
+    }
   }
   
   return result
