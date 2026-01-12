@@ -514,12 +514,11 @@ export default function Map() {
       const el = document.createElement('div')
       
       if (bend.isSection) {
-        // SECTION marker - consolidated cluster
-        const bgColor = bend.character === 'technical' ? '#f59e0b' : 
-                       bend.character === 'challenging' ? '#ef4444' : HIGHWAY_BEND_COLOR
+        // SECTION marker - consolidated cluster - always "ACTIVE"
+        const bgColor = '#f59e0b'  // Amber/orange for active sections
         el.innerHTML = `
           <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
-            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">${bend.character}</span>
+            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
             <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
             <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
           </div>
