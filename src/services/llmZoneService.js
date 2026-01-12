@@ -9,7 +9,6 @@ const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
 export const ZONE_TYPES = {
   HIGHWAY: 'transit',      // Maps to our internal 'transit' character
   TECHNICAL: 'technical',
-  SPIRITED: 'spirited', 
   URBAN: 'urban'
 }
 
@@ -116,20 +115,26 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
 function getSystemPrompt() {
   return `You are an expert driving route analyst for a rally co-pilot app. Your job is to classify road segments into the correct driving character.
 
-CLASSIFICATION TYPES:
-- HIGHWAY (transit): Wide, fast roads with gentle curves. Interstates, turnpikes, major highways. Typically 3+ lanes, high speed limits, minimal driver engagement needed.
-- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads. Often 2 lanes, many curves, lower speeds despite what speed limits say.
-- SPIRITED: Fun driving roads with good flow. Country roads, scenic routes, roads enthusiasts enjoy. Mix of straights and curves, engaging but not exhausting.
+CLASSIFICATION TYPES (only use these 3):
+- HIGHWAY: Wide, fast roads with gentle sweepers. Interstates, turnpikes, major highways, scenic byways with good flow. Typically 2+ lanes, higher speed limits, gentle curves.
+- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads, country lanes with tight curves. Many curves, lower effective speeds.
 - URBAN: City/town driving with traffic lights, pedestrians, frequent stops. Downtown areas, suburban streets, commercial zones.
 
-KEY INSIGHT: A narrow 2-lane forest road with a 50mph speed limit is TECHNICAL, not HIGHWAY. The NUMBER OF CURVES and ROAD CHARACTER matter more than speed limits.
+KEY INSIGHTS:
+- A narrow 2-lane forest road with a 50mph speed limit is TECHNICAL, not HIGHWAY
+- A scenic country road with gentle sweeping curves is HIGHWAY
+- High curve count + tight angles = TECHNICAL
+- High curve count + gentle angles = HIGHWAY
+- Few curves + high speed = HIGHWAY
+- Lots of intersections/stops = URBAN
 
 RULES:
-1. High curve density (5+ curves per 5km) usually means TECHNICAL or SPIRITED, not HIGHWAY
-2. Road names containing "Mountain", "Forest", "Ridge", "Creek" suggest TECHNICAL
-3. Road names containing "Interstate", "Turnpike", "Highway XX" suggest HIGHWAY  
-4. Short segments (<2km) between highway sections are likely interchanges - keep as HIGHWAY
-5. If unsure between TECHNICAL and SPIRITED, prefer TECHNICAL for safety
+1. High curve density with tight angles (15°+) = TECHNICAL
+2. High curve density with gentle angles (<15°) = HIGHWAY
+3. Road names containing "Mountain", "Forest", "Ridge" with many curves = TECHNICAL
+4. Road names containing "Interstate", "Turnpike", "Highway XX" = HIGHWAY
+5. Short segments (<2km) between highway sections are likely interchanges - keep as HIGHWAY
+6. When in doubt, prefer TECHNICAL for safety (better to over-call than under-call)
 
 Respond ONLY with valid JSON array. No explanation text outside the JSON.`
 }
@@ -163,7 +168,7 @@ For each segment, analyze if the current classification is correct. Return a JSO
 [
   {
     "index": 0,
-    "classification": "HIGHWAY|TECHNICAL|SPIRITED|URBAN",
+    "classification": "HIGHWAY|TECHNICAL|URBAN",
     "confidence": 0.0-1.0,
     "reason": "brief explanation"
   },
@@ -209,11 +214,12 @@ function parseClassificationResponse(response, segmentCount) {
         case 'TECHNICAL':
           mappedClass = 'technical'
           break
-        case 'SPIRITED':
-          mappedClass = 'spirited'
-          break
         case 'URBAN':
           mappedClass = 'urban'
+          break
+        // Map any legacy spirited to technical
+        case 'SPIRITED':
+          mappedClass = 'technical'
           break
       }
 
