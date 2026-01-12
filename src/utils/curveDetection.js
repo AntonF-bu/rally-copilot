@@ -1,7 +1,6 @@
 // ================================
 // Curve Detection Algorithm v10
-// Technical sections + Road type detection + Fixed directions
-// NEW: Highway Sweeper Detection (adds sweepers, doesn't break existing curves)
+// NEW: Highway Sweeper Detection (8-25° gentle curves)
 // ================================
 
 const SAMPLE_INTERVAL = 8 // meters - fine granularity
@@ -43,6 +42,14 @@ export function detectCurves(coordinates) {
   let curves = detectAllCurves(interpolatedPoints, headings, roadCharacteristics)
   console.log(`Initial detection: ${curves.length} curves`)
 
+  // Step 4.5 NEW: Detect highway sweepers (very gentle curves)
+  if (roadCharacteristics.isHighway) {
+    const sweepers = detectHighwaySweepers(interpolatedPoints, headings, curves)
+    curves = [...curves, ...sweepers]
+    curves.sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+    console.log(`After sweeper detection: ${curves.length} curves (added ${sweepers.length} sweepers)`)
+  }
+
   // Step 5: Analyze tightening/opening for each curve
   curves = analyzeCurveShape(curves, interpolatedPoints, headings)
 
@@ -57,17 +64,6 @@ export function detectCurves(coordinates) {
 
   // Step 9: Apply road-type speed adjustments
   curves = applyRoadTypeSpeedAdjustments(curves, roadCharacteristics)
-
-  // Step 9.5 NEW: Detect highway sweepers (very gentle curves that regular detection misses)
-  // Only run on highway routes, and only add curves that don't overlap existing ones
-  if (roadCharacteristics.isHighway) {
-    const sweepers = detectHighwaySweepers(interpolatedPoints, headings, curves)
-    if (sweepers.length > 0) {
-      curves = [...curves, ...sweepers]
-      curves.sort((a, b) => a.distanceFromStart - b.distanceFromStart)
-      console.log(`Added ${sweepers.length} highway sweepers`)
-    }
-  }
 
   // Step 10: Assign final IDs
   curves = curves.map((curve, idx) => ({ ...curve, id: idx + 1 }))
@@ -86,15 +82,11 @@ function detectHighwaySweepers(points, headings, existingCurves) {
   const sweepers = []
   const windowSize = Math.floor(SWEEPER_CONFIG.windowSize / SAMPLE_INTERVAL)
   
-  if (windowSize >= headings.length) return sweepers
-  
   // Track which points are already part of existing curves
   const usedPoints = new Set()
   existingCurves.forEach(curve => {
-    if (curve.startIndex !== undefined && curve.endIndex !== undefined) {
-      for (let i = curve.startIndex; i <= curve.endIndex; i++) {
-        usedPoints.add(i)
-      }
+    for (let i = curve.startIndex; i <= curve.endIndex; i++) {
+      usedPoints.add(i)
     }
   })
   
@@ -174,7 +166,7 @@ function detectHighwaySweepers(points, headings, existingCurves) {
           usedPoints.add(j)
         }
         
-        console.log(`  🌊 Sweeper detected: ${sweeper.direction} ${sweeper.sweeperAngle}° over ${sweeper.length}m at ${sweeper.distanceFromStart}m`)
+        console.log(`  🌊 Sweeper detected: ${sweeper.direction} ${sweeper.sweeperAngle}° over ${sweeper.length}m`)
       }
       
       i = sweeperEnd + 1
@@ -239,17 +231,7 @@ function createSweeperObject(points, headings, startIndex, endIndex, totalHeadin
  * Analyze road characteristics to determine context (highway vs local road)
  */
 function analyzeRoadCharacteristics(points, headings) {
-  const totalDistance = points[points.length - 1]?.distance || 0
-  
-  if (totalDistance === 0) {
-    return {
-      totalDistance: 0,
-      significantChanges: 0,
-      avgStraightLength: 100,
-      changesPerKm: 0,
-      isHighway: false
-    }
-  }
+  const totalDistance = points[points.length - 1].distance
   
   // Count significant direction changes
   let significantChanges = 0
