@@ -1,14 +1,14 @@
 // ================================
-// Zone Service v3 - Census-Based Route Character Detection
+// Zone Service v4 - Census-Based Route Character Detection
 // Uses TIGERweb + Census Data API for reliable population density
+// UPDATED: Removed SPIRITED - now only HIGHWAY, TECHNICAL, URBAN
 // ================================
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 
-// Route character types (what actually matters for driving)
+// Route character types - SIMPLIFIED to 3 zones
 export const ROUTE_CHARACTER = {
   TECHNICAL: 'technical',   // Twisty fun roads - full co-pilot mode
-  SPIRITED: 'spirited',     // Fun roads but some interruptions
   TRANSIT: 'transit',       // Highway cruising - minimal callouts (highway)
   URBAN: 'urban'            // City driving - only important stuff
 }
@@ -17,7 +17,6 @@ export const ROUTE_CHARACTER = {
 // These show WHERE you are (context/mode) - BOLD and visible
 export const CHARACTER_COLORS = {
   technical: { primary: '#22d3ee', bg: 'rgba(34, 211, 238, 0.2)', label: 'Technical' },  // Bright Cyan
-  spirited: { primary: '#fbbf24', bg: 'rgba(251, 191, 36, 0.2)', label: 'Spirited' },    // Amber
   transit: { primary: '#3b82f6', bg: 'rgba(59, 130, 246, 0.2)', label: 'Highway' },      // Blue
   urban: { primary: '#f472b6', bg: 'rgba(244, 114, 182, 0.2)', label: 'Urban' }          // Pink
 }
@@ -29,13 +28,6 @@ export const CHARACTER_BEHAVIORS = {
     speedMultiplier: 1.0,     // Standard speeds
     calloutStyle: 'detailed', // Full pace notes with modifiers
     announceStraights: true,  // "Clear ahead" callouts
-    hapticOnHard: true
-  },
-  spirited: {
-    minSeverity: 2,           // Skip severity 1
-    speedMultiplier: 1.0,
-    calloutStyle: 'standard',
-    announceStraights: false,
     hapticOnHard: true
   },
   transit: {
@@ -256,7 +248,7 @@ function categorizeDensity(density) {
 export function getZoneAtPosition(position, cachedTracts, roadInfo = null) {
   if (!position || !cachedTracts?.length) {
     return {
-      character: ROUTE_CHARACTER.SPIRITED,
+      character: ROUTE_CHARACTER.TECHNICAL,  // Default to TECHNICAL instead of SPIRITED
       density: null,
       densityCategory: 'unknown',
       tractId: null
@@ -287,6 +279,7 @@ export function getZoneAtPosition(position, cachedTracts, roadInfo = null) {
 
 /**
  * Determine route character based on density and road type
+ * UPDATED: No more SPIRITED - suburban maps to TECHNICAL
  */
 function determineCharacter(densityCategory, roadInfo) {
   const isHighway = roadInfo && 
@@ -298,12 +291,12 @@ function determineCharacter(densityCategory, roadInfo) {
     return ROUTE_CHARACTER.TRANSIT
   }
 
-  // Map density to character
+  // Map density to character - UPDATED: suburban now maps to TECHNICAL
   switch (densityCategory) {
     case 'urban':
       return ROUTE_CHARACTER.URBAN
     case 'suburban':
-      return ROUTE_CHARACTER.SPIRITED
+      return ROUTE_CHARACTER.TECHNICAL  // Was SPIRITED, now TECHNICAL
     case 'rural':
     default:
       return ROUTE_CHARACTER.TECHNICAL
@@ -312,11 +305,12 @@ function determineCharacter(densityCategory, roadInfo) {
 
 /**
  * Fallback classification when no census data available
+ * UPDATED: No more SPIRITED
  */
 function classifyByRoadInfo(roadInfo) {
   if (!roadInfo) {
     return {
-      character: ROUTE_CHARACTER.SPIRITED,
+      character: ROUTE_CHARACTER.TECHNICAL,  // Default to TECHNICAL
       density: null,
       densityCategory: 'unknown',
       tractId: null
@@ -330,10 +324,9 @@ function classifyByRoadInfo(roadInfo) {
     character = ROUTE_CHARACTER.TRANSIT
   } else if (roadInfo.speedLimit <= 25) {
     character = ROUTE_CHARACTER.URBAN
-  } else if (roadInfo.speedLimit >= 45) {
-    character = ROUTE_CHARACTER.SPIRITED
   } else {
-    character = ROUTE_CHARACTER.SPIRITED
+    // Everything else is TECHNICAL (was SPIRITED for speed >= 45)
+    character = ROUTE_CHARACTER.TECHNICAL
   }
 
   return {
@@ -452,11 +445,11 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
     })
     
     if (hasSharpCurve) {
-      console.log(`  ✅ Segment ${seg.id} reclassified from TRANSIT to SPIRITED`)
+      console.log(`  ✅ Segment ${seg.id} reclassified from TRANSIT to TECHNICAL`)  // Was SPIRITED
       return {
         ...seg,
-        character: ROUTE_CHARACTER.SPIRITED,
-        behavior: CHARACTER_BEHAVIORS[ROUTE_CHARACTER.SPIRITED]
+        character: ROUTE_CHARACTER.TECHNICAL,  // Was SPIRITED
+        behavior: CHARACTER_BEHAVIORS[ROUTE_CHARACTER.TECHNICAL]
       }
     }
     
@@ -474,6 +467,7 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
 
 /**
  * Final classification considering census density + road characteristics + curves
+ * UPDATED: No more SPIRITED
  */
 function finalClassifyPoint(point) {
   const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity, curveMaxSeverity } = point
@@ -487,18 +481,16 @@ function finalClassifyPoint(point) {
     if (densityCategory === 'urban') {
       return ROUTE_CHARACTER.URBAN
     }
-    if (densityCategory === 'rural' || curveDensity >= 2) {
-      return ROUTE_CHARACTER.TECHNICAL
-    }
-    return ROUTE_CHARACTER.SPIRITED
+    // Everything else with sharp curves = TECHNICAL
+    return ROUTE_CHARACTER.TECHNICAL
   }
   
   // Highway classification: only if no sharp curves
   const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
   if (isHighway || speedLimit >= 55) {
-    // But if highway has lots of curves (mountain road), bump to SPIRITED
+    // But if highway has lots of curves (mountain road), bump to TECHNICAL
     if (curveDensity >= 3) {
-      return ROUTE_CHARACTER.SPIRITED
+      return ROUTE_CHARACTER.TECHNICAL  // Was SPIRITED
     }
     return ROUTE_CHARACTER.TRANSIT
   }
@@ -509,12 +501,9 @@ function finalClassifyPoint(point) {
     return ROUTE_CHARACTER.TECHNICAL
   }
 
-  // Suburban with good curves could upgrade to TECHNICAL
+  // Suburban now maps to TECHNICAL (was SPIRITED)
   if (densityCategory === 'suburban') {
-    if (curveDensity >= 3 && (curveAvgSeverity || 0) >= 3) {
-      return ROUTE_CHARACTER.TECHNICAL
-    }
-    return ROUTE_CHARACTER.SPIRITED
+    return ROUTE_CHARACTER.TECHNICAL
   }
 
   // Urban density = URBAN (unless highway, handled above)
@@ -522,8 +511,8 @@ function finalClassifyPoint(point) {
     return ROUTE_CHARACTER.URBAN
   }
 
-  // Fallback to SPIRITED
-  return point.character || ROUTE_CHARACTER.SPIRITED
+  // Fallback to TECHNICAL (was SPIRITED)
+  return point.character || ROUTE_CHARACTER.TECHNICAL
 }
 
 // ================================
@@ -752,8 +741,9 @@ function generateSummary(segments, coordinates) {
     }
   }
 
+  // Fun segments = only TECHNICAL now (was TECHNICAL + SPIRITED)
   const funSegments = segments.filter(s => 
-    s.character === ROUTE_CHARACTER.TECHNICAL || s.character === ROUTE_CHARACTER.SPIRITED
+    s.character === ROUTE_CHARACTER.TECHNICAL
   )
   const bestSection = funSegments.sort((a, b) => 
     (b.endDistance - b.startDistance) - (a.endDistance - a.startDistance)
@@ -770,7 +760,7 @@ function generateSummary(segments, coordinates) {
       startMile: bestSection.startDistance / 1609.34,
       endMile: bestSection.endDistance / 1609.34
     } : null,
-    funPercentage: (byCharacter.technical?.percentage || 0) + (byCharacter.spirited?.percentage || 0)
+    funPercentage: byCharacter.technical?.percentage || 0  // Was technical + spirited
   }
 }
 
@@ -840,7 +830,7 @@ function getDistance(coord1, coord2) {
 
 export function getBehaviorForCurve(segments, curve) {
   if (!segments?.length || !curve) {
-    return CHARACTER_BEHAVIORS.spirited
+    return CHARACTER_BEHAVIORS.technical  // Default to TECHNICAL
   }
 
   const curveDistance = curve.distanceFromStart || 0
@@ -848,7 +838,7 @@ export function getBehaviorForCurve(segments, curve) {
     curveDistance >= s.startDistance && curveDistance <= s.endDistance
   )
 
-  return segment?.behavior || CHARACTER_BEHAVIORS.spirited
+  return segment?.behavior || CHARACTER_BEHAVIORS.technical
 }
 
 export function shouldAnnounceCurve(segments, curve) {
