@@ -19,20 +19,20 @@ export const HIGHWAY_MODE = {
 // Highway bend detection thresholds - tuned to catch meaningful bends only
 const HIGHWAY_BEND_CONFIG = {
   sampleInterval: 10,       // meters - fine granularity
-  slidingWindow: 300,       // meters - window for detecting gradual bends (increased from 200)
-  minAngle: 6,              // degrees - lowered from 8 to catch gentler sweeps
+  slidingWindow: 200,       // meters - window for detecting gradual bends
+  minAngle: 8,              // degrees - lowered from 10 to catch more subtle bends
   maxAngle: 45,             // degrees - above this it's a real curve
-  minLength: 50,            // meters - minimum bend length (lowered from 60)
-  minSpacing: 300,          // meters - minimum distance between markers
+  minLength: 60,            // meters - minimum bend length (lowered from 80)
+  minSpacing: 300,          // meters - minimum distance between markers (was 400)
   noMerge: true,            // Never merge highway bends
   noChicane: true           // Don't combine into chicanes - keep each bend separate
 }
 
 // Sweeper thresholds (subset of highway bends)
 const SWEEPER_CONFIG = {
-  minAngle: 6,        // Minimum degrees to qualify as sweeper (lowered from 8)
+  minAngle: 8,        // Minimum degrees to qualify as sweeper
   maxAngle: 25,       // Above this, it's a real curve, not a sweeper
-  minLength: 100,     // Minimum curve length in meters (lowered from 150)
+  minLength: 150,     // Minimum curve length in meters
   maxSeverity: 2      // Sweepers are severity 1-2 max
 }
 
