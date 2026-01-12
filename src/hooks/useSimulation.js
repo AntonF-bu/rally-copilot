@@ -5,9 +5,8 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter } from '../services/zoneService'
 
 // ================================
-// Simulation Hook - v4
-// Realistic driving simulation with proper curve handling
-// Now includes route character analysis for zone-aware callouts
+// Simulation Hook - v5
+// FIXED: Reliable curve updates with better filtering
 // ================================
 
 // Demo route coordinates (Boston to Weston via scenic route)
@@ -38,6 +37,7 @@ export function useSimulation(enabled) {
   const currentSpeedRef = useRef(35)
   const targetSpeedRef = useRef(35)
   const segmentDataRef = useRef({ lengths: [], totalLength: 0 })
+  const lastLogTimeRef = useRef(0)
 
   // Calculate segment lengths for route
   const calculateSegments = useCallback((coordinates) => {
@@ -193,19 +193,26 @@ export function useSimulation(enabled) {
       const heading = getBearing(interpolatedPos, coordinates[lookAheadIdx])
       setHeading(heading)
 
-      // Find upcoming curves and calculate distances
+      // ================================================================
+      // CRITICAL: Calculate curve distances properly
+      // ================================================================
       const curvesWithActualDistance = curves
-        .filter(curve => (curve.distanceFromStart || 0) > 50) // Skip curves at very start of route
+        // FILTER 1: Skip curves at very start of route (the "curve 1 at 0m" problem)
+        .filter(curve => {
+          const curveStart = curve.distanceFromStart || 0
+          return curveStart > 50 // Skip first 50m of route
+        })
         .map(curve => {
-          const actualDistance = (curve.distanceFromStart || 0) - currentDistanceAlong
+          const curveStart = curve.distanceFromStart || 0
+          const actualDistance = curveStart - currentDistanceAlong
           return {
             ...curve,
             distance: Math.max(0, actualDistance),
-            actualDistance
+            actualDistance // Keep the real value for sorting/filtering
           }
         })
       
-      // Only include curves ahead of us (actualDistance > -30 means we haven't fully passed)
+      // FILTER 2: Only include curves ahead of us (actualDistance > -30 means we haven't fully passed)
       const upcomingCurvesWithDist = curvesWithActualDistance
         .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
         .sort((a, b) => a.actualDistance - b.actualDistance)
@@ -214,8 +221,21 @@ export function useSimulation(enabled) {
       setUpcomingCurves(upcomingCurvesWithDist)
 
       // Set active curve (one we're in or very close to)
-      const activeCurve = upcomingCurvesWithDist.find(c => c.distance <= 30 && c.distance >= -30)
+      const activeCurve = upcomingCurvesWithDist.find(c => c.distance <= 30 && c.distance >= 0)
       setActiveCurve(activeCurve || null)
+
+      // Log for debugging (every ~3 seconds)
+      const now = Date.now()
+      if (now - lastLogTimeRef.current > 3000 && upcomingCurvesWithDist.length > 0) {
+        lastLogTimeRef.current = now
+        console.log(`📍 Demo simulation:
+          - Progress: ${(progressRef.current * 100).toFixed(1)}%
+          - Distance along: ${Math.round(currentDistanceAlong)}m / ${Math.round(totalLength)}m
+          - Speed: ${Math.round(currentSpeedRef.current)} mph (${speedMultiplier}x)
+          - Upcoming curves: ${upcomingCurvesWithDist.map(c => 
+              `${c.id}:${Math.round(c.distance)}m`
+            ).join(', ')}`)
+      }
 
       // REALISTIC SPEED CALCULATION
       const nextCurve = upcomingCurvesWithDist[0]
@@ -247,35 +267,25 @@ export function useSimulation(enabled) {
       const speedDiff = targetSpeedRef.current - currentSpeedRef.current
       // Deceleration is faster than acceleration (realistic braking)
       const maxAccel = speedDiff < 0 ? 15 : 8 // mph/s
-      const maxChange = maxAccel * (deltaMs / 1000) * speedMultiplier
+      const accel = Math.sign(speedDiff) * Math.min(Math.abs(speedDiff), maxAccel * (deltaMs / 1000))
+      currentSpeedRef.current += accel
       
-      if (Math.abs(speedDiff) < maxChange) {
-        currentSpeedRef.current = targetSpeedRef.current
-      } else {
-        currentSpeedRef.current += Math.sign(speedDiff) * maxChange
-      }
+      setSpeed(currentSpeedRef.current)
 
-      // Add slight natural variation
-      const displaySpeed = currentSpeedRef.current + (Math.sin(timestamp / 500) * 0.8)
-      setSpeed(Math.max(5, displaySpeed))
-
-      // Progress based on actual speed
-      const speedMps = (currentSpeedRef.current * 1609.34) / 3600 // Convert mph to m/s
-      const distanceThisFrame = speedMps * (deltaMs / 1000) * speedMultiplier
-      const progressThisFrame = distanceThisFrame / totalLength
-
-      progressRef.current += progressThisFrame
+      // Update progress based on current speed
+      const speedMps = (currentSpeedRef.current * 1609.34) / 3600 // mph to m/s
+      const distanceTraveled = speedMps * (deltaMs / 1000) * speedMultiplier
+      progressRef.current = Math.min(1, progressRef.current + distanceTraveled / totalLength)
       
-      // End trip when complete
-      if (progressRef.current >= 1) {
-        progressRef.current = 1
-        setSimulationProgress(1)
-        const { endTrip } = useStore.getState()
-        endTrip()
+      setSimulationProgress(progressRef.current)
+
+      // Check for end of route
+      if (progressRef.current >= 0.99) {
+        console.log('🏁 Demo route complete!')
+        useStore.getState().endTrip()
         return
       }
 
-      setSimulationProgress(progressRef.current)
       animationRef.current = requestAnimationFrame(animate)
     }
 
@@ -287,18 +297,17 @@ export function useSimulation(enabled) {
         animationRef.current = null
       }
     }
-  }, [enabled, isRunning, routeData, mode, simulationPaused, simulationSpeed, setPosition, setHeading, setSpeed, setSimulationProgress, setUpcomingCurves, setActiveCurve])
+  }, [enabled, isRunning, routeData, simulationPaused, simulationSpeed, mode, setPosition, setHeading, setSpeed, setSimulationProgress, setUpcomingCurves, setActiveCurve])
 
-  // Reset on stop
+  // Reset on disable
   useEffect(() => {
-    if (!isRunning) {
+    if (!enabled) {
       progressRef.current = 0
       lastTimeRef.current = 0
-      routeInitializedRef.current = false
       currentSpeedRef.current = 35
       targetSpeedRef.current = 35
     }
-  }, [isRunning])
+  }, [enabled])
 
   return null
 }
@@ -308,19 +317,33 @@ export function useSimulation(enabled) {
 // ================================
 
 function getBaseSpeed(mode) {
-  return { race: 55, fast: 48, cruise: 40 }[mode] || 40
+  const speeds = {
+    cruise: 35,
+    fast: 45,
+    race: 55
+  }
+  return speeds[mode] || 35
 }
 
 function getCurveSpeed(severity, mode) {
-  const speeds = {
-    1: { cruise: 38, fast: 45, race: 52 },
-    2: { cruise: 34, fast: 40, race: 48 },
-    3: { cruise: 30, fast: 36, race: 42 },
-    4: { cruise: 25, fast: 30, race: 36 },
-    5: { cruise: 20, fast: 25, race: 30 },
-    6: { cruise: 15, fast: 20, race: 25 },
+  // Base curve speeds by severity
+  const baseSpeeds = {
+    1: 50,
+    2: 45,
+    3: 35,
+    4: 28,
+    5: 22,
+    6: 15
   }
-  return speeds[severity]?.[mode] || speeds[3][mode]
+  
+  const multipliers = {
+    cruise: 0.85,
+    fast: 1.0,
+    race: 1.15
+  }
+  
+  const baseSpeed = baseSpeeds[severity] || 30
+  return Math.round(baseSpeed * (multipliers[mode] || 0.85))
 }
 
 function getDistanceBetween(coord1, coord2) {
@@ -340,12 +363,16 @@ function getDistanceBetween(coord1, coord2) {
 
 function getBearing(start, end) {
   const startLat = start[1] * Math.PI / 180
+  const startLng = start[0] * Math.PI / 180
   const endLat = end[1] * Math.PI / 180
-  const dLon = (end[0] - start[0]) * Math.PI / 180
+  const endLng = end[0] * Math.PI / 180
 
-  const y = Math.sin(dLon) * Math.cos(endLat)
-  const x = Math.cos(startLat) * Math.sin(endLat) -
-            Math.sin(startLat) * Math.cos(endLat) * Math.cos(dLon)
+  const dLng = endLng - startLng
+  const x = Math.sin(dLng) * Math.cos(endLat)
+  const y = Math.cos(startLat) * Math.sin(endLat) - Math.sin(startLat) * Math.cos(endLat) * Math.cos(dLng)
   
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+  let bearing = Math.atan2(x, y) * 180 / Math.PI
+  return (bearing + 360) % 360
 }
+
+export default useSimulation
