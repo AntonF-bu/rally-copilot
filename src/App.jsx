@@ -13,7 +13,8 @@ import {
   shouldCallClear,
   generateModeCallout,
   generateChicaneCallout,
-  generateClearCallout
+  generateClearCallout,
+  shouldAnnounceCurveInMode
 } from './services/calloutEngine'
 
 // Import voice params for style switching
@@ -258,35 +259,8 @@ export default function App() {
         Voice enabled: ${settings.voiceEnabled}`)
     }
     
-    // Determine if curve should be announced
-    let shouldAnnounce = true // Default to announce everything in live testing
-    
-    // In technical mode, announce all curves
-    if (currentDrivingMode === DRIVING_MODE.TECHNICAL) {
-      shouldAnnounce = true
-    }
-    // In spirited mode, skip severity 1
-    else if (currentDrivingMode === DRIVING_MODE.SPIRITED) {
-      shouldAnnounce = nextCurve.severity >= 2
-    }
-    // In highway mode, skip severity 1-2
-    else if (currentDrivingMode === DRIVING_MODE.HIGHWAY) {
-      shouldAnnounce = nextCurve.severity >= 3
-    }
-    // In urban mode, only announce severity 4+
-    else if (currentDrivingMode === DRIVING_MODE.URBAN) {
-      shouldAnnounce = nextCurve.severity >= 4
-    }
-    
-    // OVERRIDE: Always announce severity 4+ regardless of mode
-    if (nextCurve.severity >= 4) {
-      shouldAnnounce = true
-    }
-    
-    // OVERRIDE: Always announce chicanes
-    if (nextCurve.isChicane) {
-      shouldAnnounce = true
-    }
+    // Use the centralized function to check if curve should be announced
+    const shouldAnnounce = shouldAnnounceCurveInMode(currentDrivingMode, nextCurve)
     
     if (!shouldAnnounce) {
       return
