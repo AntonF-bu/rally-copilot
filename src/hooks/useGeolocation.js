@@ -2,8 +2,8 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 
 // ================================
-// Geolocation Hook v2 - Smooth Tracking
-// Speed-dependent interpolation + prediction
+// Geolocation Hook v3 - More Lenient Accuracy
+// FIXED: Accuracy thresholds were too strict
 // ================================
 
 export function useGeolocation(enabled = false) {
@@ -126,9 +126,27 @@ export function useGeolocation(enabled = false) {
     const { latitude, longitude, accuracy, speed: gpsSpeed, heading: gpsHeading, altitude } = position.coords
     const now = Date.now()
 
-    // Accuracy filter - stricter at higher speeds
+    // ================================================================
+    // FIXED: More lenient accuracy thresholds
+    // Mobile GPS can have 50-100m accuracy, especially at start
+    // ================================================================
     const currentSpeed = velocityRef.current.speed * 2.237 // to mph
-    const maxAccuracy = currentSpeed > 40 ? 30 : currentSpeed > 20 ? 40 : 50
+    
+    // Much more lenient thresholds:
+    // - At rest (0 mph): accept up to 100m accuracy
+    // - Slow (< 20 mph): accept up to 80m accuracy  
+    // - Medium (20-40 mph): accept up to 60m accuracy
+    // - Fast (> 40 mph): accept up to 40m accuracy (need better precision at speed)
+    let maxAccuracy
+    if (currentSpeed < 5) {
+      maxAccuracy = 100 // Very lenient when starting/stopped
+    } else if (currentSpeed < 20) {
+      maxAccuracy = 80
+    } else if (currentSpeed < 40) {
+      maxAccuracy = 60
+    } else {
+      maxAccuracy = 40
+    }
     
     if (accuracy > maxAccuracy) {
       console.log(`📍 GPS ignored - accuracy ${accuracy.toFixed(0)}m > ${maxAccuracy}m threshold at ${currentSpeed.toFixed(0)}mph`)
@@ -186,6 +204,12 @@ export function useGeolocation(enabled = false) {
       }
     } else {
       setSpeed(velocityRef.current.speed * 2.237)
+    }
+
+    // Use GPS heading if available and moving
+    if (gpsHeading !== null && !isNaN(gpsHeading) && gpsSpeed > 2) {
+      setHeading(gpsHeading)
+      velocityRef.current.heading = gpsHeading
     }
 
     console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${(velocityRef.current.speed * 2.237).toFixed(0)}mph`)
