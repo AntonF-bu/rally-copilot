@@ -116,25 +116,28 @@ function getSystemPrompt() {
   return `You are an expert driving route analyst for a rally co-pilot app. Your job is to classify road segments into the correct driving character.
 
 CLASSIFICATION TYPES (only use these 3):
-- HIGHWAY: Wide, fast roads with gentle sweepers. Interstates, turnpikes, major highways, scenic byways with good flow. Typically 2+ lanes, higher speed limits, gentle curves.
-- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads, country lanes with tight curves. Many curves, lower effective speeds.
+- HIGHWAY: Wide, fast roads with gentle sweepers. Interstates, turnpikes, major highways, scenic byways with good flow. Typically 2+ lanes, higher speed limits, gentle curves. INCLUDES highway interchanges, ramps, and any section that is part of the same highway.
+- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads, country lanes with tight curves. Many curves, lower effective speeds. ONLY use when driver has LEFT the highway onto a different type of road.
 - URBAN: City/town driving with traffic lights, pedestrians, frequent stops. Downtown areas, suburban streets, commercial zones.
 
-KEY INSIGHTS:
-- A narrow 2-lane forest road with a 50mph speed limit is TECHNICAL, not HIGHWAY
-- A scenic country road with gentle sweeping curves is HIGHWAY
-- High curve count + tight angles = TECHNICAL
-- High curve count + gentle angles = HIGHWAY
-- Few curves + high speed = HIGHWAY
-- Lots of intersections/stops = URBAN
+CRITICAL RULES FOR HIGHWAY CONTINUITY:
+1. If a route starts on a highway, stays on that highway, and ends on that highway - the ENTIRE segment is HIGHWAY
+2. Highway interchanges, ramps, and curves DO NOT make it TECHNICAL - they're still part of the highway
+3. A segment can ONLY become TECHNICAL if the driver physically exits onto a different road (secondary road, local road, etc.)
+4. If segments before AND after are HIGHWAY, the middle segment is almost certainly HIGHWAY too (same road)
+5. Curves on highways (even sharp ones at interchanges) are still HIGHWAY - just challenging highway sections
 
-RULES:
-1. High curve density with tight angles (15°+) = TECHNICAL
-2. High curve density with gentle angles (<15°) = HIGHWAY
-3. Road names containing "Mountain", "Forest", "Ridge" with many curves = TECHNICAL
-4. Road names containing "Interstate", "Turnpike", "Highway XX" = HIGHWAY
-5. Short segments (<2km) between highway sections are likely interchanges - keep as HIGHWAY
-6. When in doubt, prefer TECHNICAL for safety (better to over-call than under-call)
+WHEN TO USE TECHNICAL:
+- Driver exits highway onto Route 9, a winding mountain road
+- Backroad sections through forests or hills
+- Scenic roads with many tight turns
+- Country roads that are clearly NOT highways
+
+WHEN TO STAY HIGHWAY:
+- Highway curves, even if they're 15-20 degrees
+- Interchange areas with ramps
+- Construction zones on highways
+- Any section that is part of a continuous highway journey
 
 Respond ONLY with valid JSON array. No explanation text outside the JSON.`
 }
@@ -150,18 +153,27 @@ ROUTE OVERVIEW:
 - Route name: ${routeData.name || 'Unknown'}
 ` : ''
 
-  const segmentsList = segmentSummaries.map(seg => 
-    `Segment ${seg.index}: ${seg.startKm}km - ${seg.endKm}km (${seg.lengthKm}km)
+  const segmentsList = segmentSummaries.map((seg, i) => {
+    const prevSeg = segmentSummaries[i - 1]
+    const nextSeg = segmentSummaries[i + 1]
+    const neighbors = []
+    if (prevSeg) neighbors.push(`Previous: ${prevSeg.currentClassification.toUpperCase()}`)
+    if (nextSeg) neighbors.push(`Next: ${nextSeg.currentClassification.toUpperCase()}`)
+    const neighborInfo = neighbors.length > 0 ? `\n   Neighbors: ${neighbors.join(', ')}` : ''
+    
+    return `Segment ${seg.index}: ${seg.startKm}km - ${seg.endKm}km (${seg.lengthKm}km)
    Current: ${seg.currentClassification.toUpperCase()}
    Curves: ${seg.curveCount}, Avg angle: ${seg.avgCurveAngle}°
-   Road class: ${seg.roadClass}, Est. speed: ${seg.estimatedSpeedMph}mph`
-  ).join('\n\n')
+   Road class: ${seg.roadClass}, Est. speed: ${seg.estimatedSpeedMph}mph${neighborInfo}`
+  }).join('\n\n')
 
   return `${routeContext}
 
 SEGMENTS TO CLASSIFY:
 
 ${segmentsList}
+
+IMPORTANT: Look at the "Neighbors" field. If a segment is sandwiched between two HIGHWAY segments, it's almost certainly HIGHWAY too (continuous highway journey).
 
 For each segment, analyze if the current classification is correct. Return a JSON array with your assessment:
 
