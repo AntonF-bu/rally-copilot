@@ -800,6 +800,16 @@ function estimateAngle(curve) {
 export function generateHighwayCallout(bend, highwayMode = HIGHWAY_MODE.BASIC) {
   if (!bend) return null
   
+  // SECTION - consolidated cluster of bends
+  if (bend.isSection) {
+    return {
+      text: bend.calloutDetailed || `Active section, ${bend.bendCount} bends`,
+      type: 'section',
+      priority: 1,
+      bend
+    }
+  }
+  
   // S-sweep
   if (bend.isSSweep) {
     const text = COACHING_TEMPLATES.sSweep(
