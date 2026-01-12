@@ -2,9 +2,12 @@ import { useState } from 'react'
 import useStore from '../store'
 import { useSpeech } from '../hooks/useSpeech'
 
+// NEW: Highway mode settings component
+import HighwayModeSettings from './HighwayModeSettings'
+
 // ================================
-// Settings Panel - Overhauled
-// Clean sections, proper unit handling
+// Settings Panel - v2
+// NEW: Highway Mode section added
 // ================================
 
 export default function SettingsPanel() {
@@ -175,6 +178,9 @@ export default function SettingsPanel() {
               </>
             )}
           </Section>
+
+          {/* NEW: Highway Mode Section */}
+          <HighwayModeSettings modeColor={modeColor} />
 
           {/* Display Section */}
           <Section title="DISPLAY" icon="display">
