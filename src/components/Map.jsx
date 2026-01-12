@@ -27,7 +27,6 @@ export default function Map() {
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const routeLayersRef = useRef([])
-  const routeAddedRef = useRef(false)
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
   
@@ -101,12 +100,14 @@ export default function Map() {
     return segments
   }, [routeData?.distance])
 
-  // Add route to map - called once and kept visible
+  // Add route to map
   const addRouteToMap = useCallback(() => {
-    if (!map.current || !routeData?.coordinates?.length) return
-    if (routeAddedRef.current) return // Don't re-add if already added
+    if (!map.current || !routeData?.coordinates?.length) {
+      console.log('🗺️ addRouteToMap: No map or routeData', { hasMap: !!map.current, hasCoords: !!routeData?.coordinates?.length })
+      return
+    }
     
-    console.log('🗺️ Adding route to map...')
+    console.log('🗺️ Adding route to map...', routeData.coordinates.length, 'points')
     
     try {
       // Clear any existing route layers
@@ -193,7 +194,6 @@ export default function Map() {
         routeLayersRef.current.push(sourceId, glowLayerId, lineLayerId)
       })
 
-      routeAddedRef.current = true
       console.log(`🗺️ Route added: ${segments.length} segments, ${routeLayersRef.current.length} layers`)
       
     } catch (e) {
@@ -259,7 +259,6 @@ export default function Map() {
     })
 
     return () => {
-      routeAddedRef.current = false
       map.current?.remove()
       map.current = null
     }
@@ -267,10 +266,12 @@ export default function Map() {
 
   // Add route when routeData changes (and map is loaded)
   useEffect(() => {
-    if (!mapLoaded || !routeData?.coordinates?.length) return
+    if (!mapLoaded || !routeData?.coordinates?.length) {
+      console.log('🗺️ Route effect: Waiting for map/data', { mapLoaded, hasCoords: !!routeData?.coordinates?.length })
+      return
+    }
     
-    // Reset flag so route gets re-added for new route
-    routeAddedRef.current = false
+    console.log('🗺️ Route effect: Adding route now')
     addRouteToMap()
     
     // Fit bounds to show full route initially
