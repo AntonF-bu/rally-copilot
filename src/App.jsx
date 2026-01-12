@@ -169,11 +169,33 @@ export default function App() {
   // ================================
   
   useEffect(() => {
+    // Log state every 2 seconds regardless
+    const now = Date.now()
+    if (now - lastLogRef.current > 2000) {
+      lastLogRef.current = now
+      console.log(`🔍 CALLOUT DEBUG:
+        - isRunning: ${isRunning}
+        - voiceEnabled: ${settings.voiceEnabled}
+        - upcomingCurves.length: ${upcomingCurves.length}
+        - currentSpeed: ${currentSpeed}
+        - currentMode: ${currentMode}
+        - routeMode: ${routeMode}
+        - isDemoMode: ${isDemoMode}`)
+      
+      if (upcomingCurves.length > 0) {
+        console.log(`   First 3 curves:`, upcomingCurves.slice(0, 3).map(c => ({
+          id: c.id,
+          distance: Math.round(c.distance),
+          severity: c.severity,
+          direction: c.direction
+        })))
+      }
+    }
+    
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
 
-    const now = Date.now()
     const curve = upcomingCurves[0]
     if (!curve) return
     
@@ -189,16 +211,13 @@ export default function App() {
       return
     }
     
-    // Log every 3 seconds
-    if (now - lastLogRef.current > 3000) {
-      lastLogRef.current = now
-      const curveType = curve.isChicane ? `Chicane ${curve.startDirection}` : `${curve.direction} ${curve.severity}`
-      console.log(`📍 ${curveType} @ ${Math.round(distance)}m | Speed: ${Math.round(currentSpeed)}mph | Mode: ${currentMode}`)
-      console.log(`   Thresholds: early=${thresholds.early}m, main=${thresholds.main}m | Announced: ${announcedRef.current.has(curveId)}`)
-    }
+    // Log curve status
+    const curveType = curve.isChicane ? `Chicane ${curve.startDirection}` : `${curve.direction} ${curve.severity}`
+    console.log(`📍 CURVE: ${curveType} @ ${Math.round(distance)}m | Thresholds: early=${thresholds.early}, main=${thresholds.main} | Announced: ${announcedRef.current.has(curveId)}`)
     
     // Skip if shouldn't announce
     if (!shouldAnnounceCurve(currentMode, curve)) {
+      console.log(`   ⏭️ Skipping - shouldAnnounceCurve returned false`)
       return
     }
 
@@ -214,7 +233,7 @@ export default function App() {
       
       const text = generateEarlyWarning(currentMode, curve)
       if (text) {
-        console.log(`🔊 EARLY: "${text}" @ ${Math.round(distance)}m`)
+        console.log(`🔊 EARLY WARNING: "${text}" @ ${Math.round(distance)}m`)
         speak(text, 'high')
         earlyRef.current.add(curveId)
         lastCalloutRef.current = now
@@ -225,13 +244,15 @@ export default function App() {
     // ================================
     // MAIN CALLOUT
     // ================================
-    if (distance <= thresholds.main && 
-        distance > thresholds.final &&
-        !announcedRef.current.has(curveId)) {
-      
+    const inMainWindow = distance <= thresholds.main && distance > thresholds.final
+    const alreadyAnnounced = announcedRef.current.has(curveId)
+    
+    console.log(`   📊 Main window check: distance=${Math.round(distance)}, main=${thresholds.main}, final=${thresholds.final}, inWindow=${inMainWindow}, announced=${alreadyAnnounced}`)
+    
+    if (inMainWindow && !alreadyAnnounced) {
       const text = generateCallout(currentMode, curve)
       if (text) {
-        console.log(`🔊 MAIN: "${text}" @ ${Math.round(distance)}m`)
+        console.log(`🔊 MAIN CALLOUT: "${text}" @ ${Math.round(distance)}m`)
         speak(text, 'high')
         announcedRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
@@ -249,11 +270,11 @@ export default function App() {
     // ================================
     if (distance <= thresholds.final && 
         distance > 10 &&
-        !announcedRef.current.has(curveId)) {
+        !alreadyAnnounced) {
       
       const text = generateCallout(currentMode, curve)
       if (text) {
-        console.log(`🔊 CATCH-UP: "${text}" @ ${Math.round(distance)}m`)
+        console.log(`🔊 CATCH-UP: "${text}" @ ${Math.round(distance)}m (missed main window)`)
         speak(text, 'high')
         announcedRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
