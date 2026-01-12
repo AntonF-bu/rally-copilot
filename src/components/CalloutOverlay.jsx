@@ -2,11 +2,16 @@ import { useMemo, useState, useEffect } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { getBehaviorForCurve, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
+import { useHighwayMode } from '../hooks/useHighwayMode'
 
 // ================================
-// Racing HUD - v10
-// FIXED: Uses userDistance prop for zone detection
+// Racing HUD - v11
+// NEW: Highway mode support - shows SW, S-SWEEP, ACTIVE sections
 // ================================
+
+// Highway colors
+const HIGHWAY_BEND_COLOR = '#3b82f6'  // Blue for sweepers
+const ACTIVE_SECTION_COLOR = '#f59e0b'  // Amber for active sections
 
 // Character labels for zone badge
 const CHARACTER_LABELS = {
@@ -35,6 +40,9 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     elevationData
   } = useStore()
 
+  // NEW: Get highway data
+  const { highwayBends, isHighwayActive } = useHighwayMode()
+
   const [isOnline, setIsOnline] = useState(true)
   
   const isMetric = settings.units === 'metric'
@@ -57,12 +65,11 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // FIXED: Get current route character using userDistance (for GPS) or simulationProgress (for demo)
+  // Get current route character using userDistance (for GPS) or simulationProgress (for demo)
   const currentCharacter = useMemo(() => {
     if (!routeZones?.length) return null
     
     const totalDist = routeData?.distance || 15000
-    // Use userDistance if provided (live GPS), otherwise use simulationProgress (demo)
     const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
     
     const segment = routeZones.find(s => 
@@ -73,6 +80,33 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   
   const characterColors = currentCharacter ? CHARACTER_COLORS[currentCharacter] : null
   const characterLabel = currentCharacter ? CHARACTER_LABELS[currentCharacter] : null
+
+  // NEW: Find upcoming highway bend
+  const upcomingHighwayBend = useMemo(() => {
+    if (!highwayBends?.length) return null
+    
+    const upcoming = highwayBends
+      .filter(bend => {
+        const distanceToBend = bend.distanceFromStart - userDistance
+        return distanceToBend > 0 && distanceToBend < 800  // Look ahead 800m
+      })
+      .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+    
+    return upcoming[0] || null
+  }, [highwayBends, userDistance])
+
+  // NEW: Get next few highway bends for "upcoming" display
+  const upcomingHighwayBends = useMemo(() => {
+    if (!highwayBends?.length) return []
+    
+    return highwayBends
+      .filter(bend => {
+        const distanceToBend = bend.distanceFromStart - userDistance
+        return distanceToBend > 0 && distanceToBend < 2000
+      })
+      .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+      .slice(0, 4)
+  }, [highwayBends, userDistance])
 
   // Calculate route progress
   const routeProgress = useMemo(() => {
@@ -121,14 +155,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     }
   }, [elevationData, altitude, simulationProgress, isMetric])
 
-  const getBrakingZone = (severity) => {
-    if (severity <= 2) return { show: false, start: 0 }
-    if (severity <= 3) return { show: true, start: 75 }
-    if (severity <= 4) return { show: true, start: 60 }
-    if (severity <= 5) return { show: true, start: 50 }
-    return { show: true, start: 40 }
-  }
-
   const currentSpeedDisplay = isMetric 
     ? Math.round((speed || 0) * 1.609) 
     : Math.round(speed || 0)
@@ -139,6 +165,144 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 
   const hasNetworkIssue = !isOnline
 
+  // Determine if we should show highway HUD or regular curve HUD
+  const showHighwayHUD = currentCharacter === ROUTE_CHARACTER.TRANSIT && upcomingHighwayBend
+  
+  // ========================================
+  // HIGHWAY HUD - when in transit zone
+  // ========================================
+  if (showHighwayHUD) {
+    const bend = upcomingHighwayBend
+    const distanceToBend = bend.distanceFromStart - userDistance
+    const distanceDisplay = isMetric 
+      ? Math.round(distanceToBend) 
+      : Math.round(distanceToBend * 3.28084)
+    
+    const bendColor = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
+    const targetSpeed = bend.optimalSpeed || 70
+    
+    const maxDistance = 500
+    const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToBend) / maxDistance) * 100))
+
+    return (
+      <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
+
+        <div className="hud-glass rounded-2xl overflow-hidden">
+          {/* Top row: Zone badge + stats */}
+          <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-white/5">
+            <div className="flex items-center gap-2">
+              <ZoneBadge colors={CHARACTER_COLORS[ROUTE_CHARACTER.TRANSIT]} label="HIGHWAY" />
+            </div>
+            <div className="flex items-center gap-4 text-white/40 text-xs">
+              <span>{routeProgress.percent}%</span>
+              <span>{routeProgress.remainingTime}min</span>
+              {settings.showElevation !== false && (
+                <span style={{ color: modeColor }}>↑{elevationStats.current}{elevationUnit}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Main highway bend info */}
+          <div className="px-4 py-3">
+            <div className="flex items-center gap-4">
+              
+              {/* Bend type display */}
+              <HighwayBendDisplay bend={bend} color={bendColor} />
+              
+              {/* Distance and type info */}
+              <div className="flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold" style={{ color: bendColor }}>
+                    {bend.isSection ? `${bend.bendCount} bends` : 
+                     bend.isSSweep ? 'S-SWEEP' : 
+                     `${bend.angle}°`}
+                  </span>
+                  {bend.isSection && (
+                    <span className="text-sm text-white/60">{bend.length}m</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-white/50 text-sm">DISTANCE</span>
+                  <span className="text-white font-bold">{distanceDisplay}</span>
+                  <span className="text-white/40 text-xs">{distanceUnit}</span>
+                </div>
+                
+                {/* Progress bar */}
+                <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{ 
+                      width: `${progress}%`,
+                      background: bendColor
+                    }}
+                  />
+                </div>
+              </div>
+              
+              {/* Speed display */}
+              {settings.showSpeedometer !== false ? (
+                <div className="text-right pl-2 flex flex-col items-end">
+                  <div className="flex items-baseline gap-1">
+                    <div 
+                      className="text-4xl font-bold tracking-tight leading-none"
+                      style={{ 
+                        color: currentSpeedDisplay > targetSpeed + 10 ? '#ff3366' : 
+                               currentSpeedDisplay < targetSpeed - 10 ? '#22c55e' : 'white',
+                        textShadow: '0 0 20px rgba(255,255,255,0.3)'
+                      }}
+                    >
+                      {currentSpeedDisplay}
+                    </div>
+                    <span className="text-xs text-white/40">{speedUnit}</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[10px] text-white/40">TARGET</span>
+                    <span className="text-sm font-bold" style={{ color: bendColor }}>{targetSpeed}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-right pl-2">
+                  <div className="text-3xl font-bold tracking-tight leading-none" style={{ color: bendColor, textShadow: `0 0 20px ${bendColor}30` }}>
+                    {targetSpeed}
+                  </div>
+                  <span className="text-[10px] text-white/40">{speedUnit}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* Progress bar at bottom */}
+          <div className="px-4 pb-2">
+            <ProgressBar 
+              percent={routeProgress.percent} 
+              modeColor={bendColor}
+              compact
+            />
+          </div>
+        </div>
+
+        {/* Upcoming highway bends */}
+        {upcomingHighwayBends.length > 1 && (
+          <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
+            <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
+            <div className="flex flex-col gap-1">
+              {upcomingHighwayBends.slice(1, 4).map((next) => (
+                <UpcomingHighwayBendRow key={next.id} bend={next} userDistance={userDistance} isMetric={isMetric} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <style>{hudStyles}</style>
+      </div>
+    )
+  }
+
+  // ========================================
+  // REGULAR CURVE HUD - non-highway zones
+  // ========================================
+  
   // No curve view
   if (!curve) {
     return (
@@ -184,7 +348,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 
   const recommendedSpeed = getRecommendedSpeed(curve)
   const severityColor = getCurveColor(curve.severity)
-  const brakingZone = getBrakingZone(curve.severity)
   
   const distanceDisplay = isMetric 
     ? Math.round(curve.distance) 
@@ -192,6 +355,16 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   
   const maxDistance = 400
   const progress = Math.min(100, Math.max(0, ((maxDistance - curve.distance) / maxDistance) * 100))
+  
+  const getBrakingZone = (severity) => {
+    if (severity <= 2) return { show: false, start: 0 }
+    if (severity <= 3) return { show: true, start: 75 }
+    if (severity <= 4) return { show: true, start: 60 }
+    if (severity <= 5) return { show: true, start: 50 }
+    return { show: true, start: 40 }
+  }
+  
+  const brakingZone = getBrakingZone(curve.severity)
   const inBrakingZone = brakingZone.show && progress >= brakingZone.start
 
   const displayDirection = curve.isChicane ? curve.startDirection : curve.direction
@@ -353,6 +526,111 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
       )}
 
       <style>{hudStyles}</style>
+    </div>
+  )
+}
+
+// ========================================
+// NEW: Highway Bend Display Component
+// ========================================
+function HighwayBendDisplay({ bend, color }) {
+  if (bend.isSection) {
+    // Active Section display
+    return (
+      <div 
+        className="px-3 py-2 rounded-xl min-w-[60px]"
+        style={{ 
+          background: `linear-gradient(135deg, ${color}20, ${color}10)`,
+          border: `2px solid ${color}60`,
+          boxShadow: `0 0 25px ${color}40`
+        }}
+      >
+        <div className="text-center">
+          <span className="text-[10px] font-bold tracking-wider" style={{ color }}>ACTIVE</span>
+          <div className="text-xl font-bold" style={{ color }}>{bend.bendCount}</div>
+        </div>
+      </div>
+    )
+  }
+  
+  if (bend.isSSweep) {
+    // S-Sweep display
+    const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
+    const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
+    return (
+      <div 
+        className="px-3 py-2 rounded-xl"
+        style={{ 
+          background: `linear-gradient(135deg, ${color}20, ${color}10)`,
+          border: `2px solid ${color}60`,
+          boxShadow: `0 0 25px ${color}40`
+        }}
+      >
+        <div className="text-center">
+          <span className="text-[10px] font-bold tracking-wider" style={{ color }}>S-SWEEP</span>
+          <div className="text-lg font-bold" style={{ color }}>{dir1}{dir2}</div>
+        </div>
+      </div>
+    )
+  }
+  
+  // Regular sweeper display
+  const isLeft = bend.direction === 'LEFT'
+  const dirArrow = isLeft ? '←' : '→'
+  
+  return (
+    <div 
+      className="w-14 h-14 rounded-xl flex flex-col items-center justify-center"
+      style={{ 
+        background: `linear-gradient(135deg, ${color}20, ${color}10)`,
+        border: `2px solid ${color}60`,
+        boxShadow: `0 0 25px ${color}40`
+      }}
+    >
+      <span className="text-[10px] font-bold" style={{ color }}>SW</span>
+      <span className="text-xl font-bold" style={{ color }}>{dirArrow}</span>
+    </div>
+  )
+}
+
+// ========================================
+// NEW: Upcoming Highway Bend Row
+// ========================================
+function UpcomingHighwayBendRow({ bend, userDistance, isMetric }) {
+  const distanceToBend = bend.distanceFromStart - userDistance
+  const dist = isMetric ? Math.round(distanceToBend) : Math.round(distanceToBend * 3.28084)
+  const unit = isMetric ? 'm' : 'ft'
+  const color = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
+  
+  if (bend.isSection) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${color}30`, color }}>ACTIVE</span>
+        <span className="text-[10px] font-bold" style={{ color }}>{bend.bendCount}</span>
+        <span className="text-[10px] text-white/40">{dist}{unit}</span>
+      </div>
+    )
+  }
+  
+  if (bend.isSSweep) {
+    const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
+    const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold" style={{ color }}>S{dir1}{dir2}</span>
+        <span className="text-[10px] text-white/40">{dist}{unit}</span>
+      </div>
+    )
+  }
+  
+  const isLeft = bend.direction === 'LEFT'
+  const dirArrow = isLeft ? '←' : '→'
+  
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-bold" style={{ color }}>SW{dirArrow}</span>
+      <span className="text-[10px]" style={{ color }}>{bend.angle}°</span>
+      <span className="text-[10px] text-white/40">{dist}{unit}</span>
     </div>
   )
 }
