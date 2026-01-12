@@ -823,8 +823,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setMapLoaded(true)
       addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments, routeData.curves)
       addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
-      const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
+      
+      // Fit bounds with error handling
+      try {
+        const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+        mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
+      } catch (err) {
+        console.warn('fitBounds failed, using fallback:', err)
+        // Fallback: just center on first coordinate
+        mapRef.current.setCenter(routeData.coordinates[0])
+        mapRef.current.setZoom(11)
+      }
     })
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { 
