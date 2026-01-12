@@ -42,6 +42,19 @@ export default function Map() {
   const activeCurve = useStore(state => state.activeCurve)
   const mode = useStore(state => state.mode)
   const routeData = useStore(state => state.routeData)
+  const routeZones = useStore(state => state.routeZones)
+  const simulationProgress = useStore(state => state.simulationProgress)
+
+  // Calculate current zone character for zoom adjustment
+  const currentZoneCharacter = (() => {
+    if (!routeZones?.length || !routeData?.distance) return null
+    const totalDist = routeData.distance
+    const currentDist = (simulationProgress || 0) * totalDist
+    const segment = routeZones.find(s => 
+      currentDist >= s.startDistance && currentDist <= s.endDistance
+    )
+    return segment?.character || null
+  })()
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -345,12 +358,22 @@ export default function Map() {
           isAnimatingRef.current = true
           
           const duration = currentSpeed > 50 ? 500 : currentSpeed > 30 ? 700 : 900
-          const zoom = currentSpeed > 50 ? 15.5 : currentSpeed > 30 ? 16 : 16.5
+          
+          // Zoom out more on highway (transit) zones for better visibility
+          const isHighway = currentZoneCharacter === 'transit'
+          let zoom
+          if (isHighway) {
+            // Highway: zoom out more
+            zoom = currentSpeed > 60 ? 14 : currentSpeed > 40 ? 14.5 : 15
+          } else {
+            // Normal zones
+            zoom = currentSpeed > 50 ? 15.5 : currentSpeed > 30 ? 16 : 16.5
+          }
           
           map.current.easeTo({
             center: position,
             bearing: heading || 0,
-            pitch: 60,
+            pitch: isHighway ? 50 : 60, // Slightly lower pitch on highway too
             zoom: zoom,
             duration: duration,
             easing: (t) => t * (2 - t)
