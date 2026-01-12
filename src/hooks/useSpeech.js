@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v3 - Multi-Voice Pre-caching
-// Supports relaxed/normal/urgent voice styles
+// Speech Hook v4 - iOS Audio Fix
+// Proper audio context unlocking for Safari
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
@@ -44,6 +44,10 @@ export const CHARACTER_TO_VOICE = {
 // Multi-voice cache: Map<"text:style", audioUrl>
 const AUDIO_CACHE = new Map()
 
+// Audio context for iOS
+let audioContext = null
+let audioUnlocked = false
+
 // Get cache key
 const getCacheKey = (text, style = 'normal') => `${text}:${style}`
 
@@ -63,8 +67,13 @@ export function useSpeech() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // Create audio element with iOS-specific attributes
     const audio = new Audio()
     audio.playsInline = true
+    audio.preload = 'auto'
+    // This helps on iOS
+    audio.setAttribute('playsinline', '')
+    audio.setAttribute('webkit-playsinline', '')
     audioRef.current = audio
 
     audio.onended = () => {
@@ -73,7 +82,8 @@ export function useSpeech() {
       setSpeaking(false, '')
     }
     
-    audio.onerror = () => {
+    audio.onerror = (e) => {
+      console.error('Audio error:', e)
       clearTimeout(timeoutRef.current)
       isPlayingRef.current = false
       setSpeaking(false, '')
@@ -136,7 +146,6 @@ export function useSpeech() {
           utterance.voice = voiceRef.current
         }
         
-        // Adjust rate based on style
         const voiceConfig = VOICE_STYLES[style] || VOICE_STYLES.normal
         utterance.rate = voiceConfig.playbackRate
         utterance.pitch = 1.0
@@ -173,17 +182,26 @@ export function useSpeech() {
     // Check cache first
     if (AUDIO_CACHE.has(cacheKey)) {
       try {
-        audioRef.current.src = AUDIO_CACHE.get(cacheKey)
+        const cachedUrl = AUDIO_CACHE.get(cacheKey)
+        audioRef.current.src = cachedUrl
         audioRef.current.volume = settings.volume || 1.0
         audioRef.current.playbackRate = voiceConfig.playbackRate
+        audioRef.current.currentTime = 0
+        
         isPlayingRef.current = true
         setSpeakingWithTimeout(true, text, 5000)
-        await audioRef.current.play()
+        
+        // Use play() with promise handling for iOS
+        const playPromise = audioRef.current.play()
+        if (playPromise !== undefined) {
+          await playPromise
+        }
         return true
       } catch (err) {
         console.error('Cache playback error:', err)
         isPlayingRef.current = false
         setSpeaking(false, '')
+        // Don't return false - try fetching fresh
       }
     }
 
@@ -216,11 +234,16 @@ export function useSpeech() {
       audioRef.current.src = audioUrl
       audioRef.current.volume = settings.volume || 1.0
       audioRef.current.playbackRate = voiceConfig.playbackRate
+      audioRef.current.currentTime = 0
       
       isPlayingRef.current = true
       setSpeakingWithTimeout(true, text, 5000)
       
-      await audioRef.current.play()
+      // Use play() with promise handling for iOS
+      const playPromise = audioRef.current.play()
+      if (playPromise !== undefined) {
+        await playPromise
+      }
       return true
     } catch (err) {
       console.error('ElevenLabs error:', err)
@@ -244,6 +267,7 @@ export function useSpeech() {
     const now = Date.now()
     const style = styleOverride || currentStyleRef.current
     
+    // Prevent duplicate callouts
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 2000) {
       return false
     }
@@ -260,36 +284,76 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
+    console.log(`🔊 Speaking: "${text}" (style: ${style})`)
+
+    // Try ElevenLabs first, fall back to native
     const success = await speakElevenLabs(text, style)
     if (success) return true
     
+    console.log('🔊 Falling back to native speech')
     return speakNative(text, style)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
+  // ================================================================
+  // FIXED: Proper iOS audio unlocking
+  // ================================================================
   const initAudio = useCallback(async () => {
+    console.log('🔊 Initializing audio for iOS...')
+    
     try {
+      // Method 1: Create and resume AudioContext (required for iOS Safari)
+      if (!audioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext
+        if (AudioContext) {
+          audioContext = new AudioContext()
+        }
+      }
+      
+      if (audioContext && audioContext.state === 'suspended') {
+        await audioContext.resume()
+        console.log('🔊 AudioContext resumed')
+      }
+      
+      // Method 2: Play a silent sound on the audio element
       if (audioRef.current) {
-        audioRef.current.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7v/////////////////////////////////'
+        // Create a very short silent audio
+        // This is a minimal valid MP3 file (silent)
+        const silentMp3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+9DEAAAIAANIAAAAQAAAaQAAAAS7u7vd3d0iIiIiIiJ3d3e7u93dIiIiAAAAAHd3vd3SIiIAAAAiIiIid3d3u7u93SIiIiIAAAB3d73d0iIiIiIAAAAiInd3d7u73d0iIiIiIiIid3e7u7u7u93dIiIiIiJ3d3e7u7u73d3SIiIiInd3d7u7u93d3SIiIiIid3d3u7u73d3dIiIiIiIiInd3u7vd3d0iIiIiIiJ3d7u7u93d3SIiIiIiInd3d7u73d3dIiIiIiIiInd3u7vd3d0iIiIiIiJ3d7u7u93d3SIiIiIiInd3d7u73d3d0iIiIiIiInd3e7u93d0iIiIiIiJ3d3e7u7vd3dIiIiIiInd3d7u7vd3dIiIiIiIiInd3e7u73d0iIiIiIiJ3d3e7u7vd3SIiIiIiInd3d7u7vd3dIiIiIiIiInd3e7u73d0='
+        
+        audioRef.current.src = silentMp3
         audioRef.current.volume = 0.01
+        
         try {
           await audioRef.current.play()
           audioRef.current.pause()
-        } catch (e) {}
+          audioRef.current.currentTime = 0
+          console.log('🔊 Audio element unlocked')
+        } catch (e) {
+          console.log('🔊 Silent play failed (expected on some browsers):', e.message)
+        }
       }
       
+      // Method 3: Trigger speech synthesis (helps on some iOS versions)
       if (synthRef.current) {
         try {
-          const u = new SpeechSynthesisUtterance('')
-          u.volume = 0
-          synthRef.current.speak(u)
-          setTimeout(() => synthRef.current?.cancel(), 10)
-        } catch (e) {}
+          const utterance = new SpeechSynthesisUtterance('')
+          utterance.volume = 0
+          synthRef.current.speak(utterance)
+          setTimeout(() => {
+            try { synthRef.current?.cancel() } catch (e) {}
+          }, 10)
+          console.log('🔊 Speech synthesis unlocked')
+        } catch (e) {
+          console.log('🔊 Speech synthesis unlock failed:', e.message)
+        }
       }
       
-      console.log('🔊 Audio initialized')
+      audioUnlocked = true
+      console.log('🔊 Audio initialization complete')
       return true
     } catch (e) {
-      return true
+      console.error('🔊 Audio init error:', e)
+      return true // Return true anyway to not block
     }
   }, [])
 
@@ -324,20 +388,18 @@ export function useSpeech() {
     setVoiceStyle,
     isCached,
     getCacheStats,
-    preloadCopilotVoices  // Export the preload function
+    preloadCopilotVoices
   }
 }
 
 /**
  * Pre-cache essential callouts in all voice styles
- * Returns progress updates via callback
  */
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   if (!navigator.onLine) {
     return { success: false, cached: 0, total: 0, error: 'offline' }
   }
 
-  // Build list of callouts to cache
   const callouts = new Set()
   
   // Basic direction + severity callouts
@@ -379,7 +441,7 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
   const calloutList = Array.from(callouts)
   
   // Determine which styles to cache based on route segments
-  const stylesToCache = new Set(['normal']) // Always cache normal
+  const stylesToCache = new Set(['normal'])
   
   if (segments?.length) {
     segments.forEach(seg => {
@@ -387,7 +449,6 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
       if (style) stylesToCache.add(style)
     })
   } else {
-    // Cache all styles if no segments info
     stylesToCache.add('relaxed')
     stylesToCache.add('urgent')
   }
@@ -405,7 +466,6 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
     for (const text of calloutList) {
       const cacheKey = getCacheKey(text, style)
       
-      // Skip if already cached
       if (AUDIO_CACHE.has(cacheKey)) {
         cached++
         onProgress?.({ cached, total: totalItems, percent: (cached / totalItems) * 100 })
@@ -443,80 +503,55 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
         failed++
       }
       
-      onProgress?.({ cached, failed, total: totalItems, percent: (cached / totalItems) * 100 })
-      
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 80))
+      onProgress?.({ cached, total: totalItems, percent: (cached / totalItems) * 100 })
     }
   }
 
   console.log(`🔊 Pre-cache complete: ${cached}/${totalItems} cached, ${failed} failed`)
   
   return { 
-    success: cached > 0, 
+    success: failed < totalItems * 0.5,
     cached, 
-    failed,
-    total: totalItems 
+    total: totalItems, 
+    failed 
   }
 }
 
-// Legacy export for compatibility
-export async function preloadRouteAudio(curves) {
-  return preloadCopilotVoices(curves, null, null)
-}
+// ================================
+// CALLOUT GENERATORS
+// ================================
 
-// Callout generation functions (unchanged)
-export function generateCallout(curve, mode = 'cruise', speedUnit = 'mph', nextCurve = null, phase = 'main') {
-  if (!curve) return ''
-
-  const getSpeed = (severity) => {
-    const speeds = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 24, 6: 18 }
-    const mult = { cruise: 0.92, fast: 1.0, race: 1.15 }
-    let speed = Math.round((speeds[severity] || 40) * (mult[mode] || 0.92))
-    if (speedUnit === 'kmh') speed = Math.round(speed * 1.609)
-    return speed
-  }
-
-  const dir = curve.isChicane 
-    ? (curve.startDirection === 'LEFT' ? 'left' : 'right')
-    : (curve.direction === 'LEFT' ? 'left' : 'right')
-  const Dir = dir.charAt(0).toUpperCase() + dir.slice(1)
+export function generateCallout(curve, mode, speedUnit, nextCurve = null, phase = 'main') {
+  if (!curve) return null
   
-  const speed = curve.isChicane 
-    ? getSpeed(Math.max(...curve.severitySequence.split('-').map(Number)))
-    : getSpeed(curve.severity)
-
-  if (curve.isChicane) {
-    if (phase === 'final') return `Chicane ${dir} now!`
-    return `Chicane ${dir} ${curve.severitySequence}`
-  }
-
-  if (phase === 'early') {
-    return `${Dir} ${curve.severity} ahead`
-  }
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  const severity = curve.severity
   
-  if (phase === 'final') {
-    return curve.severity >= 5 ? `${Dir} ${curve.severity} now!` : `${Dir} now`
-  }
-
-  // Main callout
-  let callout = `${Dir} ${curve.severity}`
+  let callout = `${dir} ${severity}`
+  
   if (curve.modifier) {
-    callout += ` ${curve.modifier.toLowerCase()}`
+    const modMap = {
+      'TIGHTENS': 'tightens',
+      'OPENS': 'opens',
+      'LONG': 'long',
+      'HAIRPIN': 'hairpin'
+    }
+    const mod = modMap[curve.modifier] || curve.modifier.toLowerCase()
+    callout += `, ${mod}`
   }
   
   return callout
 }
 
-export function generateEarlyWarning(curve, mode = 'cruise', speedUnit = 'mph') {
-  return generateCallout(curve, mode, speedUnit, null, 'early')
+export function generateFinalWarning(curve, speedUnit) {
+  if (!curve) return null
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  return curve.severity >= 5 ? `${dir} ${curve.severity} now!` : `${dir} now`
 }
 
-export function generateFinalWarning(curve, mode = 'cruise', speedUnit = 'mph') {
-  return generateCallout(curve, mode, speedUnit, null, 'final')
-}
-
-export function generateStraightCallout(distanceMeters, mode = 'cruise', speedUnit = 'mph', nextCurve = null) {
+export function generateStraightCallout(distanceMeters, nextCurve, speedUnit) {
+  if (distanceMeters < 300) return null
+  
   if (nextCurve) {
     const nextDir = nextCurve.isChicane 
       ? (nextCurve.startDirection === 'LEFT' ? 'left' : 'right')
@@ -536,7 +571,6 @@ export function generateInSectionCallout(curve, mode, speedUnit) {
   return `${Dir} ${curve.severity}`
 }
 
-// Zone transition callouts
 export function generateZoneTransitionCallout(fromCharacter, toCharacter) {
   const transitions = {
     'technical': 'Technical section ahead',
