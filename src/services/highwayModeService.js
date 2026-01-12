@@ -159,11 +159,8 @@ export function analyzeHighwayBends(coordinates, segments) {
   // Post-process: detect S-sweeps (two opposite bends in sequence)
   const processedBends = detectSSweeps(allBends)
   
-  // Filter by minimum spacing - don't show markers too close together
-  const spacedBends = enforceMinimumSpacing(processedBends, HIGHWAY_BEND_CONFIG.minSpacing)
-  
   // STRICT zone validation - ensure each bend is actually within a transit zone
-  const validatedBends = spacedBends.filter(bend => {
+  const validatedBends = processedBends.filter(bend => {
     const isInTransit = highwaySegments.some(seg => 
       bend.distanceFromStart >= seg.startDistance && 
       bend.distanceFromStart <= seg.endDistance
@@ -174,10 +171,17 @@ export function analyzeHighwayBends(coordinates, segments) {
     return isInTransit
   })
   
-  // Add coaching data
-  const coachedBends = addCoachingData(validatedBends)
+  // Consolidate dense clusters into section markers FIRST (before spacing)
+  // This combines 3+ close bends into a single "sweeping section" marker
+  const consolidatedBends = consolidateBendClusters(validatedBends, 400)
   
-  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends`)
+  // Then apply minimum spacing to the consolidated result
+  const spacedBends = enforceMinimumSpacing(consolidatedBends, HIGHWAY_BEND_CONFIG.minSpacing)
+  
+  // Add coaching data
+  const coachedBends = addCoachingData(spacedBends)
+  
+  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} markers`)
   
   return coachedBends
 }
@@ -339,6 +343,112 @@ function detectHighwayBends(coordinates, segmentStartDistance) {
   }
   
   return bends
+}
+
+/**
+ * Detect and consolidate dense bend clusters into section markers
+ * Combines 3+ close bends into a single "sweeping section" marker
+ */
+function consolidateBendClusters(bends, clusterDistance = 400) {
+  if (bends.length < 3) return bends  // Need 3+ to consider clustering
+  
+  const result = []
+  let i = 0
+  
+  while (i < bends.length) {
+    // Look ahead to see how many bends are within clusterDistance
+    const clusterStart = i
+    let clusterEnd = i
+    let lastDist = bends[i].distanceFromStart
+    
+    for (let j = i + 1; j < bends.length; j++) {
+      const gap = bends[j].distanceFromStart - lastDist
+      if (gap <= clusterDistance) {
+        clusterEnd = j
+        lastDist = bends[j].distanceFromStart
+      } else {
+        break
+      }
+    }
+    
+    const clusterSize = clusterEnd - clusterStart + 1
+    
+    // Consolidate if 3+ bends are truly clustered
+    if (clusterSize >= 3) {
+      // Consolidate into a section marker
+      const clusterBends = bends.slice(clusterStart, clusterEnd + 1)
+      const firstBend = clusterBends[0]
+      const lastBend = clusterBends[clusterBends.length - 1]
+      
+      const totalAngle = clusterBends.reduce((sum, b) => sum + (b.isSSweep ? b.combinedAngle : b.angle), 0)
+      const sectionLength = lastBend.distanceFromStart - firstBend.distanceFromStart + (lastBend.length || 100)
+      const maxAngle = Math.max(...clusterBends.map(b => b.isSSweep ? b.combinedAngle : b.angle))
+      
+      // Determine section character
+      let character = 'sweeping'
+      if (maxAngle > 25 || totalAngle > 60) character = 'technical'
+      if (clusterSize >= 5 || totalAngle > 80) character = 'challenging'
+      
+      const section = {
+        id: `hwy-section-${result.length + 1}`,
+        type: 'highway_section',
+        isSection: true,
+        bendCount: clusterSize,
+        totalAngle: Math.round(totalAngle),
+        maxAngle: Math.round(maxAngle),
+        length: Math.round(sectionLength),
+        distanceFromStart: firstBend.distanceFromStart,
+        position: firstBend.position,  // Mark at start of section
+        entryPosition: firstBend.entryPosition,
+        exitPosition: lastBend.exitPosition,
+        character: character,
+        // Include individual bends for detailed callouts
+        bends: clusterBends,
+        // Generate callout text
+        calloutBasic: `${character === 'technical' ? 'Technical' : 'Sweepy'} section, ${clusterSize} bends`,
+        calloutDetailed: generateSectionCallout(clusterBends, character, sectionLength),
+        // For UI compatibility
+        direction: firstBend.direction,
+        angle: maxAngle,
+        isSweeper: true,
+        isHighwayBend: true
+      }
+      
+      result.push(section)
+      i = clusterEnd + 1
+    } else {
+      // Keep individual bend(s)
+      result.push(bends[i])
+      i++
+    }
+  }
+  
+  console.log(`   Cluster consolidation: ${bends.length} bends → ${result.length} markers (${bends.length - result.length} consolidated)`)
+  return result
+}
+
+/**
+ * Generate detailed callout for a section
+ */
+function generateSectionCallout(bends, character, length) {
+  const directions = bends.map(b => b.direction)
+  const leftCount = directions.filter(d => d === 'LEFT').length
+  const rightCount = directions.filter(d => d === 'RIGHT').length
+  
+  let directionHint = ''
+  if (leftCount > rightCount * 2) directionHint = ', mostly left'
+  else if (rightCount > leftCount * 2) directionHint = ', mostly right'
+  else if (leftCount > 0 && rightCount > 0) directionHint = ', both directions'
+  
+  const lengthInMeters = Math.round(length / 100) * 100  // Round to nearest 100m
+  
+  if (character === 'technical') {
+    return `Technical stretch ahead. ${bends.length} bends over ${lengthInMeters} meters${directionHint}. Stay focused.`
+  } else if (character === 'challenging') {
+    return `Challenging section. ${bends.length} sweepers, ${lengthInMeters} meters${directionHint}. Full attention.`
+  } else {
+    return `Sweepy section, ${bends.length} gentle bends${directionHint}.`
+  }
 }
 
 /**
