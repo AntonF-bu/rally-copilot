@@ -429,26 +429,81 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
 
 /**
  * Generate detailed callout for a section
+ * Narrates through the key bends with directions, angles, and speed targets
  */
 function generateSectionCallout(bends, character, length) {
-  const directions = bends.map(b => b.direction)
-  const leftCount = directions.filter(d => d === 'LEFT').length
-  const rightCount = directions.filter(d => d === 'RIGHT').length
+  if (!bends?.length) return 'Section ahead.'
   
-  let directionHint = ''
-  if (leftCount > rightCount * 2) directionHint = ', mostly left'
-  else if (rightCount > leftCount * 2) directionHint = ', mostly right'
-  else if (leftCount > 0 && rightCount > 0) directionHint = ', both directions'
+  const parts = []
   
-  const lengthInMeters = Math.round(length / 100) * 100  // Round to nearest 100m
-  
-  if (character === 'technical') {
-    return `Technical stretch ahead. ${bends.length} bends over ${lengthInMeters} meters${directionHint}. Stay focused.`
-  } else if (character === 'challenging') {
-    return `Challenging section. ${bends.length} sweepers, ${lengthInMeters} meters${directionHint}. Full attention.`
+  // Opening based on character
+  if (character === 'challenging') {
+    parts.push('Challenging section ahead')
+  } else if (character === 'technical') {
+    parts.push('Technical stretch ahead')
   } else {
-    return `Sweepy section, ${bends.length} gentle bends${directionHint}.`
+    parts.push('Sweeping section')
   }
+  
+  // Narrate through key bends (limit to first 4-5 for brevity)
+  const keyBends = bends.slice(0, 5)
+  
+  keyBends.forEach((bend, idx) => {
+    const dir = bend.direction?.toLowerCase() || 'bend'
+    const angle = bend.angle || 10
+    const speed = bend.optimalSpeed || calculateOptimalSpeed(bend)
+    
+    // First bend is "entry"
+    if (idx === 0) {
+      if (bend.isSSweep) {
+        const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
+        const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
+        parts.push(`Entry ${dir1} ${bend.firstBend?.angle || angle} degrees then ${dir2}`)
+      } else {
+        parts.push(`Entry ${dir} ${angle} degrees, ${speed}`)
+      }
+    } 
+    // Subsequent bends
+    else {
+      // Describe the bend character
+      let bendDesc = ''
+      
+      if (bend.isSSweep) {
+        const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
+        const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
+        bendDesc = `S-sweep ${dir1} then ${dir2}`
+      } else if (bend.angle > 25) {
+        bendDesc = `Firm ${dir} ${angle} degrees, ease to ${speed}`
+      } else if (bend.angle > 15) {
+        bendDesc = `${dir} ${angle}, ${speed}`
+      } else {
+        bendDesc = `Gentle ${dir}`
+      }
+      
+      // Add transition word
+      if (idx === 1) {
+        parts.push(`Then ${bendDesc.toLowerCase()}`)
+      } else if (idx === keyBends.length - 1) {
+        parts.push(`Finally ${bendDesc.toLowerCase()}`)
+      } else {
+        parts.push(bendDesc)
+      }
+    }
+  })
+  
+  // If there are more bends we didn't narrate
+  if (bends.length > 5) {
+    parts.push(`${bends.length - 5} more bends follow`)
+  }
+  
+  // Closing advice
+  if (character === 'challenging') {
+    parts.push('Full attention')
+  } else if (character === 'technical') {
+    parts.push('Stay focused')
+  }
+  
+  return parts.join('. ') + '.'
 }
 
 /**
