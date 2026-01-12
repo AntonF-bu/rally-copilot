@@ -67,16 +67,6 @@ export default function Map() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // NEW: Helper to check if a distance is within a transit zone
-  const isInTransitZone = useCallback((distance) => {
-    if (!routeZones?.length) return false
-    return routeZones.some(seg => 
-      seg.character === 'transit' && 
-      distance >= seg.startDistance && 
-      distance <= seg.endDistance
-    )
-  }, [routeZones])
-
   // Build severity segments for route coloring
   const buildSeveritySegments = useCallback((coordinates, curves, totalDistance) => {
     if (!coordinates?.length) return []
@@ -426,7 +416,7 @@ export default function Map() {
     })
   }, [position, heading])
 
-  // Add curve markers - UPDATED: Skip curves in transit zones
+  // Add curve markers - curves are already filtered to exclude transit zones
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -439,11 +429,6 @@ export default function Map() {
 
     curves.forEach((curve) => {
       if (!curve.position) return
-      
-      // NEW: Skip curves in transit zones - highway system handles those
-      if (isInTransitZone(curve.distanceFromStart)) {
-        return
-      }
       
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
@@ -480,7 +465,7 @@ export default function Map() {
       
       curveMarkers.current.push(marker)
     })
-  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded, isInTransitZone])
+  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded])
 
   // NEW: Add highway bend markers
   useEffect(() => {
