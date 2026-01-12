@@ -17,7 +17,6 @@ const ACTIVE_SECTION_COLOR = '#f59e0b'  // Amber for active sections
 const CHARACTER_LABELS = {
   [ROUTE_CHARACTER.TECHNICAL]: { label: 'TECHNICAL', short: 'TECH' },
   [ROUTE_CHARACTER.TRANSIT]: { label: 'HIGHWAY', short: 'HWY' },
-  [ROUTE_CHARACTER.SPIRITED]: { label: 'SPIRITED', short: 'SPRT' },
   [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY' }
 }
 
