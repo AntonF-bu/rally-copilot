@@ -165,24 +165,26 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 
   const hasNetworkIssue = !isOnline
 
-  // Determine if we should show highway HUD or regular curve HUD
-  const showHighwayHUD = currentCharacter === ROUTE_CHARACTER.TRANSIT && upcomingHighwayBend
+  // Determine if we're in a highway zone
+  const inHighwayZone = currentCharacter === ROUTE_CHARACTER.TRANSIT
   
   // ========================================
   // HIGHWAY HUD - when in transit zone
   // ========================================
-  if (showHighwayHUD) {
-    const bend = upcomingHighwayBend
-    const distanceToBend = bend.distanceFromStart - userDistance
-    const distanceDisplay = isMetric 
-      ? Math.round(distanceToBend) 
-      : Math.round(distanceToBend * 3.28084)
-    
-    const bendColor = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
-    const targetSpeed = bend.optimalSpeed || 70
-    
-    const maxDistance = 500
-    const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToBend) / maxDistance) * 100))
+  if (inHighwayZone) {
+    // If there's an upcoming bend, show it
+    if (upcomingHighwayBend) {
+      const bend = upcomingHighwayBend
+      const distanceToBend = bend.distanceFromStart - userDistance
+      const distanceDisplay = isMetric 
+        ? Math.round(distanceToBend) 
+        : Math.round(distanceToBend * 3.28084)
+      
+      const bendColor = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
+      const targetSpeed = bend.optimalSpeed || 70
+      
+      const maxDistance = 500
+      const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToBend) / maxDistance) * 100))
 
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
@@ -294,6 +296,56 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
           </div>
         )}
 
+        <style>{hudStyles}</style>
+      </div>
+    )
+    }
+    
+    // Highway zone but no immediate bend - show "clear" state
+    return (
+      <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
+        {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
+        
+        <div className="hud-glass rounded-2xl px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ZoneBadge colors={CHARACTER_COLORS[ROUTE_CHARACTER.TRANSIT]} label="HIGHWAY" />
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span className="text-white/50 text-sm">Clear ahead</span>
+            </div>
+            {settings.showSpeedometer !== false && (
+              <div className="text-right">
+                <span className="text-2xl font-bold" style={{ color: HIGHWAY_BEND_COLOR }}>
+                  {currentSpeedDisplay}
+                </span>
+                <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-3">
+            <ProgressBar 
+              percent={routeProgress.percent} 
+              modeColor={HIGHWAY_BEND_COLOR}
+              remainingDist={routeProgress.remainingDist}
+              remainingDistUnit={routeProgress.remainingDistUnit}
+              remainingTime={routeProgress.remainingTime}
+            />
+          </div>
+        </div>
+
+        {/* Show upcoming highway bends if any */}
+        {upcomingHighwayBends.length > 0 && (
+          <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
+            <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">AHEAD</div>
+            <div className="flex flex-col gap-1">
+              {upcomingHighwayBends.slice(0, 3).map((next) => (
+                <UpcomingHighwayBendRow key={next.id} bend={next} userDistance={userDistance} isMetric={isMetric} />
+              ))}
+            </div>
+          </div>
+        )}
+        
         <style>{hudStyles}</style>
       </div>
     )
