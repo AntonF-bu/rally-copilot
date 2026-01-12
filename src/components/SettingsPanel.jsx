@@ -264,7 +264,7 @@ export default function SettingsPanel() {
             <div className="grid grid-cols-3 gap-2">
               {[
                 { m: 'cruise', label: 'Cruise', desc: 'Relaxed', color: '#00d4ff' },
-                { m: 'fast', label: 'Fast', desc: 'Spirited', color: '#ffd500' },
+                { m: 'fast', label: 'Fast', desc: 'Enthusiast', color: '#ffd500' },
                 { m: 'race', label: 'Race', desc: 'Aggressive', color: '#ff3366' },
               ].map(({ m, label, desc, color }) => (
                 <button
@@ -299,7 +299,7 @@ export default function SettingsPanel() {
             </div>
             <p className="text-white/30 text-xs mt-3 text-center">
               {mode === 'cruise' && 'Conservative speed targets for comfortable driving'}
-              {mode === 'fast' && 'Moderate speed targets for spirited driving'}
+              {mode === 'fast' && 'Moderate speed targets for enthusiast driving'}
               {mode === 'race' && 'Aggressive speed targets for experienced drivers'}
             </p>
           </Section>
