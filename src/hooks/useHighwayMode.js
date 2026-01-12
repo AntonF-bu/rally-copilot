@@ -1,15 +1,8 @@
-// ================================
-// useHighwayMode Hook
-// Integration layer for highway mode features
-// 
-// Usage in App.jsx:
-//   const { getNextHighwayCallout, isHighwayActive } = useHighwayMode()
-// ================================
-
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import useHighwayStore from '../services/highwayStore'
 import {
+  analyzeHighwayBends,
   identifySweepers,
   generateHighwayCallout,
   generateApexCallout,
@@ -18,24 +11,24 @@ import {
   checkProgressMilestone,
   generateStatsCallout,
   shouldUseHighwayMode,
+  getHighwayModeConfig,
   HIGHWAY_MODE
 } from '../services/highwayModeService'
 
-/**
- * Hook for highway mode integration
- * Call this from App.jsx to get highway-specific callouts
- */
+// ================================
+// useHighwayMode Hook v2.0
+// NEW: Uses independent highway bend detection
+// ================================
+
 export function useHighwayMode() {
-  // Main store state
-  const { 
-    routeData, 
+  const {
+    routeData,
     routeZones,
-    speed,
+    simulationProgress,
     isRunning,
-    simulationProgress
+    speed
   } = useStore()
-  
-  // Highway store state
+
   const {
     highwayMode,
     highwayFeatures,
@@ -43,241 +36,244 @@ export function useHighwayMode() {
     lastCalloutTime,
     lastChatterTime,
     inHighwayZone,
-    routeSweepers,
-    setRouteSweepers,
+    announcedMilestones,
     setInHighwayZone,
     recordCalloutTime,
     recordChatterTime,
     incrementSweepersCleared,
     addSpeedSample,
-    addAnnouncedMilestone,
-    announcedMilestones,
     resetHighwayTrip
   } = useHighwayStore()
-  
-  // Refs for tracking
-  const lastSweeperIdRef = useRef(null)
-  const pendingApexRef = useRef(null)
-  
+
+  // Store highway bends from independent detection
+  const highwayBendsRef = useRef([])
+  const announcedBendsRef = useRef(new Set())
+  const routeAnalyzedRef = useRef(false)
+
   // ================================
   // ROUTE INITIALIZATION
-  // Process curves to identify sweepers when route loads
+  // Run independent highway bend detection when route loads
   // ================================
   
   useEffect(() => {
-    if (!routeData?.curves || !routeZones?.length) {
-      setRouteSweepers([])
+    if (!routeData?.coordinates?.length || !routeZones?.length) {
+      routeAnalyzedRef.current = false
       return
     }
     
-    // Identify sweepers in highway zones
-    const enhancedCurves = identifySweepers(routeData.curves, routeZones)
-    const sweepers = enhancedCurves.filter(c => c.isSweeper)
+    // Only analyze once per route
+    if (routeAnalyzedRef.current) return
+    routeAnalyzedRef.current = true
     
-    console.log(`🛣️ Highway Mode: Found ${sweepers.length} sweepers out of ${routeData.curves.length} curves`)
+    // Run independent highway bend detection
+    const bends = analyzeHighwayBends(routeData.coordinates, routeZones)
+    highwayBendsRef.current = bends
     
-    setRouteSweepers(enhancedCurves)
-  }, [routeData?.curves, routeZones, setRouteSweepers])
-  
+    console.log(`🛣️ Highway Mode: Found ${bends.length} highway bends`)
+    
+    // Log some details for debugging
+    if (bends.length > 0) {
+      const sSweeps = bends.filter(b => b.isSSweep)
+      const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
+      console.log(`   - S-sweeps: ${sSweeps.length}`)
+      console.log(`   - Sweepers: ${sweepers.length}`)
+      console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
+      
+      // Log first few bends for inspection
+      bends.slice(0, 3).forEach((b, i) => {
+        console.log(`   Bend ${i + 1}: ${b.direction} ${b.angle}° @ ${b.distanceFromStart}m${b.isSSweep ? ' (S-sweep)' : ''}`)
+      })
+    }
+    
+    // Also tag sweepers on existing curves (backward compat)
+    if (routeData.curves?.length) {
+      const enhancedCurves = identifySweepers(routeData.curves, routeZones)
+      const sweeperCount = enhancedCurves.filter(c => c.isSweeper).length
+      console.log(`🛣️ Highway Mode: Tagged ${sweeperCount} sweepers on existing curves`)
+    }
+    
+  }, [routeData?.coordinates, routeZones])
+
+  // Reset on route change
+  useEffect(() => {
+    announcedBendsRef.current = new Set()
+    routeAnalyzedRef.current = false
+  }, [routeData])
+
   // ================================
   // ZONE TRACKING
-  // Detect when we enter/exit highway zones
+  // Detect when entering/exiting highway zones
   // ================================
-  
+
   useEffect(() => {
-    if (!routeZones?.length || !isRunning) return
-    
-    // Calculate current position along route
-    const totalDistance = routeData?.distance || 0
-    const currentDistance = totalDistance * simulationProgress
-    
+    if (!isRunning || !routeZones?.length || !routeData?.distance) return
+
+    const totalDist = routeData.distance
+    const currentDist = (simulationProgress || 0) * totalDist
+
     // Find current zone
     const currentZone = routeZones.find(z => 
-      currentDistance >= z.startDistance && currentDistance <= z.endDistance
+      currentDist >= z.startDistance && currentDist <= z.endDistance
     )
-    
-    const isHighway = currentZone?.character === 'transit'
-    setInHighwayZone(isHighway)
-    
-  }, [routeZones, simulationProgress, routeData?.distance, isRunning, setInHighwayZone])
-  
+
+    const nowInHighway = currentZone?.character === 'transit'
+
+    if (nowInHighway !== inHighwayZone) {
+      setInHighwayZone(nowInHighway)
+      console.log(`🛣️ Highway zone: ${nowInHighway ? 'ENTERED' : 'EXITED'}`)
+    }
+  }, [isRunning, routeZones, simulationProgress, routeData?.distance, inHighwayZone, setInHighwayZone])
+
   // ================================
   // SPEED SAMPLING
-  // Track average speed in highway zones
+  // Track average speed for stats (Companion mode)
   // ================================
-  
+
   useEffect(() => {
-    if (!inHighwayZone || !isRunning || speed <= 0) return
-    
-    // Sample speed every 2 seconds
+    if (!isRunning || !inHighwayZone || !highwayFeatures.stats) return
+
     const interval = setInterval(() => {
-      addSpeedSample(speed)
+      if (speed > 0) {
+        addSpeedSample(speed)
+      }
     }, 2000)
-    
+
     return () => clearInterval(interval)
-  }, [inHighwayZone, isRunning, speed, addSpeedSample])
-  
+  }, [isRunning, inHighwayZone, speed, highwayFeatures.stats, addSpeedSample])
+
   // ================================
   // MAIN CALLOUT FUNCTION
-  // Returns the next highway callout if any
+  // Returns next highway callout if one is due
   // ================================
-  
-  const getNextHighwayCallout = useCallback((upcomingCurves, distanceToFirst) => {
-    // Not in highway zone? No highway callouts
-    if (!inHighwayZone) return null
-    
-    // Features disabled? No callouts
-    if (!highwayFeatures.sweepers) return null
-    
-    const now = Date.now()
-    
-    // Check pending apex callout
-    if (pendingApexRef.current) {
-      const apex = pendingApexRef.current
-      if (now >= apex.triggerTime) {
-        pendingApexRef.current = null
-        return apex.callout
-      }
-    }
-    
-    // Look for sweeper in upcoming curves
-    if (upcomingCurves?.length > 0 && highwayFeatures.sweepers) {
-      const curve = upcomingCurves[0]
-      
-      // Find enhanced version with sweeper data
-      const enhancedCurve = routeSweepers.find(c => c.id === curve.id)
-      
-      if (enhancedCurve?.isSweeper && enhancedCurve.id !== lastSweeperIdRef.current) {
-        // Check if we should call this sweeper (within warning distance)
-        const warningDistance = speed > 60 ? 400 : speed > 40 ? 300 : 200
-        
-        if (distanceToFirst <= warningDistance && distanceToFirst > 50) {
-          lastSweeperIdRef.current = enhancedCurve.id
-          
-          // Generate sweeper callout
-          const callout = generateHighwayCallout(enhancedCurve, highwayMode)
-          
-          if (callout) {
-            recordCalloutTime()
-            
-            // Queue apex callout if companion mode
-            if (highwayMode === HIGHWAY_MODE.COMPANION && highwayFeatures.apex) {
-              const apexCallout = generateApexCallout(enhancedCurve, speed)
-              if (apexCallout) {
-                pendingApexRef.current = {
-                  callout: apexCallout,
-                  triggerTime: now + apexCallout.delayMs
-                }
-              }
-            }
-            
-            return callout
-          }
+
+  const getNextHighwayCallout = useCallback((userDistanceAlongRoute) => {
+    if (!inHighwayZone || !highwayFeatures.sweepers) return null
+
+    const config = getHighwayModeConfig(highwayMode)
+    const bends = highwayBendsRef.current
+
+    // Find upcoming bends
+    const upcomingBends = bends.filter(bend => {
+      const distanceToBend = bend.distanceFromStart - userDistanceAlongRoute
+      return distanceToBend > 0 && distanceToBend < 500 // Look ahead 500m
+    })
+
+    if (upcomingBends.length === 0) {
+      // No bends coming up - check for chatter (Companion mode)
+      if (config.enableChatter) {
+        const chatter = getSilenceBreaker(lastCalloutTime, lastChatterTime)
+        if (chatter) {
+          recordChatterTime()
+          return chatter
         }
       }
+      return null
     }
-    
-    // Check for chatter (Companion mode only)
-    if (highwayMode === HIGHWAY_MODE.COMPANION && highwayFeatures.chatter) {
-      const chatter = getSilenceBreaker(lastCalloutTime, lastChatterTime)
-      if (chatter) {
-        recordChatterTime()
-        return chatter
+
+    // Get closest bend
+    const nextBend = upcomingBends[0]
+    const distanceToBend = nextBend.distanceFromStart - userDistanceAlongRoute
+
+    // Check announcement windows based on bend type
+    const announceDistance = nextBend.isSSweep ? 400 : 
+                            nextBend.angle > 20 ? 350 : 
+                            nextBend.angle > 10 ? 300 : 250
+
+    // Check if we should announce
+    if (distanceToBend <= announceDistance && !announcedBendsRef.current.has(nextBend.id)) {
+      announcedBendsRef.current.add(nextBend.id)
+      
+      const callout = generateHighwayCallout(nextBend, highwayMode)
+      if (callout) {
+        recordCalloutTime()
+        
+        // Queue apex callout if enabled
+        if (config.enableApex && (nextBend.isHighwayBend || nextBend.isSweeper)) {
+          // Apex timing is handled separately via delay
+        }
+        
+        return callout
       }
     }
-    
+
     return null
-  }, [
-    inHighwayZone, 
-    highwayMode, 
-    highwayFeatures, 
-    routeSweepers, 
-    speed, 
-    lastCalloutTime, 
-    lastChatterTime,
-    recordCalloutTime,
-    recordChatterTime
-  ])
-  
+  }, [inHighwayZone, highwayFeatures.sweepers, highwayMode, lastCalloutTime, lastChatterTime, recordCalloutTime, recordChatterTime])
+
   // ================================
-  // PROGRESS CALLOUT
-  // Check for milestone announcements
+  // PROGRESS CALLOUTS
   // ================================
-  
+
   const getProgressCallout = useCallback(() => {
     if (!highwayFeatures.progress || !routeData?.distance) return null
-    
-    const totalDistance = routeData.distance
-    const currentDistance = totalDistance * simulationProgress
-    
-    return checkProgressMilestone(currentDistance, totalDistance, announcedMilestones)
+
+    const totalDist = routeData.distance
+    const currentDist = (simulationProgress || 0) * totalDist
+
+    return checkProgressMilestone(currentDist, totalDist, announcedMilestones)
   }, [highwayFeatures.progress, routeData?.distance, simulationProgress, announcedMilestones])
-  
+
   // ================================
-  // SWEEPER COMPLETION
-  // Called when a sweeper is passed
+  // SWEEPER/BEND COMPLETION
   // ================================
-  
-  const onSweeperCompleted = useCallback((curve) => {
-    if (!curve?.isSweeper) return null
-    
+
+  const onBendCompleted = useCallback((bend) => {
+    if (!highwayFeatures.feedback) return null
+
     incrementSweepersCleared()
-    
-    // Return feedback if companion mode
-    if (highwayMode === HIGHWAY_MODE.COMPANION && highwayFeatures.feedback) {
+
+    // Random chance of feedback (not every time)
+    if (Math.random() < 0.4) {
       return getSweeperFeedback()
     }
-    
+
     return null
-  }, [highwayMode, highwayFeatures.feedback, incrementSweepersCleared])
-  
+  }, [highwayFeatures.feedback, incrementSweepersCleared])
+
   // ================================
-  // STATS CALLOUT
-  // Periodic stats in companion mode
+  // STATS CALLOUTS (Companion mode)
   // ================================
-  
+
   const getStatsCallout = useCallback(() => {
-    if (highwayMode !== HIGHWAY_MODE.COMPANION || !highwayFeatures.stats) return null
-    if (!inHighwayZone) return null
-    
-    // Check for sweeper milestone
+    if (!highwayFeatures.stats) return null
+
+    // Check for milestone callouts (every 10 sweepers)
     if (highwayStats.sweepersCleared > 0 && highwayStats.sweepersCleared % 10 === 0) {
       return generateStatsCallout(highwayStats, 'sweepers')
     }
-    
+
     return null
-  }, [highwayMode, highwayFeatures.stats, inHighwayZone, highwayStats])
-  
+  }, [highwayFeatures.stats, highwayStats])
+
   // ================================
-  // RESET ON NEW TRIP
+  // GET HIGHWAY BENDS FOR DISPLAY
+  // Used by Map/RoutePreview to show markers
   // ================================
-  
-  useEffect(() => {
-    if (!isRunning) {
-      // Reset when navigation stops
-      lastSweeperIdRef.current = null
-      pendingApexRef.current = null
-    }
-  }, [isRunning])
-  
+
+  const getHighwayBends = useCallback(() => {
+    return highwayBendsRef.current
+  }, [])
+
   // ================================
-  // PUBLIC API
+  // RETURN HOOK API
   // ================================
-  
+
   return {
     // State
-    isHighwayActive: inHighwayZone,
+    isHighwayActive: inHighwayZone && highwayFeatures.sweepers,
     highwayMode,
     highwayStats,
-    routeSweepers,
+    
+    // Data
+    highwayBends: highwayBendsRef.current,
+    getHighwayBends,
     
     // Callout functions
     getNextHighwayCallout,
     getProgressCallout,
     getStatsCallout,
-    onSweeperCompleted,
+    onBendCompleted,
     
-    // Control
+    // Actions
     resetHighwayTrip
   }
 }
