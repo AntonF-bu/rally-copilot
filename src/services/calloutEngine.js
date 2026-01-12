@@ -1,11 +1,10 @@
 // ================================
-// Callout Engine v3.1
-// FIXED: Announce ALL curves (including sev 1), proper chicane direction
+// Callout Engine v4
+// NEW: Sweeper callouts with angle ("Sweeper right, 15 degrees")
 // ================================
 
 export const DRIVING_MODE = {
   HIGHWAY: 'highway',
-  SPIRITED: 'spirited', 
   TECHNICAL: 'technical',
   URBAN: 'urban'
 }
@@ -21,11 +20,6 @@ const BASE_DISTANCES = {
     main: 250,      // ~7 seconds at 75mph
     final: 100,     // ~3 seconds
   },
-  spirited: {
-    early: 300,
-    main: 180,
-    final: 60,
-  },
   technical: {
     early: 200,
     main: 120,
@@ -39,12 +33,11 @@ const BASE_DISTANCES = {
 }
 
 // ================================
-// MINIMUM SEVERITY - NOW ANNOUNCES ALL!
+// MINIMUM SEVERITY
 // ================================
 
 const MIN_SEVERITY = {
-  highway: 1,     // FIXED: Announce ALL curves on highway
-  spirited: 1,    // Announce all
+  highway: 1,     // Announce ALL curves on highway (including sweepers)
   technical: 1,   // Announce all
   urban: 2        // Skip sev 1 only in urban (too many tiny turns)
 }
@@ -57,7 +50,7 @@ const MIN_SEVERITY = {
  * Get warning distances scaled by speed
  */
 export function getWarningDistances(mode, speedMph) {
-  const base = BASE_DISTANCES[mode] || BASE_DISTANCES.spirited
+  const base = BASE_DISTANCES[mode] || BASE_DISTANCES.technical
   
   // Scale by speed: at 30mph use base, at 60mph use 1.5x, at 90mph use 2x
   const speedFactor = Math.max(1, Math.min(2, speedMph / 45))
@@ -71,10 +64,12 @@ export function getWarningDistances(mode, speedMph) {
 
 /**
  * Check if curve should be announced
- * FIXED: Now announces severity 1 curves too!
  */
 export function shouldAnnounceCurve(mode, curve) {
   if (!curve) return false
+  
+  // Always announce sweepers on highway
+  if (curve.isSweeper && mode === DRIVING_MODE.HIGHWAY) return true
   
   // Always announce chicanes and S-curves
   if (curve.isChicane) return true
@@ -86,17 +81,29 @@ export function shouldAnnounceCurve(mode, curve) {
 
 /**
  * Generate main callout
- * FIXED: Use correct direction for chicanes
+ * NEW: Sweeper callouts with angle
  */
 export function generateCallout(mode, curve) {
   if (!curve) return null
   
+  // NEW: SWEEPER - "Sweeper right, 15 degrees"
+  if (curve.isSweeper) {
+    const dir = curve.direction === 'LEFT' ? 'left' : 'right'
+    const angle = curve.sweeperAngle || curve.totalAngle || 10
+    return `Sweeper ${dir}, ${angle} degrees`
+  }
+  
   // CHICANE - use the FIRST turn direction
   if (curve.isChicane) {
-    // The startDirection tells us which way we turn FIRST
     const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
     const type = curve.chicaneType === 'CHICANE' ? 'Chicane' : 'S curve'
     return `${type} ${firstDir} ${curve.severitySequence || ''}`
+  }
+  
+  // TECHNICAL SECTION
+  if (curve.isTechnicalSection) {
+    const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+    return `Technical section ${dir}, ${curve.curveCount} curves`
   }
   
   // Regular curve
@@ -122,6 +129,12 @@ export function generateCallout(mode, curve) {
 export function generateEarlyWarning(mode, curve) {
   if (!curve) return null
   
+  // Sweepers don't need early warnings - they're gentle
+  if (curve.isSweeper) return null
+  
+  // Only early warning for severity 4+
+  if (curve.severity < 4) return null
+  
   if (curve.isChicane) {
     const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
     return `Chicane ${firstDir} ahead`
@@ -136,6 +149,9 @@ export function generateEarlyWarning(mode, curve) {
  */
 export function generateFinalWarning(mode, curve) {
   if (!curve || curve.severity < 5) return null
+  
+  // Sweepers don't need final warnings
+  if (curve.isSweeper) return null
   
   if (curve.isChicane) {
     const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
@@ -160,14 +176,17 @@ export const SEVERITY_COLORS = {
   6: '#dc2626',
 }
 
-export function getSeverityColor(severity) {
+// Sweeper color (distinct from regular severity 1)
+export const SWEEPER_COLOR = '#3b82f6' // Blue for sweepers
+
+export function getSeverityColor(severity, isSweeper = false) {
+  if (isSweeper) return SWEEPER_COLOR
   return SEVERITY_COLORS[severity] || '#22c55e'
 }
 
 // Voice timing
 export const VOICE_CONFIG = {
   highway: { minPauseBetween: 1500 },
-  spirited: { minPauseBetween: 1200 },
   technical: { minPauseBetween: 1000 },
   urban: { minPauseBetween: 1500 }
 }
@@ -183,5 +202,6 @@ export default {
   generateClearCallout,
   getSeverityColor,
   SEVERITY_COLORS,
+  SWEEPER_COLOR,
   VOICE_CONFIG
 }
