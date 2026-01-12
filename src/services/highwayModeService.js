@@ -427,68 +427,65 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
 
 /**
  * Generate detailed callout for a section
- * Narrates through the key bends with directions, angles, and speed targets
+ * Rhythmic pace notes style - short, punchy, each bend called out
  */
 function generateSectionCallout(bends, character, length) {
   if (!bends?.length) return 'Active section ahead.'
   
   const parts = []
   
-  // Always call it "Active section"
-  parts.push('Active section ahead')
+  // Opening with bend count
+  parts.push(`Active section, ${bends.length} bends`)
   
-  // Narrate through key bends (limit to first 4-5 for brevity)
-  const keyBends = bends.slice(0, 5)
-  
-  keyBends.forEach((bend, idx) => {
+  // Narrate each bend - short and rhythmic
+  bends.forEach((bend, idx) => {
     const dir = bend.direction?.toLowerCase() || 'bend'
     const angle = bend.angle || 10
     const speed = bend.optimalSpeed || calculateOptimalSpeed(bend)
     
-    // First bend is "entry"
     if (idx === 0) {
+      // First bend - "Entry"
       if (bend.isSSweep) {
         const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
         const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
-        parts.push(`Entry ${dir1} ${bend.firstBend?.angle || angle} degrees then ${dir2}`)
+        parts.push(`${capitalize(dir1)} entry, S-sweep ${dir1}-${dir2}`)
       } else {
-        parts.push(`Entry ${dir} ${angle} degrees, ${speed}`)
+        parts.push(`${capitalize(dir)} entry ${speed}`)
       }
-    } 
-    // Subsequent bends
-    else {
-      // Describe the bend character
-      let bendDesc = ''
-      
+    } else {
+      // Subsequent bends - rhythmic style
       if (bend.isSSweep) {
         const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
         const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
-        bendDesc = `S-sweep ${dir1} then ${dir2}`
-      } else if (bend.angle > 25) {
-        bendDesc = `Firm ${dir} ${angle} degrees, ease to ${speed}`
-      } else if (bend.angle > 15) {
-        bendDesc = `${dir} ${angle}, ${speed}`
+        parts.push(`S-sweep ${dir1}-${dir2}`)
+      } else if (bend.angle > 20) {
+        // Tighter bend - mention character
+        if (bend.tightens) {
+          parts.push(`${capitalize(dir)} tightening, ${speed}`)
+        } else if (bend.opens) {
+          parts.push(`${capitalize(dir)} opens, ${speed}`)
+        } else {
+          parts.push(`${capitalize(dir)} ${angle}, ${speed}`)
+        }
+      } else if (bend.angle > 12) {
+        // Moderate - just direction and speed
+        parts.push(`${capitalize(dir)} sweep, ${speed}`)
       } else {
-        bendDesc = `Gentle ${dir}`
-      }
-      
-      // Add transition word
-      if (idx === 1) {
-        parts.push(`Then ${bendDesc.toLowerCase()}`)
-      } else if (idx === keyBends.length - 1) {
-        parts.push(`Finally ${bendDesc.toLowerCase()}`)
-      } else {
-        parts.push(bendDesc)
+        // Gentle - just direction
+        parts.push(`Gentle ${dir}`)
       }
     }
   })
   
-  // If there are more bends we didn't narrate
-  if (bends.length > 5) {
-    parts.push(`${bends.length - 5} more bends follow`)
-  }
+  // Exit clear
+  parts.push('Exit clear')
   
   return parts.join('. ') + '.'
+}
+
+function capitalize(str) {
+  if (!str) return ''
+  return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
 /**
