@@ -217,6 +217,14 @@ function extractSegmentCoordinates(coordinates, segment) {
   const startIdx = Math.floor(startProgress * coordinates.length)
   const endIdx = Math.min(Math.ceil(endProgress * coordinates.length), coordinates.length)
   
+  // DEBUG: Log extraction details
+  console.log(`   📐 Extracting coords for segment ${Math.round(segment.startDistance)}m-${Math.round(segment.endDistance)}m:`)
+  console.log(`      Total route length (estimated): ${Math.round(totalLength)}m`)
+  console.log(`      Progress: ${(startProgress*100).toFixed(1)}% - ${(endProgress*100).toFixed(1)}%`)
+  console.log(`      Coord indices: ${startIdx} - ${endIdx} (of ${coordinates.length})`)
+  console.log(`      First coord: [${coordinates[startIdx]?.[0]?.toFixed(4)}, ${coordinates[startIdx]?.[1]?.toFixed(4)}]`)
+  console.log(`      Last coord: [${coordinates[endIdx-1]?.[0]?.toFixed(4)}, ${coordinates[endIdx-1]?.[1]?.toFixed(4)}]`)
+  
   return coordinates.slice(startIdx, endIdx)
 }
 
