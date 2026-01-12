@@ -548,7 +548,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
     if (!coords?.length) return []
     if (!characterSegments?.length) {
-      return [{ coords, color: CHARACTER_COLORS.spirited.primary, character: 'spirited' }]
+      return [{ coords, color: CHARACTER_COLORS.technical.primary, character: 'technical' }]
     }
     
     const segments = []
@@ -570,7 +570,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       if (segCoords?.length > 1) {
-        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.spirited
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
         segments.push({
           coords: segCoords,
           color: colors.primary,
