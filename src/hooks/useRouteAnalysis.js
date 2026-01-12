@@ -5,8 +5,8 @@ import { getRoute, getRoadAhead, geocodeAddress, parseGoogleMapsUrl, getRouteWit
 import { analyzeRouteCharacter } from '../services/zoneService'
 
 // ================================
-// Route Analysis Hook - v3
-// With full reroute capability
+// Route Analysis Hook - v4
+// FIXED: Reliable curve updates for live GPS mode
 // ================================
 
 export function useRouteAnalysis() {
@@ -28,6 +28,8 @@ export function useRouteAnalysis() {
   const allCurvesRef = useRef([])
   const lastFetchPositionRef = useRef(null)
   const isFetchingRef = useRef(false)
+  const lastCurveUpdateRef = useRef(0)
+  const lastDistanceAlongRef = useRef(0)
 
   const processRoute = useCallback((coordinates) => {
     if (!coordinates || coordinates.length < 3) return []
@@ -106,11 +108,6 @@ export function useRouteAnalysis() {
 
       console.log(`✅ Reroute complete: ${curves.length} curves, ${Math.round(distance)}m`)
       
-      // 7. Note: Voice cache will need to be updated
-      // The CopilotLoader handles this when navigation starts
-      // For mid-route reroute, we'd need to pre-cache new callouts
-      // For now, fallback to browser TTS for uncached callouts
-
       return true
     } catch (error) {
       console.error('Reroute error:', error)
@@ -300,29 +297,148 @@ export function useRouteAnalysis() {
     return () => clearInterval(interval)
   }, [routeMode, isRunning, fetchRoadAhead])
 
-  // Update upcoming curves based on position (for non-lookahead modes)
+  // ================================================================
+  // CRITICAL FIX: Update upcoming curves based on GPS position
+  // This effect runs when position changes in live GPS mode
+  // ================================================================
   useEffect(() => {
-    if (!isRunning || !position || !routeData?.curves?.length) return
-    if (routeMode === 'lookahead') return
+    // Skip if not running or no position
+    if (!isRunning || !position) {
+      return
+    }
+    
+    // Skip if no route data or curves
+    if (!routeData?.curves?.length || !routeData?.coordinates?.length) {
+      console.log('📍 GPS Update: No route data or curves available')
+      return
+    }
+    
+    // Skip lookahead mode (handled differently)
+    if (routeMode === 'lookahead') {
+      return
+    }
+
+    // Throttle updates to avoid excessive processing
+    const now = Date.now()
+    if (now - lastCurveUpdateRef.current < 250) { // Max 4 updates per second
+      return
+    }
+    lastCurveUpdateRef.current = now
 
     const curves = routeData.curves
-    const currentDist = estimateDistanceAlongRoute(position, routeData.coordinates)
+    const coordinates = routeData.coordinates
+    
+    // Calculate current distance along route
+    const currentDist = estimateDistanceAlongRoute(position, coordinates)
+    
+    // Log for debugging (every ~2 seconds)
+    if (now % 2000 < 300) {
+      console.log(`📍 GPS Position Update:
+        - Position: [${position[0].toFixed(5)}, ${position[1].toFixed(5)}]
+        - Distance along route: ${Math.round(currentDist)}m
+        - Route mode: ${routeMode}
+        - Total curves: ${curves.length}`)
+    }
+    
+    // Store for reference
+    lastDistanceAlongRef.current = currentDist
 
+    // Calculate distance to each curve
     const upcoming = curves
-      .map(curve => ({
-        ...curve,
-        distance: Math.max(0, (curve.distanceFromStart || 0) - currentDist)
-      }))
-      .filter(c => c.distance >= -50 && c.distance < 2000)
-      .sort((a, b) => a.distance - b.distance)
+      .filter(curve => {
+        // Skip curves at the very start (position 0 issue)
+        const curveStart = curve.distanceFromStart || 0
+        return curveStart > 50 // Skip first 50m of route
+      })
+      .map(curve => {
+        const curveStart = curve.distanceFromStart || 0
+        const distanceToCurve = curveStart - currentDist
+        
+        return {
+          ...curve,
+          distance: Math.max(0, distanceToCurve),
+          actualDistance: distanceToCurve // Keep negative values for debugging
+        }
+      })
+      .filter(c => {
+        // Only include curves that are:
+        // 1. Ahead of us (actualDistance > -30 = we haven't fully passed)
+        // 2. Within reasonable range (< 2000m)
+        return c.actualDistance > -30 && c.actualDistance < 2000
+      })
+      .sort((a, b) => a.actualDistance - b.actualDistance)
       .slice(0, 5)
+
+    // Log curve updates (throttled)
+    if (now % 2000 < 300 && upcoming.length > 0) {
+      console.log(`🎯 Upcoming curves: ${upcoming.map(c => 
+        `${c.id}:${Math.round(c.distance)}m`
+      ).join(', ')}`)
+    }
 
     setUpcomingCurves(upcoming)
 
-    // Set active curve
-    const active = upcoming.find(c => c.distance <= 30 && c.distance >= -30)
+    // Set active curve (one we're in or very close to)
+    const active = upcoming.find(c => c.distance <= 30 && c.distance >= 0)
     setActiveCurve(active || null)
+    
   }, [isRunning, position, routeData, routeMode, setUpcomingCurves, setActiveCurve])
+
+  // ================================================================
+  // BACKUP: Interval-based curve updates for live GPS
+  // This ensures curves update even if position updates are slow
+  // ================================================================
+  useEffect(() => {
+    // Only run for non-demo, non-lookahead modes when running
+    if (!isRunning || routeMode === 'demo' || routeMode === 'lookahead') {
+      return
+    }
+    
+    if (!routeData?.curves?.length) {
+      return
+    }
+
+    console.log('🔄 Starting live GPS curve update interval')
+
+    const interval = setInterval(() => {
+      const currentPosition = useStore.getState().position
+      const coordinates = routeData.coordinates
+      const curves = routeData.curves
+      
+      if (!currentPosition || !coordinates?.length || !curves?.length) {
+        return
+      }
+
+      const currentDist = estimateDistanceAlongRoute(currentPosition, coordinates)
+      
+      const upcoming = curves
+        .filter(curve => (curve.distanceFromStart || 0) > 50)
+        .map(curve => {
+          const curveStart = curve.distanceFromStart || 0
+          const distanceToCurve = curveStart - currentDist
+          return {
+            ...curve,
+            distance: Math.max(0, distanceToCurve),
+            actualDistance: distanceToCurve
+          }
+        })
+        .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
+        .sort((a, b) => a.actualDistance - b.actualDistance)
+        .slice(0, 5)
+
+      if (upcoming.length > 0) {
+        useStore.getState().setUpcomingCurves(upcoming)
+        
+        const active = upcoming.find(c => c.distance <= 30 && c.distance >= 0)
+        useStore.getState().setActiveCurve(active || null)
+      }
+    }, 500) // Update every 500ms
+
+    return () => {
+      console.log('🔄 Stopping live GPS curve update interval')
+      clearInterval(interval)
+    }
+  }, [isRunning, routeMode, routeData])
 
   return {
     reroute,
@@ -361,26 +477,80 @@ function getDistanceBetween(coord1, coord2) {
   return R * c
 }
 
+/**
+ * IMPROVED: Estimate distance along route from current position
+ * Uses projection onto route segments for better accuracy
+ */
 function estimateDistanceAlongRoute(position, coordinates) {
   if (!coordinates || coordinates.length < 2) return 0
   
-  // Find closest point on route
   let minDist = Infinity
-  let closestIdx = 0
+  let closestSegmentIdx = 0
+  let closestPointOnSegment = null
+  let projectionFactor = 0
   
-  for (let i = 0; i < coordinates.length; i++) {
-    const dist = getDistanceBetween(position, coordinates[i])
+  // Find closest point on any segment of the route
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const segStart = coordinates[i]
+    const segEnd = coordinates[i + 1]
+    
+    // Project position onto segment
+    const projection = projectPointOnSegment(position, segStart, segEnd)
+    const dist = getDistanceBetween(position, projection.point)
+    
     if (dist < minDist) {
       minDist = dist
-      closestIdx = i
+      closestSegmentIdx = i
+      closestPointOnSegment = projection.point
+      projectionFactor = projection.factor
     }
   }
   
-  // Calculate distance along route to that point
+  // Calculate distance along route to the closest point
   let distAlong = 0
-  for (let i = 0; i < closestIdx; i++) {
+  for (let i = 0; i < closestSegmentIdx; i++) {
     distAlong += getDistanceBetween(coordinates[i], coordinates[i + 1])
   }
   
+  // Add partial distance within the closest segment
+  if (closestSegmentIdx < coordinates.length - 1) {
+    const segmentLength = getDistanceBetween(
+      coordinates[closestSegmentIdx], 
+      coordinates[closestSegmentIdx + 1]
+    )
+    distAlong += segmentLength * Math.max(0, Math.min(1, projectionFactor))
+  }
+  
   return distAlong
+}
+
+/**
+ * Project a point onto a line segment
+ * Returns the closest point on the segment and the projection factor (0-1)
+ */
+function projectPointOnSegment(point, segStart, segEnd) {
+  const dx = segEnd[0] - segStart[0]
+  const dy = segEnd[1] - segStart[1]
+  
+  if (dx === 0 && dy === 0) {
+    // Segment is a point
+    return { point: segStart, factor: 0 }
+  }
+  
+  // Calculate projection factor
+  const t = (
+    (point[0] - segStart[0]) * dx + 
+    (point[1] - segStart[1]) * dy
+  ) / (dx * dx + dy * dy)
+  
+  // Clamp to segment
+  const clampedT = Math.max(0, Math.min(1, t))
+  
+  // Calculate projected point
+  const projectedPoint = [
+    segStart[0] + clampedT * dx,
+    segStart[1] + clampedT * dy
+  ]
+  
+  return { point: projectedPoint, factor: clampedT }
 }
