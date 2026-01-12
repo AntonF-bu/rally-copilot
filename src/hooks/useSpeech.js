@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v7 - NATIVE SPEECH FIRST
-// ElevenLabs was causing choppiness due to network
-// Native iOS speech is smooth and reliable
+// Speech Hook v8 - CarPlay/Bluetooth Fix
+// Uses Audio element (routes through CarPlay) with ElevenLabs
+// Falls back to native speech only when offline
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-// Simple cache for ElevenLabs (optional enhancement)
+// Minimal cache - only for current session
 const AUDIO_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
@@ -23,16 +23,16 @@ export function useSpeech() {
   const lastSpokenTimeRef = useRef(0)
   const isPlayingRef = useRef(false)
   const timeoutRef = useRef(null)
-  const useElevenLabsRef = useRef(false) // Default to native speech
 
   // Initialize
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Audio element for ElevenLabs (optional)
+    // Audio element - THIS routes through CarPlay/Bluetooth!
     const audio = new Audio()
     audio.playsInline = true
     audio.preload = 'auto'
+    audio.setAttribute('playsinline', '')
     audioRef.current = audio
 
     audio.onended = () => {
@@ -41,12 +41,13 @@ export function useSpeech() {
       setSpeaking(false, '')
     }
     
-    audio.onerror = () => {
+    audio.onerror = (e) => {
+      console.log('🔊 Audio error, will use native speech')
       isPlayingRef.current = false
       setSpeaking(false, '')
     }
 
-    // Native speech synthesis - RELIABLE
+    // Native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -54,26 +55,22 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
         
-        // Prefer good quality voices
-        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava', 'Alex']
+        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
             voiceRef.current = found
-            console.log(`🔊 Voice selected: ${found.name}`)
             break
           }
         }
         if (!voiceRef.current) {
           voiceRef.current = voices.find(v => v.lang.startsWith('en')) || voices[0]
-          console.log(`🔊 Fallback voice: ${voiceRef.current?.name}`)
         }
       }
 
       loadVoices()
       synthRef.current.onvoiceschanged = loadVoices
       setTimeout(loadVoices, 100)
-      setTimeout(loadVoices, 500)
     }
 
     return () => {
@@ -83,32 +80,18 @@ export function useSpeech() {
     }
   }, [setSpeaking])
 
-  // Native speech - SMOOTH AND RELIABLE
+  // Native speech fallback (doesn't route through CarPlay)
   const speakNative = useCallback((text) => {
-    if (!synthRef.current) {
-      console.log('🔊 No speech synthesis')
-      return false
-    }
+    if (!synthRef.current) return false
 
     try {
-      // Cancel any ongoing speech
       synthRef.current.cancel()
       
       const utterance = new SpeechSynthesisUtterance(text)
-      
-      if (voiceRef.current) {
-        utterance.voice = voiceRef.current
-      }
-      
-      // Settings for clarity
-      utterance.rate = 1.0      // Normal speed
-      utterance.pitch = 1.0     // Normal pitch
+      if (voiceRef.current) utterance.voice = voiceRef.current
+      utterance.rate = 1.0
+      utterance.pitch = 1.0
       utterance.volume = settings.volume || 1.0
-
-      utterance.onstart = () => {
-        isPlayingRef.current = true
-        setSpeaking(true, text)
-      }
 
       utterance.onend = () => {
         clearTimeout(timeoutRef.current)
@@ -116,38 +99,79 @@ export function useSpeech() {
         setSpeaking(false, '')
       }
       
-      utterance.onerror = (e) => {
-        console.log('🔊 Speech error:', e.error)
+      utterance.onerror = () => {
         isPlayingRef.current = false
         setSpeaking(false, '')
       }
 
-      // Safety timeout
       timeoutRef.current = setTimeout(() => {
         isPlayingRef.current = false
         setSpeaking(false, '')
       }, 5000)
 
+      isPlayingRef.current = true
+      setSpeaking(true, text)
       synthRef.current.speak(utterance)
-      console.log(`🔊 Speaking: "${text}"`)
+      console.log(`🔊 Native: "${text}"`)
       return true
     } catch (err) {
-      console.error('🔊 Speech error:', err)
       return false
     }
   }, [setSpeaking, settings.volume])
 
-  // ElevenLabs speech (optional - only if cached)
+  // ElevenLabs via Audio element (routes through CarPlay!)
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
     
-    if (!AUDIO_CACHE.has(cacheKey)) {
-      return false // Not cached, use native
+    // Check cache
+    if (AUDIO_CACHE.has(cacheKey)) {
+      try {
+        audioRef.current.src = AUDIO_CACHE.get(cacheKey)
+        audioRef.current.volume = settings.volume || 1.0
+        audioRef.current.currentTime = 0
+        
+        isPlayingRef.current = true
+        setSpeaking(true, text)
+        
+        await audioRef.current.play()
+        console.log(`🔊 Cached: "${text}"`)
+        return true
+      } catch (err) {
+        console.log('🔊 Cache play failed')
+      }
+    }
+
+    // Fetch from API
+    if (!navigator.onLine) {
+      console.log('🔊 Offline')
+      return false
     }
 
     try {
-      const cachedUrl = AUDIO_CACHE.get(cacheKey)
-      audioRef.current.src = cachedUrl
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text, 
+          voiceId: ELEVENLABS_VOICE_ID,
+          voiceSettings: {
+            stability: 0.90,        // HIGH stability - no choppiness
+            similarity_boost: 0.80,
+            style: 0.05,            // LOW style variation
+            use_speaker_boost: true
+          }
+        }),
+      })
+
+      if (!response.ok) return false
+
+      const blob = await response.blob()
+      if (blob.size < 500) return false
+
+      const audioUrl = URL.createObjectURL(blob)
+      AUDIO_CACHE.set(cacheKey, audioUrl)
+      
+      audioRef.current.src = audioUrl
       audioRef.current.volume = settings.volume || 1.0
       audioRef.current.currentTime = 0
       
@@ -155,21 +179,21 @@ export function useSpeech() {
       setSpeaking(true, text)
       
       await audioRef.current.play()
+      console.log(`🔊 ElevenLabs: "${text}"`)
       return true
     } catch (err) {
-      console.log('🔊 ElevenLabs playback failed, using native')
-      isPlayingRef.current = false
+      console.log('🔊 ElevenLabs failed:', err.message)
       return false
     }
   }, [setSpeaking, settings.volume])
 
-  // Main speak function - NATIVE FIRST for reliability
+  // Main speak function
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled || !text) return false
 
     const now = Date.now()
     
-    // Prevent duplicate callouts
+    // Prevent duplicates
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 1500) {
       return false
     }
@@ -187,13 +211,12 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // Try ElevenLabs if cached and enabled
-    if (useElevenLabsRef.current && AUDIO_CACHE.has(getCacheKey(text))) {
-      const success = await speakElevenLabs(text)
-      if (success) return true
-    }
+    // Try ElevenLabs first (routes through CarPlay)
+    const success = await speakElevenLabs(text)
+    if (success) return true
     
-    // Use native speech - ALWAYS WORKS
+    // Fall back to native (phone speaker only)
+    console.log('🔊 Falling back to native speech')
     return speakNative(text)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
@@ -201,17 +224,30 @@ export function useSpeech() {
   const initAudio = useCallback(async () => {
     console.log('🔊 Initializing audio...')
     
-    // Test speech synthesis
+    // Unlock audio element
+    if (audioRef.current) {
+      const silentMp3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+9DEAAAIAANIAAAAQAAAaQAAAAS7u7vd3d0iIiIiIiJ3d3e7u93dIiIiAAAAAHd3vd3SIiIAAAAiIiIid3d3u7u93SIiIiIAAAB3d73d0iIiIiIAAAAiInd3d7u73d0iIiIiIiIid3e7u7u7u93dIiIiIiJ3d3e7u7u73d3SIiIiInd3d7u7u93d3SIiIiIid3d3u7u73d3dIiIiIiIiInd3u7vd3d0iIiIiIiJ3d7u7u93d3SIiIiIiInd3d7u73d3dIiIiIiIiInd3u7vd3d0iIiIiIiJ3d7u7u93d3SIiIiIiInd3d7u73d3d0iIiIiIiInd3e7u93d0iIiIiIiJ3d3e7u7vd3dIiIiIiInd3d7u7vd3dIiIiIiIiInd3e7u73d0iIiIiIiJ3d3e7u7vd3SIiIiIiInd3d7u7vd3dIiIiIiIiInd3e7u73d0='
+      
+      audioRef.current.src = silentMp3
+      audioRef.current.volume = 0.01
+      
+      try {
+        await audioRef.current.play()
+        audioRef.current.pause()
+        console.log('🔊 Audio unlocked')
+      } catch (e) {}
+    }
+    
+    // Unlock speech synthesis
     if (synthRef.current) {
       try {
-        const utterance = new SpeechSynthesisUtterance('')
-        utterance.volume = 0
-        synthRef.current.speak(utterance)
+        const u = new SpeechSynthesisUtterance('')
+        u.volume = 0
+        synthRef.current.speak(u)
         setTimeout(() => synthRef.current?.cancel(), 10)
       } catch (e) {}
     }
     
-    console.log('🔊 Audio ready')
     return true
   }, [])
 
@@ -224,82 +260,83 @@ export function useSpeech() {
   }, [setSpeaking])
 
   const isSpeaking = useCallback(() => isPlayingRef.current, [])
-  
-  const setVoiceStyle = useCallback(() => {}, []) // No-op for now
-
-  const getCacheStats = useCallback(() => ({
-    size: AUDIO_CACHE.size,
-    keys: Array.from(AUDIO_CACHE.keys())
-  }), [])
+  const setVoiceStyle = useCallback(() => {}, [])
+  const getCacheStats = useCallback(() => ({ size: AUDIO_CACHE.size }), [])
 
   return { 
-    speak, 
-    stop, 
-    isSpeaking, 
-    initAudio, 
-    setVoiceStyle,
-    getCacheStats,
+    speak, stop, isSpeaking, initAudio, setVoiceStyle, getCacheStats,
     preloadCopilotVoices
   }
 }
 
-/**
- * Simplified pre-loading - just marks as ready, doesn't actually cache
- * Native speech doesn't need pre-caching!
- */
+// Quick pre-load - just essential callouts
 export async function preloadCopilotVoices(curves, segments, onProgress) {
-  console.log('🔊 Using native speech - no pre-caching needed')
+  const essentialCallouts = [
+    'Left 2', 'Left 3', 'Left 4', 'Left 5', 'Left 6',
+    'Right 2', 'Right 3', 'Right 4', 'Right 5', 'Right 6',
+    'Left 2 long', 'Right 2 long',
+    'Left 3 ahead', 'Right 3 ahead',
+    'Left 4 ahead', 'Right 4 ahead',
+    'Chicane', 'S curve'
+  ]
   
-  // Simulate quick progress for UI
-  for (let i = 0; i <= 100; i += 20) {
-    onProgress?.({ cached: i, total: 100, percent: i })
-    await new Promise(r => setTimeout(r, 100))
+  let cached = 0
+  const total = essentialCallouts.length
+  
+  console.log(`🔊 Pre-caching ${total} essential callouts...`)
+  
+  for (const text of essentialCallouts) {
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text, 
+          voiceId: ELEVENLABS_VOICE_ID,
+          voiceSettings: {
+            stability: 0.90,
+            similarity_boost: 0.80,
+            style: 0.05,
+            use_speaker_boost: true
+          }
+        }),
+      })
+      
+      if (response.ok) {
+        const blob = await response.blob()
+        if (blob.size > 500) {
+          AUDIO_CACHE.set(getCacheKey(text), URL.createObjectURL(blob))
+          cached++
+        }
+      }
+    } catch (e) {}
+    
+    onProgress?.({ cached, total, percent: (cached / total) * 100 })
   }
   
-  return { success: true, cached: 0, total: 0, failed: 0 }
+  console.log(`🔊 Cached ${cached}/${total} callouts`)
+  return { success: true, cached, total }
 }
 
-// ================================
-// CALLOUT GENERATORS
-// ================================
-
-export function generateCallout(curve, mode, speedUnit) {
+// Callout generators
+export function generateCallout(curve) {
   if (!curve) return null
-  
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-  let callout = `${dir} ${curve.severity}`
-  
+  let text = `${dir} ${curve.severity}`
   if (curve.modifier) {
-    const modMap = {
-      'TIGHTENS': 'tightens',
-      'OPENS': 'opens',
-      'LONG': 'long',
-      'HAIRPIN': 'hairpin'
-    }
-    callout += ` ${modMap[curve.modifier] || curve.modifier.toLowerCase()}`
+    const mods = { 'TIGHTENS': 'tightens', 'OPENS': 'opens', 'LONG': 'long', 'HAIRPIN': 'hairpin' }
+    text += ` ${mods[curve.modifier] || curve.modifier.toLowerCase()}`
   }
-  
-  return callout
+  return text
 }
 
 export function generateFinalWarning(curve) {
   if (!curve) return null
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-  return curve.severity >= 5 ? `${dir} ${curve.severity} now` : `${dir} now`
+  return curve.severity >= 5 ? `${dir} now` : null
 }
 
-export function generateStraightCallout() {
-  return null // Disabled
-}
-
-export function generateZoneTransitionCallout(from, to) {
-  const transitions = {
-    'technical': 'Technical section',
-    'transit': 'Highway',
-    'urban': 'Urban',
-    'spirited': 'Spirited'
-  }
-  return transitions[to] || null
-}
+export function generateStraightCallout() { return null }
+export function generateZoneTransitionCallout(from, to) { return null }
 
 export default useSpeech
