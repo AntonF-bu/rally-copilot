@@ -121,30 +121,17 @@ const PROGRESS_TEMPLATES = {
 export function analyzeHighwayBends(coordinates, segments) {
   if (!coordinates?.length || !segments?.length) return []
   
-  console.log('🛣️ Highway Bend Analysis - Independent Detection')
-  
-  // DEBUG: Log ALL segments to see what we're working with
-  console.log('📊 ALL segments received:', segments.map(s => ({
-    character: s.character,
-    start: Math.round(s.startDistance),
-    end: Math.round(s.endDistance),
-    length: Math.round(s.endDistance - s.startDistance)
-  })))
+  console.log('🛣️ Highway Bend Analysis - Starting')
   
   // Find highway (transit) segments
   const highwaySegments = segments.filter(s => s.character === 'transit')
-  
-  // DEBUG: Log transit segments specifically
-  console.log('🛣️ TRANSIT segments only:', highwaySegments.map(s => ({
-    start: Math.round(s.startDistance),
-    end: Math.round(s.endDistance),
-    length: Math.round(s.endDistance - s.startDistance)
-  })))
   
   if (!highwaySegments.length) {
     console.log('   No highway segments found')
     return []
   }
+  
+  console.log(`   Found ${highwaySegments.length} transit segments`)
   
   const allBends = []
   
@@ -152,7 +139,9 @@ export function analyzeHighwayBends(coordinates, segments) {
     console.log(`   Analyzing highway segment ${segIdx + 1}: ${Math.round(segment.startDistance)}m - ${Math.round(segment.endDistance)}m`)
     
     // Extract coordinates for this segment
-    const segmentCoords = extractSegmentCoordinates(coordinates, segment)
+    const extraction = extractSegmentCoordinates(coordinates, segment)
+    const segmentCoords = extraction.coords
+    const actualStartDistance = extraction.startDistance
     
     if (segmentCoords.length < 10) {
       console.log(`   Skipping - too few points (${segmentCoords.length})`)
@@ -160,18 +149,12 @@ export function analyzeHighwayBends(coordinates, segments) {
     }
     
     // Run independent bend detection on this segment
-    const bends = detectHighwayBends(segmentCoords, segment.startDistance)
+    // Use the ACTUAL start distance from coordinate lookup, not segment.startDistance
+    const bends = detectHighwayBends(segmentCoords, actualStartDistance)
     
     console.log(`   Found ${bends.length} bends in segment`)
     allBends.push(...bends)
   })
-  
-  // DEBUG: Log all detected bends before filtering
-  console.log('📍 ALL bends detected (before validation):', allBends.map(b => ({
-    dist: Math.round(b.distanceFromStart),
-    angle: b.angle,
-    dir: b.direction
-  })))
   
   // Post-process: detect S-sweeps (two opposite bends in sequence)
   const processedBends = detectSSweeps(allBends)
@@ -186,46 +169,63 @@ export function analyzeHighwayBends(coordinates, segments) {
       bend.distanceFromStart <= seg.endDistance
     )
     if (!isInTransit) {
-      console.log(`   ⚠️ Filtered out bend at ${Math.round(bend.distanceFromStart)}m - not in transit zone`)
+      console.log(`   ⚠️ Filtered bend at ${Math.round(bend.distanceFromStart)}m - outside transit zone`)
     }
     return isInTransit
   })
   
-  // DEBUG: Log final validated bends
-  console.log('✅ FINAL validated bends:', validatedBends.map(b => ({
-    dist: Math.round(b.distanceFromStart),
-    angle: b.angle,
-    dir: b.direction
-  })))
-  
   // Add coaching data
   const coachedBends = addCoachingData(validatedBends)
   
-  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends (from ${allBends.length} raw → ${spacedBends.length} spaced → ${validatedBends.length} validated)`)
+  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends`)
+  
+  return coachedBends
+}
   
   return coachedBends
 }
 
 /**
- * Extract coordinates for a specific segment
+ * Extract coordinates for a specific segment using distance-based lookup
+ * This is more accurate than percentage-based index slicing
  */
 function extractSegmentCoordinates(coordinates, segment) {
-  const totalLength = estimateRouteLength(coordinates)
-  const startProgress = segment.startDistance / totalLength
-  const endProgress = segment.endDistance / totalLength
+  if (!coordinates?.length) return []
   
-  const startIdx = Math.floor(startProgress * coordinates.length)
-  const endIdx = Math.min(Math.ceil(endProgress * coordinates.length), coordinates.length)
+  // Calculate cumulative distances for each coordinate
+  const distances = [0]
+  for (let i = 1; i < coordinates.length; i++) {
+    distances.push(distances[i-1] + getDistance(coordinates[i-1], coordinates[i]))
+  }
+  const totalLength = distances[distances.length - 1]
   
-  // DEBUG: Log extraction details
+  // Find start and end indices based on actual distances
+  let startIdx = 0
+  let endIdx = coordinates.length - 1
+  
+  for (let i = 0; i < distances.length; i++) {
+    if (distances[i] >= segment.startDistance) {
+      startIdx = Math.max(0, i - 1)  // Include point just before
+      break
+    }
+  }
+  
+  for (let i = startIdx; i < distances.length; i++) {
+    if (distances[i] >= segment.endDistance) {
+      endIdx = Math.min(i + 1, coordinates.length - 1)  // Include point just after
+      break
+    }
+  }
+  
   console.log(`   📐 Extracting coords for segment ${Math.round(segment.startDistance)}m-${Math.round(segment.endDistance)}m:`)
-  console.log(`      Total route length (estimated): ${Math.round(totalLength)}m`)
-  console.log(`      Progress: ${(startProgress*100).toFixed(1)}% - ${(endProgress*100).toFixed(1)}%`)
+  console.log(`      Total route length: ${Math.round(totalLength)}m`)
   console.log(`      Coord indices: ${startIdx} - ${endIdx} (of ${coordinates.length})`)
-  console.log(`      First coord: [${coordinates[startIdx]?.[0]?.toFixed(4)}, ${coordinates[startIdx]?.[1]?.toFixed(4)}]`)
-  console.log(`      Last coord: [${coordinates[endIdx-1]?.[0]?.toFixed(4)}, ${coordinates[endIdx-1]?.[1]?.toFixed(4)}]`)
+  console.log(`      Actual distances at indices: ${Math.round(distances[startIdx])}m - ${Math.round(distances[endIdx])}m`)
   
-  return coordinates.slice(startIdx, endIdx)
+  return {
+    coords: coordinates.slice(startIdx, endIdx + 1),
+    startDistance: distances[startIdx]  // Return actual start distance for offset correction
+  }
 }
 
 /**
