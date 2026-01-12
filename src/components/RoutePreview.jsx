@@ -718,7 +718,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [isInTransitZone])
 
-  // NEW: Add highway bend markers
+// NEW: Add highway bend markers - WITH ACTIVE SECTION SUPPORT
   const addHighwayBendMarkers = useCallback((map, bends) => {
     // Clear existing highway markers
     highwayMarkersRef.current.forEach(m => m.remove())
@@ -732,11 +732,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      const isLeft = bend.direction === 'LEFT'
-      const dirArrow = isLeft ? '←' : '→'
-      
-      if (bend.isSSweep) {
-        // S-sweep marker - more prominent
+      // ========== ACTIVE SECTION marker ==========
+      if (bend.isSection) {
+        const bgColor = '#f59e0b'  // Amber/orange for active sections
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:6px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
+            <span style="font-size:10px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
+            <span style="font-size:12px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
+            <span style="font-size:9px;color:${bgColor}90;">${bend.length}m</span>
+          </div>
+        `
+      }
+      // ========== S-SWEEP marker ==========
+      else if (bend.isSSweep) {
         const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
         const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
         el.innerHTML = `
@@ -745,8 +753,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend.angle}° ${dir2}${bend.secondBend.angle}°</span>
           </div>
         `
-      } else {
-        // Regular highway bend marker: [SW→ 12°]
+      }
+      // ========== Regular SW marker ==========
+      else {
+        const isLeft = bend.direction === 'LEFT'
+        const dirArrow = isLeft ? '←' : '→'
         el.innerHTML = `
           <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
             <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
@@ -812,7 +823,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { 
       markersRef.current.forEach(m => m.remove())
-      highwayMarkersRef.current.forEach(m => m.remove())  // NEW
+      highwayMarkersRef.current.forEach(m => m.remove())
       zoneLayersRef.current = []
       if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
       mapRef.current?.remove()
@@ -868,7 +879,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 <path d="M3 9h18M9 21V9"/>
               </svg>
             </button>
-            {/* NEW: Highway bends toggle - only show if route has highway sections */}
+            {/* Highway bends toggle - only show if route has highway sections */}
             {hasHighwaySections && highwayBends.length > 0 && (
               <button 
                 onClick={handleToggleHighwayBends} 
@@ -994,7 +1005,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     </span>
                   )
                 })}
-                {/* NEW: Highway bends count */}
+                {/* Highway bends count */}
                 {highwayBends.length > 0 && (
                   <span 
                     className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
@@ -1031,7 +1042,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               ))}
             </div>
 
-            {/* NEW: Highway mode toggle - only show if route has highway sections */}
+            {/* Highway mode toggle - only show if route has highway sections */}
             {hasHighwaySections && (
               <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
                 <button 
@@ -1125,7 +1136,7 @@ function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   )
 }
 
-// Curve list modal - UPDATED to include highway bends
+// Curve list modal - WITH ACTIVE SECTION SUPPORT
 function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSelectBend, onClose }) {
   const [showTab, setShowTab] = useState('curves')  // 'curves' or 'highway'
   
@@ -1185,18 +1196,31 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
           ))
         ) : (
           highwayBends.map((bend, i) => (
-            <button key={bend.id || i} onClick={() => onSelectBend(bend)} className="w-full p-3 mb-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 flex items-center gap-3 border border-blue-500/20">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: '#3b82f6', color: '#fff' }}>
-                {bend.isSSweep ? 'S' : 'SW'}
+            <button 
+              key={bend.id || i} 
+              onClick={() => onSelectBend(bend)} 
+              className={`w-full p-3 mb-1 rounded-lg flex items-center gap-3 border ${
+                bend.isSection 
+                  ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20' 
+                  : 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20'
+              }`}
+            >
+              <div 
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" 
+                style={{ background: bend.isSection ? '#f59e0b' : '#3b82f6', color: '#fff' }}
+              >
+                {bend.isSection ? bend.bendCount : bend.isSSweep ? 'S' : 'SW'}
               </div>
               <div className="flex-1 text-left">
                 <div className="text-white text-sm font-medium">
-                  {bend.isSSweep ? (
+                  {bend.isSection ? (
+                    `Active Section: ${bend.bendCount} bends`
+                  ) : bend.isSSweep ? (
                     `S-Sweep: ${bend.firstBend.direction} ${bend.firstBend.angle}° → ${bend.secondBend.direction} ${bend.secondBend.angle}°`
                   ) : (
                     `${bend.direction} ${bend.angle}°`
                   )}
-                  {bend.modifier && <span className="text-blue-400/70 ml-1">{bend.modifier}</span>}
+                  {bend.modifier && <span className={`ml-1 ${bend.isSection ? 'text-amber-400/70' : 'text-blue-400/70'}`}>{bend.modifier}</span>}
                 </div>
                 <div className="text-white/40 text-xs">
                   {((bend.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}
@@ -1204,8 +1228,8 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-blue-400 text-sm font-mono">{bend.optimalSpeed || 70}</div>
-                <div className="text-white/40 text-[10px]">mph</div>
+                <div className={`text-sm font-mono ${bend.isSection ? 'text-amber-400' : 'text-blue-400'}`}>{bend.optimalSpeed || 70}</div>
+                <div className="text-white/40 text-[10px]">{settings.units === 'metric' ? 'km/h' : 'mph'}</div>
               </div>
             </button>
           ))
@@ -1215,7 +1239,7 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
   )
 }
 
-// Curve popup - UPDATED to handle highway bends
+// Curve popup - WITH ACTIVE SECTION SUPPORT
 function CurvePopup({ curve, mode, settings, onClose }) {
   const getSpd = (s) => { 
     const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
@@ -1223,26 +1247,40 @@ function CurvePopup({ curve, mode, settings, onClose }) {
     return settings.units === 'metric' ? Math.round(v * 1.6) : v
   }
   
-  const isHighwayBend = curve.isHighwayBend || curve.isSSweep
-  const color = isHighwayBend ? '#3b82f6' : getCurveColor(curve.severity)
+  const isSection = curve.isSection
+  const isHighwayBend = curve.isHighwayBend || curve.isSSweep || isSection
+  const color = isSection ? '#f59e0b' : isHighwayBend ? '#3b82f6' : getCurveColor(curve.severity)
   
   return (
-    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-30 bg-black/90 rounded-xl p-4 border border-white/20 min-w-[220px]" style={{ borderColor: isHighwayBend ? '#3b82f640' : undefined }}>
+    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-30 bg-black/90 rounded-xl p-4 border border-white/20 min-w-[280px] max-w-[340px]" style={{ borderColor: isHighwayBend ? `${color}40` : undefined }}>
       <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
       <div className="flex items-center gap-3 mb-2">
-        <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: color, color: isHighwayBend ? '#fff' : '#000' }}>
-          {isHighwayBend ? (curve.isSSweep ? 'S' : 'SW') : curve.severity}
+        <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: color, color: '#fff' }}>
+          {isSection ? curve.bendCount : curve.isSSweep ? 'S' : isHighwayBend ? 'SW' : curve.severity}
         </div>
         <div>
           <div className="text-white font-bold">
-            {curve.isSSweep ? 'S-Sweep' : curve.isHighwayBend ? `${curve.direction} Sweep` : curve.isChicane ? curve.chicaneType : `${curve.direction} ${curve.severity}`}
+            {isSection ? 'Active Section' : curve.isSSweep ? 'S-Sweep' : curve.isHighwayBend ? `${curve.direction} Sweep` : curve.isChicane ? curve.chicaneType : `${curve.direction} ${curve.severity}`}
           </div>
-          {curve.angle && <div className="text-white/50 text-sm">{curve.angle}°{curve.length ? ` • ${curve.length}m` : ''}</div>}
-          {curve.modifier && !curve.angle && <div className="text-white/50 text-sm">{curve.modifier}</div>}
+          {isSection ? (
+            <div className="text-amber-400/70 text-sm">{curve.bendCount} bends • {curve.length}m</div>
+          ) : curve.angle ? (
+            <div className="text-white/50 text-sm">{curve.angle}°{curve.length ? ` • ${curve.length}m` : ''}</div>
+          ) : curve.modifier ? (
+            <div className="text-white/50 text-sm">{curve.modifier}</div>
+          ) : null}
         </div>
       </div>
+      
+      {/* Callout preview for sections */}
+      {isSection && curve.calloutDetailed && (
+        <div className="mb-2 p-2 bg-amber-500/10 rounded-lg border border-amber-500/20">
+          <div className="text-[10px] text-amber-400/60 mb-1">CALLOUT PREVIEW</div>
+          <div className="text-amber-200 text-xs leading-relaxed">{curve.calloutDetailed}</div>
+        </div>
+      )}
       
       {/* Speed recommendation */}
       <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2">
@@ -1253,7 +1291,7 @@ function CurvePopup({ curve, mode, settings, onClose }) {
       {/* Throttle advice for highway bends */}
       {curve.throttleAdvice && (
         <div className="mt-2 pt-2 border-t border-white/10">
-          <div className="text-blue-400 text-xs">{curve.throttleAdvice}</div>
+          <div style={{ color }} className="text-xs">{curve.throttleAdvice}</div>
         </div>
       )}
     </div>
