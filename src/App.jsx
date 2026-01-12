@@ -71,16 +71,17 @@ export default function App() {
   // Highway mode hook
   const {
     isHighwayActive,
+    inHighwayZone,
     highwayBends,
+    highwayMode,
     getNextHighwayCallout,
     getProgressCallout,
+    getChatter,
     onBendCompleted,
-    resetHighwayTrip
+    resetHighwayTrip,
+    recordCalloutTime
   } = useHighwayMode()
   
-  // Highway store for recording callout times
-  const { recordCalloutTime } = useHighwayStore()
-
   // Tracking refs
   const announcedRef = useRef(new Set())
   const earlyRef = useRef(new Set())
@@ -234,6 +235,25 @@ export default function App() {
       }
     }
   }, [isRunning, settings.voiceEnabled, highwayBends, userDistanceAlongRoute, getNextHighwayCallout, speak, recordCalloutTime])
+
+  // ================================
+  // HIGHWAY COMPANION CHATTER
+  // Periodic fun callouts during quiet stretches
+  // ================================
+  useEffect(() => {
+    if (!isRunning || !settings.voiceEnabled || !inHighwayZone) return
+    
+    // Check for chatter every 10 seconds
+    const interval = setInterval(() => {
+      const chatter = getChatter()
+      if (chatter) {
+        console.log(`🎤 CHATTER: "${chatter.text}"`)
+        speak(chatter.text, 'low')
+      }
+    }, 10000)
+    
+    return () => clearInterval(interval)
+  }, [isRunning, settings.voiceEnabled, inHighwayZone, getChatter, speak])
 
   // ================================
   // REGULAR CURVE CALLOUTS
