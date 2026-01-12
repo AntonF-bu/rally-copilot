@@ -157,10 +157,22 @@ export function analyzeHighwayBends(coordinates, segments) {
   // Filter by minimum spacing - don't show markers too close together
   const spacedBends = enforceMinimumSpacing(processedBends, HIGHWAY_BEND_CONFIG.minSpacing)
   
-  // Add coaching data
-  const coachedBends = addCoachingData(spacedBends)
+  // STRICT zone validation - ensure each bend is actually within a transit zone
+  const validatedBends = spacedBends.filter(bend => {
+    const isInTransit = highwaySegments.some(seg => 
+      bend.distanceFromStart >= seg.startDistance && 
+      bend.distanceFromStart <= seg.endDistance
+    )
+    if (!isInTransit) {
+      console.log(`   ⚠️ Filtered out bend at ${bend.distanceFromStart}m - not in transit zone`)
+    }
+    return isInTransit
+  })
   
-  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends (filtered from ${allBends.length} raw detections)`)
+  // Add coaching data
+  const coachedBends = addCoachingData(validatedBends)
+  
+  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends (from ${allBends.length} raw → ${spacedBends.length} spaced → ${validatedBends.length} validated)`)
   
   return coachedBends
 }
