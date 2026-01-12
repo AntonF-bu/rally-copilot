@@ -20,10 +20,10 @@ export const HIGHWAY_MODE = {
 const HIGHWAY_BEND_CONFIG = {
   sampleInterval: 10,       // meters - fine granularity
   slidingWindow: 200,       // meters - window for detecting gradual bends
-  minAngle: 8,              // degrees - lowered from 10 to catch more subtle bends
+  minAngle: 8,              // degrees - catch subtle but noticeable bends
   maxAngle: 45,             // degrees - above this it's a real curve
-  minLength: 60,            // meters - minimum bend length (lowered from 80)
-  minSpacing: 300,          // meters - minimum distance between markers (was 400)
+  minLength: 60,            // meters - minimum bend length
+  minSpacing: 300,          // meters - minimum distance between markers
   noMerge: true,            // Never merge highway bends
   noChicane: true           // Don't combine into chicanes - keep each bend separate
 }
@@ -936,10 +936,11 @@ export function getSilenceBreaker(lastCalloutTime, lastChatterTime) {
   const timeSinceCallout = now - lastCalloutTime
   const timeSinceChatter = now - lastChatterTime
   
-  const silenceThreshold = 45000 + Math.random() * 15000
+  // Trigger chatter after 20-35 seconds of silence (was 45-60)
+  const silenceThreshold = 20000 + Math.random() * 15000
   
   if (timeSinceCallout < silenceThreshold) return null
-  if (timeSinceChatter < 30000) return null
+  if (timeSinceChatter < 20000) return null  // Minimum 20s between chatter (was 30)
   
   const text = SILENCE_BREAKERS[Math.floor(Math.random() * SILENCE_BREAKERS.length)]
   
