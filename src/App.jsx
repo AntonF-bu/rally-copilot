@@ -16,6 +16,10 @@ import {
   VOICE_CONFIG
 } from './services/calloutEngine'
 
+// NEW: Highway mode imports
+import { useHighwayMode } from './hooks/useHighwayMode'
+import useHighwayStore from './services/highwayStore'
+
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
 import BottomBar from './components/BottomBar'
@@ -27,8 +31,8 @@ import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 
 // ================================
-// Rally Co-Pilot App - v19
-// FIXED: Announces all curves, correct chicane direction
+// Rally Co-Pilot App - v20
+// NEW: Highway mode with sweeper callouts
 // ================================
 
 const CHARACTER_TO_MODE = {
@@ -64,6 +68,18 @@ export default function App() {
     goToEditor,
   } = useStore()
 
+  // NEW: Highway mode hook
+  const {
+    isHighwayActive,
+    getNextHighwayCallout,
+    getProgressCallout,
+    onSweeperCompleted,
+    resetHighwayTrip
+  } = useHighwayMode()
+  
+  // NEW: Highway store for recording callout times
+  const { recordCalloutTime } = useHighwayStore()
+
   // Tracking
   const announcedRef = useRef(new Set())
   const earlyRef = useRef(new Set())
@@ -71,6 +87,9 @@ export default function App() {
   const lastCalloutRef = useRef(0)
   const lastLogRef = useRef(0)
   const lastZoneAnnouncedRef = useRef(null)
+  
+  // NEW: Track announced sweepers separately
+  const announcedSweepersRef = useRef(new Set())
   
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
@@ -87,10 +106,12 @@ export default function App() {
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
+    announcedSweepersRef.current = new Set() // NEW
     lastCalloutRef.current = 0
     lastZoneAnnouncedRef.current = null
     setUserDistanceAlongRoute(0)
-  }, [routeMode, routeData])
+    resetHighwayTrip() // NEW: Reset highway stats
+  }, [routeMode, routeData, resetHighwayTrip])
 
   useEffect(() => {
     if (isRunning) {
@@ -98,6 +119,7 @@ export default function App() {
       announcedRef.current = new Set()
       earlyRef.current = new Set()
       finalRef.current = new Set()
+      announcedSweepersRef.current = new Set() // NEW
       lastCalloutRef.current = Date.now() - 5000
       lastZoneAnnouncedRef.current = null
     }
@@ -180,7 +202,8 @@ export default function App() {
         - currentSpeed: ${currentSpeed}
         - currentMode: ${currentMode}
         - routeMode: ${routeMode}
-        - isDemoMode: ${isDemoMode}`)
+        - isDemoMode: ${isDemoMode}
+        - isHighwayActive: ${isHighwayActive}`)
       
       if (upcomingCurves.length > 0) {
         console.log(`   First 3 curves:`, upcomingCurves.slice(0, 3).map(c => ({
@@ -209,6 +232,29 @@ export default function App() {
     const minPause = VOICE_CONFIG[currentMode]?.minPauseBetween || 1200
     if (now - lastCalloutRef.current < minPause) {
       return
+    }
+
+    // ================================
+    // NEW: HIGHWAY MODE SWEEPER CALLOUTS
+    // Check for sweeper callouts FIRST when in highway zone
+    // ================================
+    if (isHighwayActive && !announcedSweepersRef.current.has(curveId)) {
+      const highwayCallout = getNextHighwayCallout(upcomingCurves, distance)
+      
+      if (highwayCallout) {
+        console.log(`🛣️ HIGHWAY CALLOUT: "${highwayCallout.text}" @ ${Math.round(distance)}m`)
+        speak(highwayCallout.text, 'normal')
+        announcedSweepersRef.current.add(curveId)
+        lastCalloutRef.current = now
+        recordCalloutTime()
+        
+        // If it's a sweeper, also mark as announced in regular ref to avoid duplicate
+        if (highwayCallout.type === 'sweeper') {
+          announcedRef.current.add(curveId)
+          setLastAnnouncedCurveId(curveId)
+        }
+        return
+      }
     }
     
     // Log curve status
@@ -305,14 +351,28 @@ export default function App() {
       }
     }
 
-  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode])
+  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode, isHighwayActive, getNextHighwayCallout, recordCalloutTime])
+
+  // ================================
+  // NEW: HIGHWAY PROGRESS CALLOUTS
+  // Separate effect for progress milestones
+  // ================================
+  useEffect(() => {
+    if (!isRunning || !settings.voiceEnabled || !isHighwayActive) return
+    
+    const progressCallout = getProgressCallout()
+    if (progressCallout) {
+      console.log(`🛣️ PROGRESS: "${progressCallout.text}"`)
+      speak(progressCallout.text, 'normal')
+    }
+  }, [isRunning, settings.voiceEnabled, isHighwayActive, getProgressCallout, speak, userDistanceAlongRoute])
 
   // Cleanup
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
     const currentIds = new Set(upcomingCurves.map(c => c.id))
-    ;[announcedRef, earlyRef, finalRef].forEach(ref => {
+    ;[announcedRef, earlyRef, finalRef, announcedSweepersRef].forEach(ref => {
       ref.current.forEach(id => {
         if (!currentIds.has(id)) ref.current.delete(id)
       })
@@ -324,7 +384,9 @@ export default function App() {
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
+    announcedSweepersRef.current = new Set() // NEW
     lastCalloutRef.current = Date.now() - 5000
+    resetHighwayTrip() // NEW
     goToDriving()
   }
 
