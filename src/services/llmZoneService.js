@@ -116,78 +116,92 @@ function getSystemPrompt() {
   return `You are an expert driving route analyst for a rally co-pilot app. Your job is to classify road segments into the correct driving character.
 
 CLASSIFICATION TYPES (only use these 3):
-- HIGHWAY: Wide, fast roads with gentle sweepers. Interstates, turnpikes, major highways, scenic byways with good flow. Typically 2+ lanes, higher speed limits, gentle curves. INCLUDES highway interchanges, ramps, and any section that is part of the same highway.
-- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads, country lanes with tight curves. Many curves, lower effective speeds. ONLY use when driver has LEFT the highway onto a different type of road.
-- URBAN: City/town driving with traffic lights, pedestrians, frequent stops. Downtown areas, suburban streets, commercial zones.
+- HIGHWAY: Wide, fast roads. Interstates, turnpikes, major highways. INCLUDES highway interchanges, ramps, curves, and ANY section that is part of the same continuous highway.
+- TECHNICAL: Narrow, winding roads requiring full attention. Mountain roads, forest roads, twisty backroads. ONLY when driver has physically EXITED the highway onto a completely different road.
+- URBAN: City/town driving with traffic lights, frequent stops. Downtown areas, commercial zones.
 
-CRITICAL RULES FOR HIGHWAY CONTINUITY:
-1. If a route starts on a highway, stays on that highway, and ends on that highway - the ENTIRE segment is HIGHWAY
-2. Highway interchanges, ramps, and curves DO NOT make it TECHNICAL - they're still part of the highway
-3. A segment can ONLY become TECHNICAL if the driver physically exits onto a different road (secondary road, local road, etc.)
-4. If segments before AND after are HIGHWAY, the middle segment is almost certainly HIGHWAY too (same road)
-5. Curves on highways (even sharp ones at interchanges) are still HIGHWAY - just challenging highway sections
+CRITICAL - HIGHWAY CONTINUITY IS PARAMOUNT:
+The #1 mistake to avoid is marking highway sections as TECHNICAL just because they have curves.
 
-WHEN TO USE TECHNICAL:
-- Driver exits highway onto Route 9, a winding mountain road
-- Backroad sections through forests or hills
-- Scenic roads with many tight turns
-- Country roads that are clearly NOT highways
+RULES (in priority order):
+1. If estimated speed is 55+ mph → HIGHWAY (highways have high speed limits)
+2. If road class is motorway, trunk, or primary → HIGHWAY
+3. If segment is between two HIGHWAY segments → HIGHWAY (you can't teleport off a highway)
+4. If segment is at START of route and NEXT segment is HIGHWAY → probably HIGHWAY (starting on highway)
+5. If segment is at END of route and PREVIOUS segment is HIGHWAY → probably HIGHWAY (ending on highway)
+6. Curves do NOT make something TECHNICAL - highways have curves too!
+7. Only use TECHNICAL when the road class clearly indicates a secondary/tertiary road AND it's NOT surrounded by highway segments
 
-WHEN TO STAY HIGHWAY:
-- Highway curves, even if they're 15-20 degrees
-- Interchange areas with ramps
-- Construction zones on highways
-- Any section that is part of a continuous highway journey
+EXAMPLES:
+- I-95 with a 15° curve at an interchange → HIGHWAY (still on I-95)
+- Route 128 with sweeping bends → HIGHWAY (major highway)
+- Exit onto Route 9 mountain road → TECHNICAL (exited highway, different road)
+- Downtown Boston streets → URBAN
 
-Respond ONLY with valid JSON array. No explanation text outside the JSON.`
+You MUST respond with classifications for ALL segments, not just changes. This ensures nothing is missed.`
 }
 
 /**
  * Build the classification prompt with segment data
  */
 function buildClassificationPrompt(segmentSummaries, routeData) {
+  // Calculate current highway percentage
+  let totalDist = 0
+  let highwayDist = 0
+  segmentSummaries.forEach(seg => {
+    const len = parseFloat(seg.lengthKm) || 0
+    totalDist += len
+    if (seg.currentClassification === 'transit') highwayDist += len
+  })
+  const highwayPercent = totalDist > 0 ? Math.round((highwayDist / totalDist) * 100) : 0
+
   const routeContext = routeData ? `
 ROUTE OVERVIEW:
-- Total distance: ${((routeData.distance || 0) / 1000).toFixed(1)} km
+- Total distance: ${((routeData.distance || 0) / 1000).toFixed(1)} km (${((routeData.distance || 0) / 1609.34).toFixed(1)} miles)
 - Total curves: ${routeData.curves?.length || 0}
-- Route name: ${routeData.name || 'Unknown'}
+- Current highway percentage: ${highwayPercent}%
+- Route type hint: ${highwayPercent > 50 ? 'PREDOMINANTLY HIGHWAY ROUTE' : 'Mixed route'}
 ` : ''
 
   const segmentsList = segmentSummaries.map((seg, i) => {
     const prevSeg = segmentSummaries[i - 1]
     const nextSeg = segmentSummaries[i + 1]
-    const neighbors = []
-    if (prevSeg) neighbors.push(`Previous: ${prevSeg.currentClassification.toUpperCase()}`)
-    if (nextSeg) neighbors.push(`Next: ${nextSeg.currentClassification.toUpperCase()}`)
-    const neighborInfo = neighbors.length > 0 ? `\n   Neighbors: ${neighbors.join(', ')}` : ''
     
-    return `Segment ${seg.index}: ${seg.startKm}km - ${seg.endKm}km (${seg.lengthKm}km)
-   Current: ${seg.currentClassification.toUpperCase()}
-   Curves: ${seg.curveCount}, Avg angle: ${seg.avgCurveAngle}°
-   Road class: ${seg.roadClass}, Est. speed: ${seg.estimatedSpeedMph}mph${neighborInfo}`
-  }).join('\n\n')
+    // Build position context
+    let positionHint = ''
+    if (i === 0 && nextSeg?.currentClassification === 'transit') {
+      positionHint = ' ⚠️ START of route, next is HIGHWAY'
+    } else if (i === segmentSummaries.length - 1 && prevSeg?.currentClassification === 'transit') {
+      positionHint = ' ⚠️ END of route, prev is HIGHWAY'
+    } else if (prevSeg?.currentClassification === 'transit' && nextSeg?.currentClassification === 'transit') {
+      positionHint = ' ⚠️ SANDWICHED between HIGHWAY segments!'
+    }
+    
+    const neighbors = []
+    if (prevSeg) neighbors.push(`Prev: ${prevSeg.currentClassification.toUpperCase()}`)
+    if (nextSeg) neighbors.push(`Next: ${nextSeg.currentClassification.toUpperCase()}`)
+    const neighborInfo = neighbors.length > 0 ? ` | ${neighbors.join(', ')}` : ''
+    
+    return `[${i}] ${seg.startKm}-${seg.endKm}km (${seg.lengthKm}km): ${seg.currentClassification.toUpperCase()}${neighborInfo}${positionHint}
+    Speed: ${seg.estimatedSpeedMph}mph, Curves: ${seg.curveCount}, Avg angle: ${seg.avgCurveAngle}°, Road: ${seg.roadClass}`
+  }).join('\n')
 
   return `${routeContext}
 
-SEGMENTS TO CLASSIFY:
-
+SEGMENTS:
 ${segmentsList}
 
-IMPORTANT: Look at the "Neighbors" field. If a segment is sandwiched between two HIGHWAY segments, it's almost certainly HIGHWAY too (continuous highway journey).
+⚠️ IMPORTANT: Any segment marked with ⚠️ is SUSPICIOUS and likely needs to be changed to HIGHWAY.
 
-For each segment, analyze if the current classification is correct. Return a JSON array with your assessment:
+Return a JSON array with your classification for EVERY segment (not just changes):
 
 [
-  {
-    "index": 0,
-    "classification": "HIGHWAY|TECHNICAL|URBAN",
-    "confidence": 0.0-1.0,
-    "reason": "brief explanation"
-  },
+  { "index": 0, "classification": "HIGHWAY", "confidence": 0.95, "reason": "motorway, 65mph" },
+  { "index": 1, "classification": "HIGHWAY", "confidence": 0.90, "reason": "between highway segments" },
   ...
 ]
 
-Only include segments where you recommend a CHANGE or have low confidence in current classification. If a segment looks correct, you can omit it or confirm with high confidence.`
+Respond ONLY with the JSON array, no other text.`
 }
 
 /**
@@ -261,11 +275,19 @@ function applyOverrides(segments, overrides) {
 
   for (const override of overrides) {
     if (override.index >= 0 && override.index < updated.length) {
-      // Only apply if confidence is high enough
-      if (override.confidence >= 0.6) {
+      const currentChar = updated[override.index].character
+      const newChar = override.newClassification
+      
+      // Always apply if it's a change (we asked LLM for all segments, trust its judgment)
+      // Only skip if confidence is very low (<0.5) AND it's not fixing a highway continuity issue
+      const isHighwayFix = newChar === 'transit' && currentChar !== 'transit'
+      const shouldApply = override.confidence >= 0.5 || isHighwayFix
+      
+      if (shouldApply && newChar !== currentChar) {
+        console.log(`  🔄 LLM: Segment ${override.index}: ${currentChar} → ${newChar} (${(override.confidence * 100).toFixed(0)}% - ${override.reason})`)
         updated[override.index] = {
           ...updated[override.index],
-          character: override.newClassification,
+          character: newChar,
           llmOverride: true,
           llmReason: override.reason,
           llmConfidence: override.confidence
