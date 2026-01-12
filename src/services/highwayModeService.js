@@ -427,7 +427,7 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
 
 /**
  * Generate detailed callout for a section
- * Rhythmic pace notes style - short, punchy, each bend called out
+ * Narrative summary style - describes the feel, not each bend
  */
 function generateSectionCallout(bends, character, length) {
   if (!bends?.length) return 'Active section ahead.'
@@ -437,50 +437,102 @@ function generateSectionCallout(bends, character, length) {
   // Opening with bend count
   parts.push(`Active section, ${bends.length} bends`)
   
-  // Narrate each bend - short and rhythmic
-  bends.forEach((bend, idx) => {
-    const dir = bend.direction?.toLowerCase() || 'bend'
-    const angle = bend.angle || 10
-    const speed = bend.optimalSpeed || calculateOptimalSpeed(bend)
-    
-    if (idx === 0) {
-      // First bend - "Entry"
-      if (bend.isSSweep) {
-        const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
-        const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
-        parts.push(`${capitalize(dir1)} entry, S-sweep ${dir1}-${dir2}`)
-      } else {
-        parts.push(`${capitalize(dir)} entry ${speed}`)
-      }
-    } else {
-      // Subsequent bends - rhythmic style
-      if (bend.isSSweep) {
-        const dir1 = bend.firstBend?.direction?.toLowerCase() || 'right'
-        const dir2 = bend.secondBend?.direction?.toLowerCase() || 'left'
-        parts.push(`S-sweep ${dir1}-${dir2}`)
-      } else if (bend.angle > 20) {
-        // Tighter bend - mention character
-        if (bend.tightens) {
-          parts.push(`${capitalize(dir)} tightening, ${speed}`)
-        } else if (bend.opens) {
-          parts.push(`${capitalize(dir)} opens, ${speed}`)
-        } else {
-          parts.push(`${capitalize(dir)} ${angle}, ${speed}`)
-        }
-      } else if (bend.angle > 12) {
-        // Moderate - just direction and speed
-        parts.push(`${capitalize(dir)} sweep, ${speed}`)
-      } else {
-        // Gentle - just direction
-        parts.push(`Gentle ${dir}`)
-      }
-    }
-  })
+  // Entry - first bend
+  const entry = bends[0]
+  const entryDir = entry.direction?.toLowerCase() || 'right'
+  const entrySpeed = entry.optimalSpeed || calculateOptimalSpeed(entry)
   
-  // Exit clear
-  parts.push('Exit clear')
+  if (entry.isSSweep) {
+    const dir1 = entry.firstBend?.direction?.toLowerCase() || 'right'
+    parts.push(`${capitalize(dir1)} entry ${entrySpeed}, S-sweep to start`)
+  } else {
+    parts.push(`${capitalize(entryDir)} entry ${entrySpeed}`)
+  }
+  
+  // Analyze the middle section character
+  const middleBends = bends.slice(1, -1)
+  if (middleBends.length > 0) {
+    const middleDesc = analyzeMiddleCharacter(middleBends)
+    if (middleDesc) {
+      parts.push(middleDesc)
+    }
+  }
+  
+  // Exit - last bend (if different from entry)
+  if (bends.length > 2) {
+    const exit = bends[bends.length - 1]
+    const exitDesc = describeExit(exit)
+    if (exitDesc) {
+      parts.push(exitDesc)
+    }
+  }
   
   return parts.join('. ') + '.'
+}
+
+/**
+ * Analyze the middle bends and describe the overall character
+ */
+function analyzeMiddleCharacter(bends) {
+  if (!bends?.length) return null
+  
+  const leftCount = bends.filter(b => b.direction === 'LEFT').length
+  const rightCount = bends.filter(b => b.direction === 'RIGHT').length
+  const sSweepCount = bends.filter(b => b.isSSweep).length
+  const avgAngle = bends.reduce((sum, b) => sum + (b.angle || 10), 0) / bends.length
+  
+  // Check for S-sweep dominant
+  if (sSweepCount >= bends.length / 2) {
+    return 'alternating S-sweeps through'
+  }
+  
+  // Check for strong directional bias
+  if (leftCount >= rightCount * 2) {
+    if (avgAngle < 12) {
+      return 'gentle lefts through the middle'
+    } else {
+      return 'rolling lefts through'
+    }
+  }
+  
+  if (rightCount >= leftCount * 2) {
+    if (avgAngle < 12) {
+      return 'gentle rights through the middle'
+    } else {
+      return 'rolling rights through'
+    }
+  }
+  
+  // Mixed directions
+  if (avgAngle < 12) {
+    return 'gentle curves throughout'
+  } else if (avgAngle < 20) {
+    return 'rolling lefts and rights'
+  } else {
+    return 'active lefts and rights through'
+  }
+}
+
+/**
+ * Describe how the section exits
+ */
+function describeExit(exitBend) {
+  if (!exitBend) return null
+  
+  if (exitBend.isSSweep) {
+    return 'S-sweep to exit'
+  }
+  
+  const dir = exitBend.direction?.toLowerCase() || 'right'
+  const angle = exitBend.angle || 10
+  
+  if (angle < 10) {
+    return 'opens on exit'
+  } else if (angle > 20) {
+    return `${dir} tightens at exit`
+  } else {
+    return `${dir} to exit`
+  }
 }
 
 function capitalize(str) {
