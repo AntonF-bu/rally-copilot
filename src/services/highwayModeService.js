@@ -346,10 +346,10 @@ function detectHighwayBends(coordinates, segmentStartDistance) {
 
 /**
  * Detect and consolidate dense bend clusters into section markers
- * If 3+ bends within clusterDistance, combine into one "section" marker
+ * Only consolidate if bends are VERY close together (truly overlapping markers)
  */
-function consolidateBendClusters(bends, clusterDistance = 600) {
-  if (bends.length < 3) return bends
+function consolidateBendClusters(bends, clusterDistance = 350) {
+  if (bends.length < 4) return bends  // Need 4+ to consider clustering
   
   const result = []
   let i = 0
@@ -372,7 +372,8 @@ function consolidateBendClusters(bends, clusterDistance = 600) {
     
     const clusterSize = clusterEnd - clusterStart + 1
     
-    if (clusterSize >= 3) {
+    // Only consolidate if 4+ bends are truly clustered (would overlap visually)
+    if (clusterSize >= 4) {
       // Consolidate into a section marker
       const clusterBends = bends.slice(clusterStart, clusterEnd + 1)
       const firstBend = clusterBends[0]
