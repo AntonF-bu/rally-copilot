@@ -181,9 +181,6 @@ export function analyzeHighwayBends(coordinates, segments) {
   
   return coachedBends
 }
-  
-  return coachedBends
-}
 
 /**
  * Extract coordinates for a specific segment using distance-based lookup
