@@ -511,6 +511,49 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
+      // PHASE 1.5: POST-PROCESSING - Highway Sandwich Rule
+      // Force any non-highway segment between two highway segments to highway
+      // This catches cases LLM misses (interchange curves, etc.)
+      // ========================================
+      const currentZones = routeCharacter.segments || []
+      if (currentZones.length >= 3) {
+        let fixedCount = 0
+        const fixedZones = currentZones.map((seg, i) => {
+          // Skip first and last segments
+          if (i === 0 || i === currentZones.length - 1) return seg
+          
+          const prevSeg = currentZones[i - 1]
+          const nextSeg = currentZones[i + 1]
+          
+          // If this segment is NOT highway but both neighbors ARE highway
+          if (seg.character !== 'transit' && 
+              prevSeg.character === 'transit' && 
+              nextSeg.character === 'transit') {
+            console.log(`🔧 Fixing sandwiched segment ${seg.id}: ${seg.character} → transit (highway)`)
+            fixedCount++
+            return {
+              ...seg,
+              character: 'transit',
+              behavior: routeCharacter.segments[0]?.behavior, // Copy highway behavior
+              sandwichFixed: true
+            }
+          }
+          return seg
+        })
+        
+        if (fixedCount > 0) {
+          console.log(`🔧 Fixed ${fixedCount} sandwiched segment(s) to highway`)
+          setRouteCharacter(prev => ({ ...prev, segments: fixedZones }))
+          setRouteZones(fixedZones)
+          
+          // Re-analyze highway bends with fixed zones
+          const bends = analyzeHighwayBends(routeData.coordinates, fixedZones)
+          setHighwayBends(bends)
+          console.log(`🛣️ Re-analyzed highway bends after sandwich fix: ${bends.length}`)
+        }
+      }
+      
+      // ========================================
       // PHASE 2: Voice Preloading
       // ========================================
       setCopilotStatus('Loading voice callouts...')
