@@ -1,6 +1,6 @@
 // ================================
-// Callout Engine v2.1
-// FIXED: Clear callouts only for technical mode
+// Callout Engine v2.2
+// FIXED: Choppy voice - skip sev 1, cap clear distance, longer pauses
 // ================================
 
 import { ROUTE_CHARACTER, CHARACTER_BEHAVIORS } from './zoneService'
@@ -49,31 +49,32 @@ const TIMING_CONFIG = {
 
 // ================================
 // VOICE/PACING CONFIGURATION  
+// FIXED: Increased minPauseBetween to prevent choppy overlapping
 // ================================
 
 export const VOICE_CONFIG = {
   highway: {
-    speed: 0.9,           // Slower speech
-    stability: 0.85,      // Smooth, consistent
-    minPauseBetween: 1500, // ms between callouts
+    speed: 0.9,
+    stability: 0.85,
+    minPauseBetween: 2000,  // Increased from 1500
     style: 'relaxed'
   },
   spirited: {
     speed: 1.0,
     stability: 0.75,
-    minPauseBetween: 1200,
+    minPauseBetween: 1500,  // Increased from 1200
     style: 'alert'
   },
   technical: {
-    speed: 1.15,          // Faster speech
-    stability: 0.65,      // More urgent variation
-    minPauseBetween: 800,
+    speed: 1.1,             // Slightly slower than before (was 1.15)
+    stability: 0.70,        // More stable (was 0.65)
+    minPauseBetween: 1200,  // Increased from 800 - prevents choppy overlap
     style: 'rapid'
   },
   urban: {
     speed: 0.9,
     stability: 0.85,
-    minPauseBetween: 1500,
+    minPauseBetween: 2000,
     style: 'casual'
   }
 }
@@ -104,7 +105,6 @@ const CALLOUT_TEMPLATES = {
   },
   spirited: {
     curve: (dir, sev, mod) => `${dir} ${sev}${mod ? ', ' + mod : ''}`,
-    // NO straight/clear callouts for spirited - just announce curves
     straight: () => null
   },
   technical: {
@@ -115,7 +115,6 @@ const CALLOUT_TEMPLATES = {
       return call
     },
     sequence: (curves) => {
-      // Link multiple curves: "Left 4 into right 2"
       return curves.map((c, i) => {
         const dir = c.direction === 'LEFT' ? 'left' : 'right'
         if (i === 0) return `${dir.charAt(0).toUpperCase() + dir.slice(1)} ${c.severity}`
@@ -123,9 +122,11 @@ const CALLOUT_TEMPLATES = {
       }).join(' ')
     },
     clear: (dist) => {
-      if (dist > 300) return `Clear, ${Math.round(dist/50)*50} meters`
-      if (dist > 150) return 'Clear ahead'
-      return null // Don't say anything for short straights
+      // FIXED: Cap at reasonable distance (2km max)
+      const cappedDist = Math.min(dist, 2000)
+      if (cappedDist > 500) return `Clear, ${Math.round(cappedDist/100)*100} meters`
+      if (cappedDist > 300) return 'Clear ahead'
+      return null
     },
     push: 'Opens, push',
     breathe: 'Breathe'
@@ -137,13 +138,21 @@ const CALLOUT_TEMPLATES = {
 }
 
 // ================================
+// MINIMUM SEVERITY BY MODE
+// Prevents announcing every tiny curve
+// ================================
+
+export const MIN_SEVERITY_BY_MODE = {
+  highway: 3,    // Only announce sev 3+ on highway
+  spirited: 2,   // Announce sev 2+ in spirited
+  technical: 2,  // FIXED: Skip severity 1 even in technical (was 1)
+  urban: 4       // Only hard curves in urban
+}
+
+// ================================
 // MODE DETECTION
 // ================================
 
-/**
- * Determine driving mode from multiple signals
- * Priority: Road data > User speed > Census density
- */
 export function detectDrivingMode(signals) {
   const { 
     roadClass, 
@@ -154,7 +163,6 @@ export function detectDrivingMode(signals) {
     curveAvgSeverity 
   } = signals
 
-  // HIGHWAY: Strong signals from road data
   const isHighwayRoad = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
   const isHighwaySpeed = speedLimit >= 55 || userSpeed >= 55
   
@@ -162,7 +170,6 @@ export function detectDrivingMode(signals) {
     return DRIVING_MODE.HIGHWAY
   }
 
-  // TECHNICAL: Curve-heavy sections
   const isTechnicalCurves = curveDensity >= 3 || (curveDensity >= 2 && curveAvgSeverity >= 3.5)
   const isRuralArea = censusCategory === 'rural'
   const isSlowRoad = speedLimit <= 35 || userSpeed <= 35
@@ -171,7 +178,6 @@ export function detectDrivingMode(signals) {
     return DRIVING_MODE.TECHNICAL
   }
 
-  // URBAN: Dense area + low speeds + sparse curves
   const isUrbanArea = censusCategory === 'urban'
   const isLowSpeed = speedLimit <= 30 && userSpeed <= 30
   const isSparseCurves = curveDensity < 2
@@ -180,8 +186,23 @@ export function detectDrivingMode(signals) {
     return DRIVING_MODE.URBAN
   }
 
-  // Default: SPIRITED
   return DRIVING_MODE.SPIRITED
+}
+
+/**
+ * Check if a curve should be announced based on mode
+ */
+export function shouldAnnounceCurveInMode(mode, curve) {
+  const minSeverity = MIN_SEVERITY_BY_MODE[mode] || 2
+  
+  // Always announce chicanes
+  if (curve.isChicane) return true
+  
+  // Always announce severity 4+ regardless of mode
+  if (curve.severity >= 4) return true
+  
+  // Check minimum severity for mode
+  return curve.severity >= minSeverity
 }
 
 /**
@@ -197,17 +218,15 @@ export function adjustForUserSpeed(mode, userSpeed, expectedSpeed) {
 
   const speedRatio = userSpeed / expectedSpeed
 
-  // User pushing hard - tighten everything
   if (speedRatio > 1.15) {
-    config.baseDistance *= 1.2  // Earlier warnings
-    voice.speed *= 1.1          // Faster speech
-    voice.minPauseBetween *= 0.8  // Less gap between calls
+    config.baseDistance *= 1.2
+    voice.speed *= 1.05  // Less aggressive speed increase
+    voice.minPauseBetween *= 0.9  // Less aggressive pause decrease
   }
   
-  // User going slower - relax
   if (speedRatio < 0.85) {
     config.baseDistance *= 0.9
-    voice.minPauseBetween *= 1.2
+    voice.minPauseBetween *= 1.1
   }
 
   return { timing: config, voice }
@@ -217,13 +236,10 @@ export function adjustForUserSpeed(mode, userSpeed, expectedSpeed) {
 // TIMING CALCULATIONS
 // ================================
 
-/**
- * Calculate warning distances for a curve
- */
 export function getWarningDistances(mode, userSpeedMph, expectedSpeedMph) {
   const { timing } = adjustForUserSpeed(mode, userSpeedMph, expectedSpeedMph)
   
-  const userSpeedMps = (userSpeedMph * 1609.34) / 3600  // Convert to m/s
+  const userSpeedMps = (userSpeedMph * 1609.34) / 3600
   const minDistance = userSpeedMps * timing.minReactionTime
   
   return {
@@ -235,7 +251,7 @@ export function getWarningDistances(mode, userSpeedMph, expectedSpeedMph) {
 
 /**
  * Check if it's time for a "clear" callout
- * FIXED: Only enable for TECHNICAL mode, and with stricter conditions
+ * FIXED: Much stricter conditions
  */
 export function shouldCallClear(mode, timeSinceLastCallout, distanceToNextCurve) {
   // ONLY technical mode gets clear callouts
@@ -243,13 +259,18 @@ export function shouldCallClear(mode, timeSinceLastCallout, distanceToNextCurve)
     return false
   }
   
-  // Must have significant distance to next curve (> 400m = real straight)
-  if (distanceToNextCurve < 400) {
+  // Must be a REAL straight - at least 600m (was 400m)
+  if (distanceToNextCurve < 600) {
     return false
   }
   
-  // Must have been silent for a while (> 8 seconds)
-  if (timeSinceLastCallout < 8000) {
+  // Cap at 2km - anything more is probably a bug
+  if (distanceToNextCurve > 2000) {
+    return false
+  }
+  
+  // Must have been silent for a while - at least 10 seconds (was 8)
+  if (timeSinceLastCallout < 10000) {
     return false
   }
   
@@ -260,9 +281,6 @@ export function shouldCallClear(mode, timeSinceLastCallout, distanceToNextCurve)
 // CALLOUT GENERATION
 // ================================
 
-/**
- * Generate callout text based on mode and curve
- */
 export function generateModeCallout(mode, curve, phase, options = {}) {
   const { speedUnit = 'mph', nextCurve = null, distanceToNext = null } = options
   
@@ -276,7 +294,6 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
   const modifier = getModifierText(curve)
   const speed = getSpeedText(curve.severity, speedUnit)
 
-  // Phase-specific callouts
   switch (phase) {
     case 'early':
       if (mode === DRIVING_MODE.HIGHWAY) {
@@ -299,7 +316,6 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
       return `${dir} now`
     
     case 'clear':
-      // Only technical mode has clear template
       if (mode === DRIVING_MODE.TECHNICAL && templates.clear) {
         return templates.clear(distanceToNext)
       }
@@ -310,9 +326,6 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
   }
 }
 
-/**
- * Generate chicane/sequence callout
- */
 export function generateChicaneCallout(mode, chicane, phase) {
   const startDir = chicane.startDirection === 'LEFT' ? 'left' : 'right'
   const endDir = chicane.endDirection === 'LEFT' ? 'left' : 'right'
@@ -334,38 +347,34 @@ export function generateChicaneCallout(mode, chicane, phase) {
 
 /**
  * Generate straight/clear callout
- * FIXED: Only for technical mode, with reasonable distances
+ * FIXED: Cap distance, require minimum 600m
  */
 export function generateClearCallout(mode, distanceMeters, nextCurve, speedUnit) {
-  // ONLY technical mode gets clear callouts
   if (mode !== DRIVING_MODE.TECHNICAL) {
     return null
   }
   
-  // Only announce if there's a real straight (> 400m)
-  if (distanceMeters < 400) {
+  // Must be a real straight (600m+) but not ridiculous (2km max)
+  if (distanceMeters < 600 || distanceMeters > 2000) {
     return null
   }
   
+  // Cap the announced distance at 2km
+  const cappedDist = Math.min(distanceMeters, 2000)
+  
   // Format distance
   const distText = speedUnit === 'kmh' 
-    ? `${Math.round(distanceMeters/100)*100} meters`
-    : `${Math.round(distanceMeters * 3.28084 / 500) * 500} feet` // Round to 500ft
+    ? `${Math.round(cappedDist/100)*100} meters`
+    : `${Math.round(cappedDist * 3.28084 / 500) * 500} feet`
   
   return `Clear, ${distText}`
 }
 
-/**
- * Generate terrain/POI callout (highway mode)
- */
 export function generateTerrainCallout(terrainType) {
   const terrain = CALLOUT_TEMPLATES.highway.terrain
   return terrain[terrainType] || null
 }
 
-/**
- * Generate engagement callout (highway mode, prevent boredom)
- */
 export function generateEngagementCallout() {
   const options = CALLOUT_TEMPLATES.highway.engagement
   return options[Math.floor(Math.random() * options.length)]
@@ -407,18 +416,15 @@ function getSpeedText(severity, speedUnit) {
 // ================================
 
 export const SEVERITY_COLORS = {
-  clear: '#22c55e',     // Green - straight/easy
-  severity1: '#22c55e', // Green
-  severity2: '#84cc16', // Lime
-  severity3: '#eab308', // Yellow
-  severity4: '#f97316', // Orange
-  severity5: '#ef4444', // Red
-  severity6: '#dc2626', // Dark red
+  clear: '#22c55e',
+  severity1: '#22c55e',
+  severity2: '#84cc16',
+  severity3: '#eab308',
+  severity4: '#f97316',
+  severity5: '#ef4444',
+  severity6: '#dc2626',
 }
 
-/**
- * Get color for a severity level
- */
 export function getSeverityColor(severity) {
   if (!severity || severity < 1) return SEVERITY_COLORS.clear
   if (severity === 1) return SEVERITY_COLORS.severity1
@@ -429,9 +435,6 @@ export function getSeverityColor(severity) {
   return SEVERITY_COLORS.severity6
 }
 
-/**
- * Get gradient warning distance based on mode
- */
 export function getGradientDistance(mode) {
   const distances = {
     highway: 300,
@@ -450,7 +453,9 @@ export default {
   DRIVING_MODE,
   TIMING_CONFIG,
   VOICE_CONFIG,
+  MIN_SEVERITY_BY_MODE,
   detectDrivingMode,
+  shouldAnnounceCurveInMode,
   adjustForUserSpeed,
   getWarningDistances,
   shouldCallClear,
