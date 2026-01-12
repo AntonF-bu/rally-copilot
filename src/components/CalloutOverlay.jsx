@@ -4,8 +4,8 @@ import { getCurveColor } from '../data/routes'
 import { getBehaviorForCurve, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 
 // ================================
-// Racing HUD - v9
-// With zone badge, progress, real elevation
+// Racing HUD - v10
+// FIXED: Uses userDistance prop for zone detection
 // ================================
 
 // Character labels for zone badge
@@ -16,7 +16,7 @@ const CHARACTER_LABELS = {
   [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY' }
 }
 
-export default function CalloutOverlay({ currentDrivingMode }) {
+export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 }) {
   const { 
     isRunning, 
     activeCurve, 
@@ -32,12 +32,11 @@ export default function CalloutOverlay({ currentDrivingMode }) {
     altitude,
     speed,
     position,
-    elevationData // Real elevation data from store
+    elevationData
   } = useStore()
 
   const [isOnline, setIsOnline] = useState(true)
   
-  // Derived values
   const isMetric = settings.units === 'metric'
   const speedUnit = isMetric ? 'KM/H' : 'MPH'
   const distanceUnit = isMetric ? 'm' : 'ft'
@@ -58,51 +57,49 @@ export default function CalloutOverlay({ currentDrivingMode }) {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Get current route character based on position or next curve
+  // FIXED: Get current route character using userDistance (for GPS) or simulationProgress (for demo)
   const currentCharacter = useMemo(() => {
     if (!routeZones?.length) return null
     
-    // Use simulation progress or curve position
-    const progress = simulationProgress || 0
     const totalDist = routeData?.distance || 15000
-    const currentDist = progress * totalDist
+    // Use userDistance if provided (live GPS), otherwise use simulationProgress (demo)
+    const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
     
     const segment = routeZones.find(s => 
       currentDist >= s.startDistance && currentDist <= s.endDistance
     )
     return segment?.character || routeZones[0]?.character || null
-  }, [routeZones, simulationProgress, routeData?.distance])
+  }, [routeZones, simulationProgress, routeData?.distance, userDistance])
   
   const characterColors = currentCharacter ? CHARACTER_COLORS[currentCharacter] : null
   const characterLabel = currentCharacter ? CHARACTER_LABELS[currentCharacter] : null
 
-  // Calculate route progress and remaining
+  // Calculate route progress
   const routeProgress = useMemo(() => {
-    const progress = simulationProgress || 0
     const totalDist = routeData?.distance || 15000
-    const remainingDist = totalDist * (1 - progress)
-    const totalTime = routeData?.duration || 1800 // seconds
+    const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
+    const progress = currentDist / totalDist
+    const remainingDist = totalDist - currentDist
+    const totalTime = routeData?.duration || 1800
     const remainingTime = totalTime * (1 - progress)
     
     return {
       percent: Math.round(progress * 100),
       remainingDist: isMetric ? Math.round(remainingDist) : Math.round(remainingDist * 3.28084),
       remainingDistUnit: isMetric ? 'm' : 'ft',
-      remainingTime: Math.round(remainingTime / 60), // minutes
+      remainingTime: Math.round(remainingTime / 60),
       totalCurves: routeData?.curves?.length || 0,
       curvesPassed: Math.round((routeData?.curves?.length || 0) * progress)
     }
-  }, [simulationProgress, routeData, isMetric])
+  }, [simulationProgress, routeData, isMetric, userDistance])
 
-  // Process elevation data
-  const { elevationPoints, elevationStats, currentElevationIdx } = useMemo(() => {
-    // Use real elevation data if available, otherwise generate placeholder
+  // Elevation data
+  const { elevationStats } = useMemo(() => {
     let points = []
     
     if (elevationData?.length > 0) {
       points = elevationData.map(e => e.elevation)
     } else {
-      // Fallback: generate from altitude or placeholder
       const numPoints = 20
       const baseElev = altitude !== null ? altitude : 50
       for (let i = 0; i < numPoints; i++) {
@@ -117,14 +114,10 @@ export default function CalloutOverlay({ currentDrivingMode }) {
     const currentIdx = Math.min(Math.floor((simulationProgress || 0) * points.length), points.length - 1)
     
     return {
-      elevationPoints: points,
       elevationStats: {
-        min: isMetric ? Math.round(minElev) : Math.round(minElev * 3.28084),
-        max: isMetric ? Math.round(maxElev) : Math.round(maxElev * 3.28084),
         gain: isMetric ? Math.round(gain) : Math.round(gain * 3.28084),
         current: isMetric ? Math.round(points[currentIdx] || 0) : Math.round((points[currentIdx] || 0) * 3.28084)
-      },
-      currentElevationIdx: currentIdx
+      }
     }
   }, [elevationData, altitude, simulationProgress, isMetric])
 
@@ -136,7 +129,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
     return { show: true, start: 40 }
   }
 
-  // Get current speed in correct units
   const currentSpeedDisplay = isMetric 
     ? Math.round((speed || 0) * 1.609) 
     : Math.round(speed || 0)
@@ -147,7 +139,7 @@ export default function CalloutOverlay({ currentDrivingMode }) {
 
   const hasNetworkIssue = !isOnline
 
-  // No curve view - show zone badge and progress
+  // No curve view
   if (!curve) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
@@ -160,7 +152,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
               <span className="text-white/50 text-sm">
                 {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
               </span>
-              {/* Zone Badge */}
               {characterColors && characterLabel && (
                 <ZoneBadge colors={characterColors} label={characterLabel.short} />
               )}
@@ -175,7 +166,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
             )}
           </div>
           
-          {/* Progress bar */}
           <div className="mt-3">
             <ProgressBar 
               percent={routeProgress.percent} 
@@ -196,7 +186,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
   const severityColor = getCurveColor(curve.severity)
   const brakingZone = getBrakingZone(curve.severity)
   
-  // Convert distance to display units
   const distanceDisplay = isMetric 
     ? Math.round(curve.distance) 
     : Math.round(curve.distance * 3.28084)
@@ -228,7 +217,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
                 </div>
               )}
               <span className="text-lg text-white/60">{distanceDisplay}{distanceUnit}</span>
-              {/* Zone Badge */}
               {characterColors && characterLabel && (
                 <ZoneBadge colors={characterColors} label={characterLabel.short} size="small" />
               )}
@@ -260,7 +248,6 @@ export default function CalloutOverlay({ currentDrivingMode }) {
           <div className="flex items-center gap-4 text-white/40 text-xs">
             <span>{routeProgress.curvesPassed}/{routeProgress.totalCurves} curves</span>
             <span>{routeProgress.remainingTime}min</span>
-            {/* Mini elevation inline */}
             {settings.showElevation !== false && (
               <span style={{ color: modeColor }}>↑{elevationStats.current}{elevationUnit}</span>
             )}
@@ -271,48 +258,47 @@ export default function CalloutOverlay({ currentDrivingMode }) {
         <div className="px-4 py-3">
           <div className="flex items-center gap-4">
             
-            <div className="flex items-center gap-3">
-              {curve.isTechnicalSection ? (
-                <TechnicalSectionDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
-              ) : curve.isChicane ? (
-                <ChicaneDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
-              ) : (
-                <CurveDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
-              )}
-            </div>
-
-            <div className="flex-1 px-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-semibold text-white/40 tracking-wider">DISTANCE</span>
-                <span className="text-lg font-bold tracking-tight" style={{ color: inBrakingZone ? '#ff3366' : 'white' }}>
-                  {distanceDisplay}<span className="text-xs text-white/50 ml-0.5">{distanceUnit}</span>
+            {/* Curve display */}
+            {curve.isChicane ? (
+              <ChicaneDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
+            ) : (
+              <CurveDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
+            )}
+            
+            {/* Distance and severity info */}
+            <div className="flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold" style={{ color: severityColor }}>
+                  {curve.isChicane ? curve.severitySequence : curve.severity}
                 </span>
+                {curve.modifier && (
+                  <span className="text-sm text-white/60 uppercase">{curve.modifier}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-white/50 text-sm">DISTANCE</span>
+                <span className="text-white font-bold">{distanceDisplay}</span>
+                <span className="text-white/40 text-xs">{distanceUnit}</span>
               </div>
               
-              <div className="relative h-2.5 bg-white/10 rounded-full overflow-hidden">
+              {/* Braking progress bar */}
+              <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div 
-                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-200"
+                  className="h-full rounded-full transition-all duration-300"
                   style={{ 
                     width: `${progress}%`,
                     background: inBrakingZone 
-                      ? 'linear-gradient(90deg, #ff3366, #ff6b6b)' 
-                      : `linear-gradient(90deg, ${severityColor}60, ${severityColor})`
+                      ? `linear-gradient(90deg, ${severityColor}, #ff3366)` 
+                      : severityColor
                   }}
                 />
-                {brakingZone.show && (
-                  <div 
-                    className="absolute inset-y-0 w-px bg-red-500"
-                    style={{ left: `${brakingZone.start}%` }}
-                  />
-                )}
               </div>
               {inBrakingZone && (
-                <div className="text-center mt-1">
-                  <span className="text-[10px] font-bold text-red-400 animate-pulse tracking-wider">BRAKE</span>
-                </div>
+                <div className="text-xs font-bold text-red-400 mt-1 animate-pulse">BRAKE</div>
               )}
             </div>
-
+            
+            {/* Speed display */}
             {settings.showSpeedometer !== false ? (
               <div className="text-right pl-2 flex flex-col items-end">
                 <div className="flex items-baseline gap-1">
@@ -354,7 +340,7 @@ export default function CalloutOverlay({ currentDrivingMode }) {
         </div>
       </div>
 
-      {/* Upcoming curves - left side, below main HUD */}
+      {/* Upcoming curves */}
       {upcomingCurves.length > 1 && (
         <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
@@ -421,7 +407,7 @@ function ProgressBar({ percent, modeColor, remainingDist, remainingDistUnit, rem
   )
 }
 
-// Curve display components
+// Curve display
 function CurveDisplay({ curve, severityColor, isLeft }) {
   return (
     <div 
@@ -439,6 +425,7 @@ function CurveDisplay({ curve, severityColor, isLeft }) {
   )
 }
 
+// Chicane display
 function ChicaneDisplay({ curve, severityColor, isLeft }) {
   const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
   return (
@@ -458,27 +445,11 @@ function ChicaneDisplay({ curve, severityColor, isLeft }) {
   )
 }
 
-function TechnicalSectionDisplay({ curve, severityColor, isLeft }) {
-  return (
-    <div 
-      className="px-3 py-2 rounded-xl"
-      style={{ 
-        background: `linear-gradient(135deg, ${severityColor}20, ${severityColor}10)`,
-        border: `1.5px solid ${severityColor}50`,
-        boxShadow: `0 0 20px ${severityColor}30`
-      }}
-    >
-      <div className="text-[8px] font-bold tracking-wider mb-0.5" style={{ color: severityColor }}>TECH</div>
-      <div className="text-lg font-bold" style={{ color: severityColor }}>{isLeft ? '←' : '→'}{curve.curveCount}c</div>
-    </div>
-  )
-}
-
+// Upcoming curve row
 function UpcomingCurveRow({ curve }) {
-  const color = getCurveColor(curve.severity)
-  const dir = curve.isChicane ? curve.startDirection : curve.direction
-  const isLeft = dir === 'LEFT'
   const isMetric = useStore.getState().settings?.units === 'metric'
+  const color = getCurveColor(curve.severity)
+  const isLeft = curve.isChicane ? curve.startDirection === 'LEFT' : curve.direction === 'LEFT'
   const dist = isMetric ? Math.round(curve.distance) : Math.round(curve.distance * 3.28084)
   const unit = isMetric ? 'm' : 'ft'
   
@@ -503,6 +474,7 @@ function UpcomingCurveRow({ curve }) {
   )
 }
 
+// Status warnings
 function StatusWarnings({ hasNetworkIssue }) {
   if (!hasNetworkIssue) return null
   
@@ -535,6 +507,5 @@ const hudStyles = `
 
 export function getCurveDirection(curve) {
   if (curve.isChicane) return curve.startDirection
-  if (curve.isTechnicalSection) return curve.direction
   return curve.direction
 }
