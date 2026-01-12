@@ -324,6 +324,8 @@ export default function Map() {
   // Reset route added flag when routeData changes (new route)
   useEffect(() => {
     routeAddedRef.current = false
+    // Also clear marker tracking so new markers will be created for new route
+    createdCurveIdsRef.current.clear()
   }, [routeData?.coordinates])
 
   // Create user marker
@@ -442,17 +444,37 @@ export default function Map() {
 
   // Store marker elements for updating active state without recreating
   const markerElementsRef = useRef(new Map()) // curveId -> { element, curve }
+  // Track the curve IDs we've created markers for to avoid unnecessary recreation
+  const createdCurveIdsRef = useRef(new Set())
 
-  // Create curve markers - only when curves change, NOT when activeCurve changes
+  // Create curve markers - only when the ACTUAL curves change (not just distance updates)
+  // We use a stable comparison based on curve IDs to avoid recreation
   useEffect(() => {
     if (!map.current || !mapLoaded) return
+
+    const curvesToShow = routeData?.curves || []
+    
+    // Check if we actually need to recreate markers
+    // Only recreate if the set of curve IDs has changed
+    const newCurveIds = new Set(curvesToShow.map(c => c.id))
+    const existingIds = createdCurveIdsRef.current
+    
+    const sameMarkers = newCurveIds.size === existingIds.size && 
+      [...newCurveIds].every(id => existingIds.has(id))
+    
+    if (sameMarkers && curveMarkers.current.length > 0) {
+      // Markers already exist for these curves, skip recreation
+      return
+    }
+
+    console.log('🗺️ Creating curve markers:', curvesToShow.length, 'curves')
 
     // Clear existing markers
     curveMarkers.current.forEach(m => m.remove())
     curveMarkers.current = []
     markerElementsRef.current.clear()
+    createdCurveIdsRef.current.clear()
 
-    const curvesToShow = routeData?.curves || []
     if (curvesToShow.length === 0) return
 
     curvesToShow.forEach((curve) => {
@@ -494,6 +516,7 @@ export default function Map() {
       
       curveMarkers.current.push(marker)
       markerElementsRef.current.set(curve.id, { element: el, curve, color })
+      createdCurveIdsRef.current.add(curve.id)
     })
   }, [routeData?.curves, mapLoaded])
 
