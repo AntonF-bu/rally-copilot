@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v8 - CarPlay/Bluetooth Fix
+// Speech Hook v9 - Sweeper Support
 // Uses Audio element (routes through CarPlay) with ElevenLabs
 // Falls back to native speech only when offline
+// NEW: Sweeper callout generation and preloading
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
@@ -269,21 +270,45 @@ export function useSpeech() {
   }
 }
 
-// Quick pre-load - just essential callouts
+// ================================
+// Pre-load essential callouts including sweepers
+// ================================
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   const essentialCallouts = [
-    'Left 2', 'Left 3', 'Left 4', 'Left 5', 'Left 6',
-    'Right 2', 'Right 3', 'Right 4', 'Right 5', 'Right 6',
+    // Regular curves
+    'Left 1', 'Left 2', 'Left 3', 'Left 4', 'Left 5', 'Left 6',
+    'Right 1', 'Right 2', 'Right 3', 'Right 4', 'Right 5', 'Right 6',
     'Left 2 long', 'Right 2 long',
     'Left 3 ahead', 'Right 3 ahead',
     'Left 4 ahead', 'Right 4 ahead',
-    'Chicane', 'S curve'
+    'Left 5 ahead', 'Right 5 ahead',
+    'Chicane', 'S curve',
+    
+    // NEW: Sweeper callouts (common angles for highways)
+    'Sweeper left, 5 degrees',
+    'Sweeper right, 5 degrees',
+    'Sweeper left, 8 degrees',
+    'Sweeper right, 8 degrees',
+    'Sweeper left, 10 degrees',
+    'Sweeper right, 10 degrees',
+    'Sweeper left, 12 degrees',
+    'Sweeper right, 12 degrees',
+    'Sweeper left, 15 degrees',
+    'Sweeper right, 15 degrees',
+    'Sweeper left, 18 degrees',
+    'Sweeper right, 18 degrees',
+    'Sweeper left, 20 degrees',
+    'Sweeper right, 20 degrees',
+    'Sweeper left, 22 degrees',
+    'Sweeper right, 22 degrees',
+    'Sweeper left, 25 degrees',
+    'Sweeper right, 25 degrees',
   ]
   
   let cached = 0
   const total = essentialCallouts.length
   
-  console.log(`🔊 Pre-caching ${total} essential callouts...`)
+  console.log(`🔊 Pre-caching ${total} essential callouts (including sweepers)...`)
   
   for (const text of essentialCallouts) {
     try {
@@ -318,9 +343,38 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
   return { success: true, cached, total }
 }
 
+// ================================
 // Callout generators
+// ================================
+
+/**
+ * Generate callout text for a curve
+ * NEW: Handles sweepers with angle
+ */
 export function generateCallout(curve) {
   if (!curve) return null
+  
+  // NEW: Handle sweepers - "Sweeper right, 15 degrees"
+  if (curve.isSweeper) {
+    const dir = curve.direction === 'LEFT' ? 'left' : 'right'
+    const angle = curve.sweeperAngle || curve.totalAngle || 10
+    return `Sweeper ${dir}, ${angle} degrees`
+  }
+  
+  // Handle chicanes
+  if (curve.isChicane) {
+    const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
+    const type = curve.chicaneType === 'CHICANE' ? 'Chicane' : 'S curve'
+    return `${type} ${firstDir} ${curve.severitySequence || ''}`
+  }
+  
+  // Handle technical sections
+  if (curve.isTechnicalSection) {
+    const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+    return `Technical section ${dir}, ${curve.curveCount} curves`
+  }
+  
+  // Regular curve
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
   let text = `${dir} ${curve.severity}`
   if (curve.modifier) {
@@ -330,10 +384,20 @@ export function generateCallout(curve) {
   return text
 }
 
+/**
+ * Generate final warning for hard curves
+ */
 export function generateFinalWarning(curve) {
   if (!curve) return null
+  
+  // Sweepers don't need final warnings - they're gentle
+  if (curve.isSweeper) return null
+  
+  // Only for severity 5+
+  if (curve.severity < 5) return null
+  
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
-  return curve.severity >= 5 ? `${dir} now` : null
+  return `${dir} now`
 }
 
 export function generateStraightCallout() { return null }
