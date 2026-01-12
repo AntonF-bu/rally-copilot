@@ -33,6 +33,12 @@ export default function Map() {
   const isAnimatingRef = useRef(false)
   // NEW: Ref to track if route has been added
   const routeAddedRef = useRef(false)
+  // Track the curve IDs we've created markers for to avoid unnecessary recreation
+  const createdCurveIdsRef = useRef(new Set())
+  // Store marker elements for updating active state without recreating
+  const markerElementsRef = useRef(new Map()) // curveId -> { element, curve }
+  // Track last active curve to avoid unnecessary updates
+  const lastActiveCurveIdRef = useRef(null)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
@@ -442,11 +448,6 @@ export default function Map() {
     })
   }, [position, heading, routeData])
 
-  // Store marker elements for updating active state without recreating
-  const markerElementsRef = useRef(new Map()) // curveId -> { element, curve }
-  // Track the curve IDs we've created markers for to avoid unnecessary recreation
-  const createdCurveIdsRef = useRef(new Set())
-
   // Create curve markers - only when the ACTUAL curves change (not just distance updates)
   // We use a stable comparison based on curve IDs to avoid recreation
   useEffect(() => {
@@ -521,8 +522,6 @@ export default function Map() {
   }, [routeData?.curves, mapLoaded])
 
   // Update active curve styling - runs frequently but doesn't recreate markers
-  const lastActiveCurveIdRef = useRef(null)
-  
   useEffect(() => {
     const newActiveId = activeCurve?.id || null
     const oldActiveId = lastActiveCurveIdRef.current
