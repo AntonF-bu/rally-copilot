@@ -74,6 +74,7 @@ const COACHING_TEMPLATES = {
 
 // Silence breaker chatter pool (for Companion mode)
 const SILENCE_BREAKERS = [
+  // Classic co-driver
   'All clear ahead',
   'Smooth stretch coming up',
   'Road\'s looking good',
@@ -82,7 +83,26 @@ const SILENCE_BREAKERS = [
   'Open road ahead',
   'Cruising',
   'Highway\'s clear',
-  'Smooth sailing'
+  'Smooth sailing',
+  // More engaging
+  'Looking good, stay focused',
+  'Easy does it',
+  'Nice pace',
+  'Keep it steady',
+  'You\'ve got this',
+  'Holding strong',
+  'Good rhythm',
+  // Gamified
+  'Clean run so far',
+  'No drama, I like it',
+  'Textbook driving',
+  'Making good time',
+  'Efficient',
+  // Slightly playful
+  'Nothing exciting here... yet',
+  'Boring is good sometimes',
+  'Autopilot engaged... just kidding, stay alert',
+  'Long straight, don\'t zone out'
 ]
 
 // After-sweeper feedback (Companion mode)
