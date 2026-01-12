@@ -3,21 +3,18 @@ import useStore from './store'
 import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useRouteAnalysis } from './hooks/useRouteAnalysis'
-import { useSpeech, generateCallout, generateFinalWarning, generateStraightCallout } from './hooks/useSpeech'
-import { getBehaviorForCurve, shouldAnnounceCurve, CHARACTER_COLORS, ROUTE_CHARACTER } from './services/zoneService'
+import { useSpeech } from './hooks/useSpeech'
+import { ROUTE_CHARACTER } from './services/zoneService'
 
-// Import callout engine
 import { 
   DRIVING_MODE,
   getWarningDistances, 
-  shouldCallClear,
-  generateModeCallout,
-  generateChicaneCallout,
-  generateClearCallout,
-  shouldAnnounceCurveInMode
+  shouldAnnounceCurve,
+  generateCallout,
+  generateEarlyWarning,
+  generateFinalWarning,
+  VOICE_CONFIG
 } from './services/calloutEngine'
-
-import { getVoiceParamsForMode, getSpeechRate } from './services/voiceParams'
 
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
@@ -30,8 +27,8 @@ import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 
 // ================================
-// Rally Co-Pilot App - v17
-// FIXED: Better callout triggering, removed clear callouts
+// Rally Co-Pilot App - v18
+// SIMPLIFIED: Reliable callouts with native speech
 // ================================
 
 const CHARACTER_TO_MODE = {
@@ -41,15 +38,8 @@ const CHARACTER_TO_MODE = {
   [ROUTE_CHARACTER.URBAN]: DRIVING_MODE.URBAN
 }
 
-const MODE_TO_VOICE_STYLE = {
-  [DRIVING_MODE.HIGHWAY]: 'relaxed',
-  [DRIVING_MODE.SPIRITED]: 'normal',
-  [DRIVING_MODE.TECHNICAL]: 'urgent',
-  [DRIVING_MODE.URBAN]: 'normal'
-}
-
 export default function App() {
-  const { speak, setVoiceStyle } = useSpeech()
+  const { speak } = useSpeech()
   
   const {
     isRunning,
@@ -75,20 +65,14 @@ export default function App() {
     goToEditor,
   } = useStore()
 
-  // Callout tracking
-  const earlyWarningsRef = useRef(new Set())
-  const mainCalloutsRef = useRef(new Set())
-  const finalWarningsRef = useRef(new Set())
-  const lastCalloutTimeRef = useRef(0)
-  const lastZoneCalloutTimeRef = useRef(0)
-  const lastTripUpdateRef = useRef(0)
-  const announcedCurvesRef = useRef(new Set())
-  const lastCalloutLogRef = useRef(0)
+  // Simple tracking
+  const announcedRef = useRef(new Set())  // Curves that got main callout
+  const earlyRef = useRef(new Set())      // Curves that got early warning
+  const finalRef = useRef(new Set())      // Curves that got final warning
+  const lastCalloutRef = useRef(0)
+  const lastLogRef = useRef(0)
   
-  const currentZoneRef = useRef(null)
-  const zoneTransitionAnnouncedRef = useRef(new Set())
-  
-  const [currentDrivingMode, setCurrentDrivingMode] = useState(DRIVING_MODE.SPIRITED)
+  const [currentMode, setCurrentMode] = useState(DRIVING_MODE.SPIRITED)
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -98,202 +82,155 @@ export default function App() {
   const currentSpeed = getDisplaySpeed()
   const speedUnit = settings.units === 'metric' ? 'kmh' : 'mph'
 
-  // Reset tracking on route change
+  // Reset on route change
   useEffect(() => {
-    console.log('🔄 Route changed - resetting callout tracking')
-    earlyWarningsRef.current = new Set()
-    mainCalloutsRef.current = new Set()
-    finalWarningsRef.current = new Set()
-    zoneTransitionAnnouncedRef.current = new Set()
-    currentZoneRef.current = null
-    lastCalloutTimeRef.current = Date.now() - 10000
-    announcedCurvesRef.current = new Set()
+    announcedRef.current = new Set()
+    earlyRef.current = new Set()
+    finalRef.current = new Set()
+    lastCalloutRef.current = 0
   }, [routeMode, routeData])
 
+  // Reset on navigation start
   useEffect(() => {
     if (isRunning) {
-      console.log(`🚀 Navigation started - mode: ${routeMode}`)
-      earlyWarningsRef.current = new Set()
-      mainCalloutsRef.current = new Set()
-      finalWarningsRef.current = new Set()
-      lastCalloutTimeRef.current = Date.now() - 10000
+      console.log('🚀 Navigation started')
+      announcedRef.current = new Set()
+      earlyRef.current = new Set()
+      finalRef.current = new Set()
+      lastCalloutRef.current = Date.now() - 5000
     }
-  }, [isRunning, routeMode])
+  }, [isRunning])
 
-  // Trip stats
+  // Detect mode from zones
   useEffect(() => {
-    if (!isRunning) return
+    if (!isRunning || !routeZones?.length || !upcomingCurves?.[0]) return
     
-    const now = Date.now()
-    if (now - lastTripUpdateRef.current < 500) return
-    lastTripUpdateRef.current = now
-    
-    let passedCurve = null
-    if (upcomingCurves.length > 0) {
-      const firstCurve = upcomingCurves[0]
-      if (firstCurve.distance < 20 && 
-          mainCalloutsRef.current.has(firstCurve.id) && 
-          !announcedCurvesRef.current.has(firstCurve.id)) {
-        passedCurve = firstCurve
-        announcedCurvesRef.current.add(firstCurve.id)
-      }
-    }
-    
-    updateTripStats(position, speed, passedCurve)
-  }, [isRunning, position, speed, upcomingCurves, updateTripStats])
-
-  // Zone detection
-  useEffect(() => {
-    if (!isRunning || !routeZones?.length || !position) return
-    
-    const nextCurve = upcomingCurves[0]
-    if (!nextCurve) return
-    
-    const curveDistance = nextCurve.distanceFromStart || 0
-    const currentZone = routeZones.find(z => 
+    const curveDistance = upcomingCurves[0].distanceFromStart || 0
+    const zone = routeZones.find(z => 
       curveDistance >= z.startDistance && curveDistance <= z.endDistance
     )
     
-    if (!currentZone) return
-    
-    const newMode = CHARACTER_TO_MODE[currentZone.character] || DRIVING_MODE.SPIRITED
-    
-    if (newMode !== currentDrivingMode) {
-      console.log(`🎯 Mode changed: ${currentDrivingMode} → ${newMode}`)
-      setCurrentDrivingMode(newMode)
-      
-      const voiceStyle = MODE_TO_VOICE_STYLE[newMode]
-      if (setVoiceStyle) setVoiceStyle(voiceStyle)
-    }
-    
-    const zoneId = currentZone.id
-    if (currentZoneRef.current !== zoneId && !zoneTransitionAnnouncedRef.current.has(zoneId)) {
-      const now = Date.now()
-      if (now - lastZoneCalloutTimeRef.current > 3000) {
-        const transitionCallout = getZoneTransitionCallout(currentZone.character)
-        if (transitionCallout && settings.voiceEnabled) {
-          speak(transitionCallout, 'normal')
-          lastZoneCalloutTimeRef.current = now
-          console.log(`📢 Zone: ${transitionCallout}`)
-        }
-        zoneTransitionAnnouncedRef.current.add(zoneId)
+    if (zone) {
+      const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.SPIRITED
+      if (newMode !== currentMode) {
+        console.log(`🎯 Mode: ${newMode}`)
+        setCurrentMode(newMode)
       }
-      currentZoneRef.current = zoneId
     }
-    
-  }, [isRunning, routeZones, upcomingCurves, position, currentDrivingMode, settings.voiceEnabled, speak, setVoiceStyle])
+  }, [isRunning, routeZones, upcomingCurves, currentMode])
 
   // ================================
-  // MAIN CALLOUT LOGIC - v17
+  // MAIN CALLOUT LOGIC - SIMPLIFIED
   // ================================
   
   useEffect(() => {
-    if (!isRunning || !settings.voiceEnabled) return
-    
-    if (upcomingCurves.length === 0) {
-      const now = Date.now()
-      if (now - lastCalloutLogRef.current > 5000) {
-        lastCalloutLogRef.current = now
-        console.log('⚠️ No upcoming curves')
-      }
+    if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
       return
     }
 
     const now = Date.now()
-    const nextCurve = upcomingCurves[0]
-    if (!nextCurve) return
+    const curve = upcomingCurves[0]
+    if (!curve) return
     
-    const distanceMeters = nextCurve.distance
-    const curveId = nextCurve.id
+    const distance = curve.distance // meters
+    const curveId = curve.id
     
-    // Get timing thresholds
-    const distances = getWarningDistances(currentDrivingMode, currentSpeed, currentSpeed)
+    // Get speed-adjusted distances
+    const thresholds = getWarningDistances(currentMode, currentSpeed)
     
     // Minimum pause between callouts
-    const minPause = isDemoMode ? 800 : 1200
-    const timeSinceLastCallout = now - lastCalloutTimeRef.current
-    
-    if (timeSinceLastCallout < minPause) {
+    const minPause = VOICE_CONFIG[currentMode]?.minPauseBetween || 1500
+    if (now - lastCalloutRef.current < minPause) {
       return
     }
     
-    // Log status every 2 seconds
-    if (now - lastCalloutLogRef.current > 2000) {
-      lastCalloutLogRef.current = now
-      const distFeet = Math.round(distanceMeters * 3.28084)
-      console.log(`🎯 Curve ${curveId}: ${nextCurve.direction} ${nextCurve.severity} @ ${Math.round(distanceMeters)}m (${distFeet}ft)`)
-      console.log(`   Thresholds: early=${Math.round(distances.early)}m, main=${Math.round(distances.main)}m`)
-      console.log(`   Announced: early=${earlyWarningsRef.current.has(curveId)}, main=${mainCalloutsRef.current.has(curveId)}`)
+    // Log status every 3 seconds
+    if (now - lastLogRef.current > 3000) {
+      lastLogRef.current = now
+      console.log(`📍 Curve ${curveId}: ${curve.direction} ${curve.severity} @ ${Math.round(distance)}m`)
+      console.log(`   Speed: ${Math.round(currentSpeed)}mph | Mode: ${currentMode}`)
+      console.log(`   Thresholds: early=${thresholds.early}m, main=${thresholds.main}m`)
+      console.log(`   Announced: ${announcedRef.current.has(curveId)}`)
     }
     
-    // Check if curve should be announced
-    const shouldAnnounce = shouldAnnounceCurveInMode(currentDrivingMode, nextCurve)
-    
-    if (!shouldAnnounce) {
-      // Skip this curve but don't log every time
+    // Skip if curve shouldn't be announced
+    if (!shouldAnnounceCurve(currentMode, curve)) {
       return
     }
 
-    const isHardCurve = nextCurve.severity >= 4
-
-    // EARLY WARNING (severity 4+ only)
-    if (isHardCurve && 
-        distanceMeters <= distances.early && 
-        distanceMeters > distances.main &&
-        !earlyWarningsRef.current.has(curveId)) {
+    // ================================
+    // EARLY WARNING (hard curves, severity 4+)
+    // ================================
+    if (curve.severity >= 4 &&
+        distance <= thresholds.early && 
+        distance > thresholds.main &&
+        !earlyRef.current.has(curveId)) {
       
-      const callout = generateModeCallout(currentDrivingMode, nextCurve, 'early', { speedUnit })
-      if (callout) {
-        console.log(`🔊 EARLY: "${callout}" @ ${Math.round(distanceMeters)}m`)
-        speak(callout, 'normal')
-        earlyWarningsRef.current.add(curveId)
-        lastCalloutTimeRef.current = now
+      const text = generateEarlyWarning(currentMode, curve)
+      if (text) {
+        console.log(`🔊 EARLY: "${text}" @ ${Math.round(distance)}m`)
+        speak(text, 'high')
+        earlyRef.current.add(curveId)
+        lastCalloutRef.current = now
+        return
       }
-      return
     }
 
+    // ================================
     // MAIN CALLOUT
-    const hasBeenAnnounced = mainCalloutsRef.current.has(curveId)
-    const inMainWindow = distanceMeters <= distances.main && distanceMeters > distances.final
-    const jumpedPast = distanceMeters <= distances.final && !hasBeenAnnounced && distanceMeters > 0
-    
-    if ((inMainWindow || jumpedPast) && !hasBeenAnnounced) {
-      let callout
+    // ================================
+    if (distance <= thresholds.main && 
+        distance > thresholds.final &&
+        !announcedRef.current.has(curveId)) {
       
-      if (nextCurve.isChicane) {
-        callout = generateChicaneCallout(currentDrivingMode, nextCurve, 'main')
-      } else {
-        callout = generateModeCallout(currentDrivingMode, nextCurve, 'main', { speedUnit })
-      }
-      
-      if (callout) {
-        mainCalloutsRef.current.add(curveId)
+      const text = generateCallout(currentMode, curve)
+      if (text) {
+        console.log(`🔊 MAIN: "${text}" @ ${Math.round(distance)}m`)
+        speak(text, 'high')
+        announcedRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
-        lastCalloutTimeRef.current = now
-        
-        console.log(`🔊 MAIN: "${callout}" @ ${Math.round(distanceMeters)}m`)
-        speak(callout, 'high')
+        lastCalloutRef.current = now
         
         if (settings.hapticFeedback && 'vibrate' in navigator) {
-          navigator.vibrate(nextCurve.severity >= 5 ? [100, 50, 100] : [50])
+          navigator.vibrate(curve.severity >= 5 ? [100, 50, 100] : [50])
         }
+        return
       }
-      return
+    }
+    
+    // ================================
+    // CATCH-UP: If we somehow missed the main window
+    // ================================
+    if (distance <= thresholds.final && 
+        distance > 10 &&
+        !announcedRef.current.has(curveId)) {
+      
+      const text = generateCallout(currentMode, curve)
+      if (text) {
+        console.log(`🔊 CATCH-UP: "${text}" @ ${Math.round(distance)}m`)
+        speak(text, 'high')
+        announcedRef.current.add(curveId)
+        setLastAnnouncedCurveId(curveId)
+        lastCalloutRef.current = now
+        return
+      }
     }
 
+    // ================================
     // FINAL WARNING (severity 5+ only)
-    if (nextCurve.severity >= 5 &&
-        distanceMeters <= distances.final && 
-        distanceMeters > 10 &&
-        mainCalloutsRef.current.has(curveId) &&
-        !finalWarningsRef.current.has(curveId)) {
+    // ================================
+    if (curve.severity >= 5 &&
+        distance <= thresholds.final && 
+        distance > 10 &&
+        announcedRef.current.has(curveId) &&
+        !finalRef.current.has(curveId)) {
       
-      const callout = generateModeCallout(currentDrivingMode, nextCurve, 'final', { speedUnit })
-      if (callout) {
-        console.log(`🔊 FINAL: "${callout}" @ ${Math.round(distanceMeters)}m`)
-        speak(callout, 'high')
-        finalWarningsRef.current.add(curveId)
-        lastCalloutTimeRef.current = now
+      const text = generateFinalWarning(currentMode, curve)
+      if (text) {
+        console.log(`🔊 FINAL: "${text}" @ ${Math.round(distance)}m`)
+        speak(text, 'high')
+        finalRef.current.add(curveId)
+        lastCalloutRef.current = now
         
         if (settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate([150])
@@ -301,48 +238,43 @@ export default function App() {
       }
     }
 
-  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentDrivingMode, speedUnit, isDemoMode])
+  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode])
 
   // Cleanup passed curves
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
-    const upcomingIds = new Set(upcomingCurves.map(c => c.id))
+    const currentIds = new Set(upcomingCurves.map(c => c.id))
     
-    ;[earlyWarningsRef, mainCalloutsRef, finalWarningsRef].forEach(ref => {
+    // Remove curves that are no longer upcoming
+    ;[announcedRef, earlyRef, finalRef].forEach(ref => {
       ref.current.forEach(id => {
-        if (!upcomingIds.has(id)) ref.current.delete(id)
+        if (!currentIds.has(id)) ref.current.delete(id)
       })
     })
   }, [isRunning, upcomingCurves])
 
   // Navigation handlers
   const handleStartNavigation = () => {
-    earlyWarningsRef.current = new Set()
-    mainCalloutsRef.current = new Set()
-    finalWarningsRef.current = new Set()
-    zoneTransitionAnnouncedRef.current = new Set()
-    currentZoneRef.current = null
-    lastCalloutTimeRef.current = Date.now() - 10000
-    console.log('🚀 Navigation started')
+    announcedRef.current = new Set()
+    earlyRef.current = new Set()
+    finalRef.current = new Set()
+    lastCalloutRef.current = Date.now() - 5000
+    console.log('🚀 Starting navigation')
     goToDriving()
   }
 
-  const handleGoToPreview = () => goToPreview()
-  const handleGoToMenu = () => { clearRouteData(); goToMenu() }
-  const handleGoToEditor = () => goToEditor()
-
   // Render
   if (showRouteSelector) {
-    return <RouteSelector onRouteSelected={handleGoToPreview} />
+    return <RouteSelector onRouteSelected={goToPreview} />
   }
 
   if (showRoutePreview) {
     return (
       <RoutePreview 
         onStartNavigation={handleStartNavigation} 
-        onBack={handleGoToMenu}
-        onEdit={handleGoToEditor}
+        onBack={() => { clearRouteData(); goToMenu() }}
+        onEdit={goToEditor}
       />
     )
   }
@@ -350,33 +282,23 @@ export default function App() {
   if (showRouteEditor) {
     return (
       <RouteEditor
-        onBack={handleGoToPreview}
-        onSave={handleGoToPreview}
+        onBack={goToPreview}
+        onSave={goToPreview}
       />
     )
   }
 
   if (showTripSummary) {
-    return <TripSummary onClose={handleGoToMenu} />
+    return <TripSummary onClose={() => { clearRouteData(); goToMenu() }} />
   }
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <Map />
-      <CalloutOverlay currentDrivingMode={currentDrivingMode} />
+      <CalloutOverlay currentDrivingMode={currentMode} />
       <BottomBar />
       <SettingsPanel />
       <VoiceIndicator />
     </div>
   )
-}
-
-function getZoneTransitionCallout(character) {
-  const callouts = {
-    [ROUTE_CHARACTER.TECHNICAL]: 'Technical section ahead',
-    [ROUTE_CHARACTER.TRANSIT]: 'Highway ahead, relax',
-    [ROUTE_CHARACTER.SPIRITED]: 'Back to spirited',
-    [ROUTE_CHARACTER.URBAN]: 'Urban zone'
-  }
-  return callouts[character] || null
 }
