@@ -4,8 +4,10 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v14
-// FIXED: Route line stays visible during navigation
+// Map Component - v15
+// FIXED: Route line now shows during navigation
+// Issue was stale closure in map.on('load') callback
+// Solution: Use ref for routeData and call addRoute in useEffect
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -29,6 +31,8 @@ export default function Map() {
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
+  // NEW: Ref to track if route has been added
+  const routeAddedRef = useRef(false)
   
   const [mapLoaded, setMapLoaded] = useState(false)
   const [showRecenter, setShowRecenter] = useState(false)
@@ -44,18 +48,24 @@ export default function Map() {
     routeData,
   } = useStore()
 
+  // NEW: Keep routeData in a ref for access in callbacks
+  const routeDataRef = useRef(routeData)
+  useEffect(() => {
+    routeDataRef.current = routeData
+  }, [routeData])
+
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
   // Build severity segments for route coloring
-  const buildSeveritySegments = useCallback((coordinates, curves) => {
+  const buildSeveritySegments = useCallback((coordinates, curves, totalDistance) => {
     if (!coordinates?.length) return []
     if (!curves?.length) {
       return [{ coords: coordinates, color: '#22c55e' }]
     }
 
     const segments = []
-    const totalDist = routeData?.distance || 15000
+    const totalDist = totalDistance || 15000
     let lastIdx = 0
     
     const sortedCurves = [...curves].sort((a, b) => 
@@ -98,16 +108,23 @@ export default function Map() {
     }
     
     return segments
-  }, [routeData?.distance])
+  }, [])
 
-  // Add route to map
-  const addRouteToMap = useCallback(() => {
-    if (!map.current || !routeData?.coordinates?.length) {
-      console.log('🗺️ addRouteToMap: No map or routeData', { hasMap: !!map.current, hasCoords: !!routeData?.coordinates?.length })
-      return
+  // Add route to map - now takes routeData as parameter to avoid stale closures
+  const addRouteToMap = useCallback((routeDataParam) => {
+    const data = routeDataParam || routeDataRef.current
+    
+    if (!map.current) {
+      console.log('🗺️ addRouteToMap: No map instance')
+      return false
     }
     
-    console.log('🗺️ Adding route to map...', routeData.coordinates.length, 'points')
+    if (!data?.coordinates?.length) {
+      console.log('🗺️ addRouteToMap: No route coordinates', { hasData: !!data })
+      return false
+    }
+    
+    console.log('🗺️ Adding route to map...', data.coordinates.length, 'points')
     
     try {
       // Clear any existing route layers
@@ -128,7 +145,7 @@ export default function Map() {
         data: {
           type: 'Feature',
           properties: {},
-          geometry: { type: 'LineString', coordinates: routeData.coordinates }
+          geometry: { type: 'LineString', coordinates: data.coordinates }
         }
       })
       
@@ -146,7 +163,7 @@ export default function Map() {
       routeLayersRef.current.push(outlineSourceId, outlineLayerId)
 
       // Add severity-colored segments
-      const segments = buildSeveritySegments(routeData.coordinates, routeData.curves)
+      const segments = buildSeveritySegments(data.coordinates, data.curves, data.distance)
       
       segments.forEach((segment, i) => {
         if (segment.coords.length < 2) return
@@ -195,17 +212,22 @@ export default function Map() {
       })
 
       console.log(`🗺️ Route added: ${segments.length} segments, ${routeLayersRef.current.length} layers`)
+      routeAddedRef.current = true
+      return true
       
     } catch (e) {
       console.error('Route rendering error:', e)
+      return false
     }
-  }, [routeData, buildSeveritySegments])
+  }, [buildSeveritySegments])
 
-  // Initialize map
+  // Initialize map - only creates the map, doesn't add route
   useEffect(() => {
     if (map.current) return
 
-    const startCoord = routeData?.coordinates?.[0] || [-71.0589, 42.3601]
+    const startCoord = routeDataRef.current?.coordinates?.[0] || [-71.0589, 42.3601]
+
+    console.log('🗺️ Initializing map at', startCoord)
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -219,7 +241,6 @@ export default function Map() {
 
     map.current.on('load', () => {
       console.log('🗺️ Map loaded')
-      setMapLoaded(true)
       
       // Add terrain
       try {
@@ -244,8 +265,9 @@ export default function Map() {
         console.log('Terrain setup error:', e)
       }
       
-      // Add route immediately when map loads
-      addRouteToMap()
+      // Set mapLoaded AFTER terrain is set up
+      // Route will be added by the useEffect that watches mapLoaded + routeData
+      setMapLoaded(true)
     })
 
     // User interaction handlers
@@ -261,28 +283,48 @@ export default function Map() {
     return () => {
       map.current?.remove()
       map.current = null
+      routeAddedRef.current = false
     }
   }, [])
 
-  // Add route when routeData changes (and map is loaded)
+  // CRITICAL: Add route when BOTH map is loaded AND routeData is available
   useEffect(() => {
-    if (!mapLoaded || !routeData?.coordinates?.length) {
-      console.log('🗺️ Route effect: Waiting for map/data', { mapLoaded, hasCoords: !!routeData?.coordinates?.length })
+    console.log('🗺️ Route effect triggered', { 
+      mapLoaded, 
+      hasRouteData: !!routeData?.coordinates?.length,
+      routeAddedAlready: routeAddedRef.current 
+    })
+    
+    if (!mapLoaded) {
+      console.log('🗺️ Route effect: Map not loaded yet')
       return
     }
     
-    console.log('🗺️ Route effect: Adding route now')
-    addRouteToMap()
+    if (!routeData?.coordinates?.length) {
+      console.log('🗺️ Route effect: No route data yet')
+      return
+    }
     
-    // Fit bounds to show full route initially
-    if (!isRunning) {
-      const bounds = routeData.coordinates.reduce(
-        (b, c) => b.extend(c),
-        new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
-      )
-      map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
+    // Always try to add route when routeData changes (handles re-renders and new routes)
+    console.log('🗺️ Route effect: Adding route now')
+    const success = addRouteToMap(routeData)
+    
+    if (success) {
+      // Fit bounds to show full route initially (only when not running)
+      if (!isRunning) {
+        const bounds = routeData.coordinates.reduce(
+          (b, c) => b.extend(c),
+          new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
+        )
+        map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
+      }
     }
   }, [routeData, mapLoaded, addRouteToMap, isRunning])
+
+  // Reset route added flag when routeData changes (new route)
+  useEffect(() => {
+    routeAddedRef.current = false
+  }, [routeData?.coordinates])
 
   // Create user marker
   useEffect(() => {
@@ -436,18 +478,18 @@ export default function Map() {
               <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
             </svg>
             <span style="font-size: 14px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severity}</span>
-            ${curve.modifier ? `<span style="font-size: 9px; color: ${isActive ? 'white' : color}; opacity: 0.8;">${curve.modifier}</span>` : ''}
+            ${curve.modifier ? `<span style="font-size: 9px; color: ${isActive ? 'white' : color}80;">${curve.modifier}</span>` : ''}
           </div>
         `
       }
-      
+
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat(curve.position)
         .addTo(map.current)
       
       curveMarkers.current.push(marker)
     })
-  }, [routeData?.curves, mapLoaded, activeCurve])
+  }, [routeData?.curves, activeCurve, mapLoaded])
 
   return (
     <div className="absolute inset-0">
@@ -457,14 +499,20 @@ export default function Map() {
       {showRecenter && (
         <button
           onClick={handleRecenter}
-          className="absolute bottom-36 right-4 z-30 w-12 h-12 bg-black/80 backdrop-blur rounded-full flex items-center justify-center border border-white/20 shadow-lg"
-          style={{ boxShadow: `0 4px 20px ${modeColor}30` }}
+          className="absolute bottom-32 right-4 w-12 h-12 bg-black/80 rounded-full flex items-center justify-center border border-white/20 shadow-lg active:scale-95 transition-transform"
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
         </button>
+      )}
+      
+      {/* Debug info - remove in production */}
+      {!mapLoaded && (
+        <div className="absolute top-20 left-4 bg-black/80 text-white text-xs p-2 rounded">
+          Loading map...
+        </div>
       )}
     </div>
   )
