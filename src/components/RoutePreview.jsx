@@ -681,13 +681,29 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
-  // Add curve markers
+  // Helper: Check if a distance is within a transit zone
+  const isInTransitZone = useCallback((distance) => {
+    if (!routeCharacter.segments?.length) return false
+    return routeCharacter.segments.some(seg => 
+      seg.character === 'transit' && 
+      distance >= seg.startDistance && 
+      distance <= seg.endDistance
+    )
+  }, [routeCharacter.segments])
+
+  // Add curve markers - SKIP curves in transit zones (highway system handles those)
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
     
     curves?.forEach(curve => {
       if (!curve.position) return
+      
+      // Skip curves in transit/highway zones - the highway bend system handles those
+      if (isInTransitZone(curve.distanceFromStart)) {
+        return
+      }
+      
       const color = getCurveColor(curve.severity)
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
@@ -700,7 +716,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       el.onclick = () => handleCurveClick(curve)
       markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(map))
     })
-  }, [])
+  }, [isInTransitZone])
 
   // NEW: Add highway bend markers
   const addHighwayBendMarkers = useCallback((map, bends) => {
