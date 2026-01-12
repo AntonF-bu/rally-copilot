@@ -27,8 +27,8 @@ import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 
 // ================================
-// Rally Co-Pilot App - v18
-// SIMPLIFIED: Reliable callouts with native speech
+// Rally Co-Pilot App - v19
+// FIXED: Announces all curves, correct chicane direction
 // ================================
 
 const CHARACTER_TO_MODE = {
@@ -60,19 +60,20 @@ export default function App() {
     clearRouteData,
     position,
     speed,
-    updateTripStats,
     showRouteEditor,
     goToEditor,
   } = useStore()
 
-  // Simple tracking
-  const announcedRef = useRef(new Set())  // Curves that got main callout
-  const earlyRef = useRef(new Set())      // Curves that got early warning
-  const finalRef = useRef(new Set())      // Curves that got final warning
+  // Tracking
+  const announcedRef = useRef(new Set())
+  const earlyRef = useRef(new Set())
+  const finalRef = useRef(new Set())
   const lastCalloutRef = useRef(0)
   const lastLogRef = useRef(0)
+  const lastZoneAnnouncedRef = useRef(null)
   
-  const [currentMode, setCurrentMode] = useState(DRIVING_MODE.SPIRITED)
+  const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
+  const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -80,17 +81,17 @@ export default function App() {
   useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
-  const speedUnit = settings.units === 'metric' ? 'kmh' : 'mph'
 
-  // Reset on route change
+  // Reset on route/navigation change
   useEffect(() => {
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
     lastCalloutRef.current = 0
+    lastZoneAnnouncedRef.current = null
+    setUserDistanceAlongRoute(0)
   }, [routeMode, routeData])
 
-  // Reset on navigation start
   useEffect(() => {
     if (isRunning) {
       console.log('🚀 Navigation started')
@@ -98,29 +99,73 @@ export default function App() {
       earlyRef.current = new Set()
       finalRef.current = new Set()
       lastCalloutRef.current = Date.now() - 5000
+      lastZoneAnnouncedRef.current = null
     }
   }, [isRunning])
 
-  // Detect mode from zones
+  // Calculate user's distance along route from position
   useEffect(() => {
-    if (!isRunning || !routeZones?.length || !upcomingCurves?.[0]) return
+    if (!isRunning || !position || !routeData?.coordinates) return
     
-    const curveDistance = upcomingCurves[0].distanceFromStart || 0
+    // In demo mode, use simulationProgress
+    if (isDemoMode) {
+      const totalDist = routeData.distance || 15000
+      setUserDistanceAlongRoute(useStore.getState().simulationProgress * totalDist)
+      return
+    }
+    
+    // In live GPS mode, calculate from position
+    const coords = routeData.coordinates
+    let minDist = Infinity
+    let closestIdx = 0
+    
+    for (let i = 0; i < coords.length; i++) {
+      const dx = coords[i][0] - position[0]
+      const dy = coords[i][1] - position[1]
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist < minDist) {
+        minDist = dist
+        closestIdx = i
+      }
+    }
+    
+    // Estimate distance along route
+    const totalDist = routeData.distance || 15000
+    const distanceAlong = (closestIdx / coords.length) * totalDist
+    setUserDistanceAlongRoute(distanceAlong)
+    
+  }, [isRunning, position, routeData, isDemoMode])
+
+  // Detect mode from zones using calculated distance
+  useEffect(() => {
+    if (!isRunning || !routeZones?.length) return
+    
     const zone = routeZones.find(z => 
-      curveDistance >= z.startDistance && curveDistance <= z.endDistance
+      userDistanceAlongRoute >= z.startDistance && userDistanceAlongRoute <= z.endDistance
     )
     
     if (zone) {
       const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.SPIRITED
+      
       if (newMode !== currentMode) {
-        console.log(`🎯 Mode: ${newMode}`)
+        console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
         setCurrentMode(newMode)
+        
+        // Announce zone transition (only once per zone)
+        if (lastZoneAnnouncedRef.current !== zone.id) {
+          const announcement = getZoneAnnouncement(zone.character)
+          if (announcement) {
+            console.log(`📢 Zone: "${announcement}"`)
+            speak(announcement, 'normal')
+          }
+          lastZoneAnnouncedRef.current = zone.id
+        }
       }
     }
-  }, [isRunning, routeZones, upcomingCurves, currentMode])
+  }, [isRunning, routeZones, userDistanceAlongRoute, currentMode, speak])
 
   // ================================
-  // MAIN CALLOUT LOGIC - SIMPLIFIED
+  // MAIN CALLOUT LOGIC
   // ================================
   
   useEffect(() => {
@@ -132,36 +177,37 @@ export default function App() {
     const curve = upcomingCurves[0]
     if (!curve) return
     
-    const distance = curve.distance // meters
+    const distance = curve.distance
     const curveId = curve.id
     
-    // Get speed-adjusted distances
+    // Get thresholds
     const thresholds = getWarningDistances(currentMode, currentSpeed)
     
-    // Minimum pause between callouts
-    const minPause = VOICE_CONFIG[currentMode]?.minPauseBetween || 1500
+    // Minimum pause
+    const minPause = VOICE_CONFIG[currentMode]?.minPauseBetween || 1200
     if (now - lastCalloutRef.current < minPause) {
       return
     }
     
-    // Log status every 3 seconds
+    // Log every 3 seconds
     if (now - lastLogRef.current > 3000) {
       lastLogRef.current = now
-      console.log(`📍 Curve ${curveId}: ${curve.direction} ${curve.severity} @ ${Math.round(distance)}m`)
-      console.log(`   Speed: ${Math.round(currentSpeed)}mph | Mode: ${currentMode}`)
-      console.log(`   Thresholds: early=${thresholds.early}m, main=${thresholds.main}m`)
-      console.log(`   Announced: ${announcedRef.current.has(curveId)}`)
+      const curveType = curve.isChicane ? `Chicane ${curve.startDirection}` : `${curve.direction} ${curve.severity}`
+      console.log(`📍 ${curveType} @ ${Math.round(distance)}m | Speed: ${Math.round(currentSpeed)}mph | Mode: ${currentMode}`)
+      console.log(`   Thresholds: early=${thresholds.early}m, main=${thresholds.main}m | Announced: ${announcedRef.current.has(curveId)}`)
     }
     
-    // Skip if curve shouldn't be announced
+    // Skip if shouldn't announce
     if (!shouldAnnounceCurve(currentMode, curve)) {
       return
     }
 
+    const isHardCurve = curve.severity >= 4 || curve.isChicane
+
     // ================================
-    // EARLY WARNING (hard curves, severity 4+)
+    // EARLY WARNING (hard curves/chicanes only)
     // ================================
-    if (curve.severity >= 4 &&
+    if (isHardCurve && 
         distance <= thresholds.early && 
         distance > thresholds.main &&
         !earlyRef.current.has(curveId)) {
@@ -199,7 +245,7 @@ export default function App() {
     }
     
     // ================================
-    // CATCH-UP: If we somehow missed the main window
+    // CATCH-UP (if we missed main window)
     // ================================
     if (distance <= thresholds.final && 
         distance > 10 &&
@@ -227,7 +273,7 @@ export default function App() {
       
       const text = generateFinalWarning(currentMode, curve)
       if (text) {
-        console.log(`🔊 FINAL: "${text}" @ ${Math.round(distance)}m`)
+        console.log(`🔊 FINAL: "${text}"`)
         speak(text, 'high')
         finalRef.current.add(curveId)
         lastCalloutRef.current = now
@@ -240,13 +286,11 @@ export default function App() {
 
   }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode])
 
-  // Cleanup passed curves
+  // Cleanup
   useEffect(() => {
     if (!isRunning || upcomingCurves.length === 0) return
     
     const currentIds = new Set(upcomingCurves.map(c => c.id))
-    
-    // Remove curves that are no longer upcoming
     ;[announcedRef, earlyRef, finalRef].forEach(ref => {
       ref.current.forEach(id => {
         if (!currentIds.has(id)) ref.current.delete(id)
@@ -260,7 +304,6 @@ export default function App() {
     earlyRef.current = new Set()
     finalRef.current = new Set()
     lastCalloutRef.current = Date.now() - 5000
-    console.log('🚀 Starting navigation')
     goToDriving()
   }
 
@@ -280,12 +323,7 @@ export default function App() {
   }
   
   if (showRouteEditor) {
-    return (
-      <RouteEditor
-        onBack={goToPreview}
-        onSave={goToPreview}
-      />
-    )
+    return <RouteEditor onBack={goToPreview} onSave={goToPreview} />
   }
 
   if (showTripSummary) {
@@ -295,10 +333,21 @@ export default function App() {
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <Map />
-      <CalloutOverlay currentDrivingMode={currentMode} />
+      <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
       <BottomBar />
       <SettingsPanel />
       <VoiceIndicator />
     </div>
   )
+}
+
+// Zone transition announcements
+function getZoneAnnouncement(character) {
+  const announcements = {
+    [ROUTE_CHARACTER.TECHNICAL]: 'Technical section',
+    [ROUTE_CHARACTER.TRANSIT]: 'Highway',
+    [ROUTE_CHARACTER.SPIRITED]: 'Spirited section',
+    [ROUTE_CHARACTER.URBAN]: 'Urban area'
+  }
+  return announcements[character] || null
 }
