@@ -67,16 +67,6 @@ export default function Map() {
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // NEW: Helper to check if a distance is within a transit zone
-  const isInTransitZone = useCallback((distance) => {
-    if (!routeZones?.length) return false
-    return routeZones.some(seg => 
-      seg.character === 'transit' && 
-      distance >= seg.startDistance && 
-      distance <= seg.endDistance
-    )
-  }, [routeZones])
-
   // Build severity segments for route coloring
   const buildSeveritySegments = useCallback((coordinates, curves, totalDistance) => {
     if (!coordinates?.length) return []
@@ -426,7 +416,7 @@ export default function Map() {
     })
   }, [position, heading])
 
-  // Add curve markers - UPDATED: Skip curves in transit zones
+  // Add curve markers - curves are already filtered to exclude transit zones
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -439,11 +429,6 @@ export default function Map() {
 
     curves.forEach((curve) => {
       if (!curve.position) return
-      
-      // NEW: Skip curves in transit zones - highway system handles those
-      if (isInTransitZone(curve.distanceFromStart)) {
-        return
-      }
       
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
@@ -480,7 +465,7 @@ export default function Map() {
       
       curveMarkers.current.push(marker)
     })
-  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded, isInTransitZone])
+  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded])
 
   // NEW: Add highway bend markers
   useEffect(() => {
@@ -496,11 +481,20 @@ export default function Map() {
       if (!bend.position) return
       
       const el = document.createElement('div')
-      const isLeft = bend.direction === 'LEFT'
-      const dirArrow = isLeft ? '←' : '→'
       
-      if (bend.isSSweep) {
-        // S-sweep marker - more prominent
+      if (bend.isSection) {
+        // SECTION marker - consolidated cluster
+        const bgColor = bend.character === 'technical' ? '#f59e0b' : 
+                       bend.character === 'challenging' ? '#ef4444' : HIGHWAY_BEND_COLOR
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
+            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">${bend.character}</span>
+            <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
+            <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
+          </div>
+        `
+      } else if (bend.isSSweep) {
+        // S-sweep marker
         const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
         const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
         el.innerHTML = `
@@ -510,7 +504,9 @@ export default function Map() {
           </div>
         `
       } else {
-        // Regular highway bend marker: [SW→ 12°]
+        // Regular highway bend marker
+        const isLeft = bend.direction === 'LEFT'
+        const dirArrow = isLeft ? '←' : '→'
         el.innerHTML = `
           <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
             <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
