@@ -1,6 +1,6 @@
 // ================================
-// Curve Detection Algorithm v9
-// Technical sections + Road type detection + Fixed directions
+// Curve Detection Algorithm v10
+// NEW: Highway Sweeper Detection (8-25° gentle curves)
 // ================================
 
 const SAMPLE_INTERVAL = 8 // meters - fine granularity
@@ -10,13 +10,21 @@ const CHICANE_MAX_DISTANCE = 150 // meters
 const TECHNICAL_SECTION_MIN_CURVES = 3
 const TECHNICAL_SECTION_MAX_GAP = 200 // meters between curves to be considered part of section
 
+// NEW: Sweeper detection thresholds for highways
+const SWEEPER_CONFIG = {
+  minAngle: 5,        // Detect curves as low as 5 degrees
+  maxAngle: 25,       // Above this, it's a regular curve not a "sweeper"
+  minLength: 150,     // Sweepers are long, gradual curves (meters)
+  windowSize: 400,    // Look over longer distance for sweepers (meters)
+}
+
 /**
  * Main entry point - detect all curves with full analysis
  */
 export function detectCurves(coordinates) {
   if (!coordinates || coordinates.length < 3) return []
 
-  console.log(`🛣️ Curve Detection v9 - Technical Sections + Road Type`)
+  console.log(`🛣️ Curve Detection v10 - Highway Sweepers + Technical Sections`)
   console.log(`Original route has ${coordinates.length} points`)
 
   // Step 1: Interpolate to fixed intervals
@@ -33,6 +41,14 @@ export function detectCurves(coordinates) {
   // Step 4: Detect curves using both immediate and sliding window
   let curves = detectAllCurves(interpolatedPoints, headings, roadCharacteristics)
   console.log(`Initial detection: ${curves.length} curves`)
+
+  // Step 4.5 NEW: Detect highway sweepers (very gentle curves)
+  if (roadCharacteristics.isHighway) {
+    const sweepers = detectHighwaySweepers(interpolatedPoints, headings, curves)
+    curves = [...curves, ...sweepers]
+    curves.sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+    console.log(`After sweeper detection: ${curves.length} curves (added ${sweepers.length} sweepers)`)
+  }
 
   // Step 5: Analyze tightening/opening for each curve
   curves = analyzeCurveShape(curves, interpolatedPoints, headings)
@@ -59,262 +75,213 @@ export function detectCurves(coordinates) {
 }
 
 /**
+ * NEW: Detect highway sweepers - very gentle curves that regular detection misses
+ * These are 5-25 degree curves spread over 150+ meters
+ */
+function detectHighwaySweepers(points, headings, existingCurves) {
+  const sweepers = []
+  const windowSize = Math.floor(SWEEPER_CONFIG.windowSize / SAMPLE_INTERVAL)
+  
+  // Track which points are already part of existing curves
+  const usedPoints = new Set()
+  existingCurves.forEach(curve => {
+    for (let i = curve.startIndex; i <= curve.endIndex; i++) {
+      usedPoints.add(i)
+    }
+  })
+  
+  let i = 0
+  while (i < headings.length - windowSize) {
+    // Skip if any point in window is already used
+    let hasUsedPoint = false
+    for (let j = i; j < i + windowSize && !hasUsedPoint; j++) {
+      if (usedPoints.has(j)) hasUsedPoint = true
+    }
+    if (hasUsedPoint) {
+      i += Math.floor(windowSize / 4)
+      continue
+    }
+    
+    // Calculate total heading change over the window
+    let windowHeadingChange = 0
+    for (let j = i; j < i + windowSize - 1; j++) {
+      windowHeadingChange += getHeadingChange(headings[j], headings[j + 1])
+    }
+    
+    const absChange = Math.abs(windowHeadingChange)
+    const curveLength = points[i + windowSize - 1].distance - points[i].distance
+    
+    // Check if this qualifies as a sweeper
+    if (absChange >= SWEEPER_CONFIG.minAngle && 
+        absChange <= SWEEPER_CONFIG.maxAngle &&
+        curveLength >= SWEEPER_CONFIG.minLength) {
+      
+      // Expand to find full extent of the sweeper
+      let sweeperStart = i
+      let sweeperEnd = i + windowSize - 1
+      let totalChange = windowHeadingChange
+      const direction = Math.sign(windowHeadingChange)
+      
+      // Expand backwards
+      while (sweeperStart > 0 && !usedPoints.has(sweeperStart - 1)) {
+        const change = getHeadingChange(headings[sweeperStart - 1], headings[sweeperStart])
+        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {
+          totalChange += change
+          sweeperStart--
+        } else {
+          break
+        }
+      }
+      
+      // Expand forwards
+      while (sweeperEnd < headings.length - 1 && !usedPoints.has(sweeperEnd + 1)) {
+        const change = getHeadingChange(headings[sweeperEnd], headings[sweeperEnd + 1])
+        if (Math.sign(change) === direction && Math.abs(change) > 0.05) {
+          totalChange += change
+          sweeperEnd++
+        } else {
+          break
+        }
+      }
+      
+      const finalAbsChange = Math.abs(totalChange)
+      const finalLength = points[sweeperEnd].distance - points[sweeperStart].distance
+      
+      // Only keep if still within sweeper bounds (not too sharp)
+      if (finalAbsChange >= SWEEPER_CONFIG.minAngle && 
+          finalAbsChange <= 35 && // Allow slightly more after expansion
+          finalLength >= SWEEPER_CONFIG.minLength) {
+        
+        const sweeper = createSweeperObject(
+          points, 
+          headings, 
+          sweeperStart, 
+          sweeperEnd, 
+          totalChange
+        )
+        sweepers.push(sweeper)
+        
+        // Mark points as used
+        for (let j = sweeperStart; j <= sweeperEnd; j++) {
+          usedPoints.add(j)
+        }
+        
+        console.log(`  🌊 Sweeper detected: ${sweeper.direction} ${sweeper.sweeperAngle}° over ${sweeper.length}m`)
+      }
+      
+      i = sweeperEnd + 1
+    } else {
+      i++
+    }
+  }
+  
+  return sweepers
+}
+
+/**
+ * Create a sweeper curve object
+ */
+function createSweeperObject(points, headings, startIndex, endIndex, totalHeadingChange) {
+  const startDist = points[startIndex].distance
+  const endDist = points[Math.min(endIndex + 1, points.length - 1)].distance
+  const curveLength = endDist - startDist
+  const absAngle = Math.abs(totalHeadingChange)
+  
+  // Direction from heading change
+  const direction = totalHeadingChange > 0 ? 'RIGHT' : 'LEFT'
+  
+  // Apex position (middle of curve)
+  const apexIndex = Math.floor((startIndex + endIndex + 1) / 2)
+  const position = points[Math.min(apexIndex, points.length - 1)].coord
+  
+  // Entry and exit positions
+  const entryPosition = points[startIndex].coord
+  const exitPosition = points[Math.min(endIndex + 1, points.length - 1)].coord
+  
+  // Sweepers are always severity 1 (gentle) but we track the actual angle
+  return {
+    id: 0,
+    position,
+    entryPosition,
+    exitPosition,
+    direction,
+    severity: 1,
+    modifier: null,
+    radius: Math.round(curveLength / (absAngle * Math.PI / 180)), // Estimate radius
+    totalAngle: Math.round(absAngle),
+    length: Math.round(curveLength),
+    distanceFromStart: Math.round(startDist),
+    startIndex,
+    endIndex,
+    entryHeading: headings[startIndex] || 0,
+    exitHeading: headings[Math.min(endIndex, headings.length - 1)] || 0,
+    
+    // NEW: Sweeper-specific properties
+    isSweeper: true,
+    sweeperAngle: Math.round(absAngle), // The actual angle for callouts
+    
+    // Higher speeds for sweepers since they're gentle
+    speedCruise: 70,
+    speedFast: 75,
+    speedRace: 80,
+  }
+}
+
+/**
  * Analyze road characteristics to determine context (highway vs local road)
  */
 function analyzeRoadCharacteristics(points, headings) {
-  const totalDistance = points[points.length - 1]?.distance || 0
+  const totalDistance = points[points.length - 1].distance
   
-  // Calculate cumulative heading change
-  let totalHeadingChange = 0
-  for (let i = 0; i < headings.length - 1; i++) {
-    totalHeadingChange += Math.abs(getHeadingChange(headings[i], headings[i + 1]))
-  }
-  
-  // Average heading change per 100m
-  const avgHeadingChangePer100m = (totalHeadingChange / totalDistance) * 100
-  
-  // Find longest straight stretch
-  let maxStraightLength = 0
-  let currentStraightStart = 0
-  let straightLengths = []
+  // Count significant direction changes
+  let significantChanges = 0
+  let straightSegmentLengths = []
+  let currentStraightLength = 0
   
   for (let i = 0; i < headings.length - 1; i++) {
     const change = Math.abs(getHeadingChange(headings[i], headings[i + 1]))
     
-    if (change > 2) { // End of straight
-      const straightLength = points[i].distance - points[currentStraightStart].distance
-      if (straightLength > 50) {
-        straightLengths.push(straightLength)
-        maxStraightLength = Math.max(maxStraightLength, straightLength)
+    if (change > 2) {
+      significantChanges++
+      if (currentStraightLength > 50) {
+        straightSegmentLengths.push(currentStraightLength)
       }
-      currentStraightStart = i + 1
+      currentStraightLength = 0
+    } else {
+      currentStraightLength += SAMPLE_INTERVAL
     }
   }
   
-  // Check final stretch
-  const finalStraight = points[points.length - 1].distance - points[currentStraightStart].distance
-  if (finalStraight > 50) {
-    straightLengths.push(finalStraight)
-    maxStraightLength = Math.max(maxStraightLength, finalStraight)
+  if (currentStraightLength > 50) {
+    straightSegmentLengths.push(currentStraightLength)
   }
   
-  const avgStraightLength = straightLengths.length > 0 
-    ? straightLengths.reduce((a, b) => a + b, 0) / straightLengths.length 
-    : 100
-
-  // Determine road type
-  // Highway: long straights (avg > 300m), low heading change (<15° per 100m)
-  // Technical: short straights (avg < 100m), high heading change (>30° per 100m)
-  // Mixed: in between
+  const avgStraightLength = straightSegmentLengths.length > 0
+    ? straightSegmentLengths.reduce((a, b) => a + b, 0) / straightSegmentLengths.length
+    : 0
   
-  let roadType = 'mixed'
-  let isHighway = false
-  let isTechnical = false
-  
-  if (avgStraightLength > 300 && avgHeadingChangePer100m < 15) {
-    roadType = 'highway'
-    isHighway = true
-  } else if (avgStraightLength < 100 && avgHeadingChangePer100m > 30) {
-    roadType = 'technical'
-    isTechnical = true
-  }
+  // Highway detection: long straights, few sharp turns
+  const changesPerKm = (significantChanges / totalDistance) * 1000
+  const isHighway = avgStraightLength > 300 || changesPerKm < 15
   
   return {
     totalDistance,
-    avgHeadingChangePer100m,
-    maxStraightLength,
+    significantChanges,
     avgStraightLength,
-    roadType,
-    isHighway,
-    isTechnical,
-    straightLengths
+    changesPerKm,
+    isHighway
   }
 }
 
 /**
- * Detect technical sections - sustained windy stretches
- * These get a single summary callout instead of individual curve calls
- */
-function detectTechnicalSections(curves, points) {
-  if (curves.length < TECHNICAL_SECTION_MIN_CURVES) return curves
-  
-  const result = []
-  let i = 0
-  
-  while (i < curves.length) {
-    // Skip chicanes and already-grouped curves
-    if (curves[i].isChicane || curves[i].isTechnicalSection) {
-      result.push(curves[i])
-      i++
-      continue
-    }
-    
-    // Look for cluster of curves
-    const cluster = [curves[i]]
-    let j = i + 1
-    
-    while (j < curves.length) {
-      const prev = cluster[cluster.length - 1]
-      const curr = curves[j]
-      
-      // Skip chicanes in cluster detection
-      if (curr.isChicane) {
-        j++
-        continue
-      }
-      
-      const gap = curr.distanceFromStart - (prev.distanceFromStart + prev.length)
-      
-      if (gap <= TECHNICAL_SECTION_MAX_GAP) {
-        cluster.push(curr)
-        j++
-      } else {
-        break
-      }
-    }
-    
-    // Check if cluster qualifies as technical section
-    // Need 3+ curves with at least 2 direction changes
-    if (cluster.length >= TECHNICAL_SECTION_MIN_CURVES) {
-      let directionChanges = 0
-      for (let k = 1; k < cluster.length; k++) {
-        if (cluster[k].direction !== cluster[k-1].direction) {
-          directionChanges++
-        }
-      }
-      
-      // Create technical section if enough direction changes
-      if (directionChanges >= 2) {
-        const technicalSection = createTechnicalSection(cluster, points)
-        result.push(technicalSection)
-        i = j
-        continue
-      }
-    }
-    
-    // Not a technical section, add curve normally
-    result.push(curves[i])
-    i++
-  }
-  
-  return result
-}
-
-/**
- * Create a technical section from a cluster of curves
- */
-function createTechnicalSection(curves, points) {
-  const first = curves[0]
-  const last = curves[curves.length - 1]
-  
-  // Calculate section properties
-  const totalLength = (last.distanceFromStart + last.length) - first.distanceFromStart
-  const maxSeverity = Math.max(...curves.map(c => c.severity))
-  const avgSeverity = curves.reduce((sum, c) => sum + c.severity, 0) / curves.length
-  
-  // Determine section character
-  let directionChanges = 0
-  for (let i = 1; i < curves.length; i++) {
-    if (curves[i].direction !== curves[i-1].direction) {
-      directionChanges++
-    }
-  }
-  
-  // Character: switchbacks, sweeping, or mixed
-  let character = 'windy'
-  if (directionChanges >= curves.length - 1) {
-    character = 'switchbacks' // Alternating directions
-  } else if (avgSeverity <= 2) {
-    character = 'sweeping'
-  } else if (maxSeverity >= 5) {
-    character = 'technical'
-  }
-  
-  // Build sequence description
-  const severitySequence = curves.map(c => c.severity).join('-')
-  const directionSequence = curves.map(c => c.direction === 'LEFT' ? 'L' : 'R').join('')
-  
-  // Calculate recommended speed (based on hardest curve, slightly higher for flow)
-  const baseSpeed = getSpeedRecommendations(maxSeverity)
-  
-  return {
-    id: 0,
-    position: first.position,
-    entryPosition: first.entryPosition,
-    exitPosition: last.exitPosition,
-    direction: first.direction, // Entry direction
-    severity: maxSeverity,
-    avgSeverity: Math.round(avgSeverity * 10) / 10,
-    modifier: character.toUpperCase(),
-    
-    // Technical section flags
-    isTechnicalSection: true,
-    sectionCharacter: character,
-    curveCount: curves.length,
-    directionChanges,
-    severitySequence,
-    directionSequence,
-    
-    // Contained curves (for reference, not announced individually)
-    containedCurves: curves,
-    
-    // Geometry
-    length: Math.round(totalLength),
-    distanceFromStart: first.distanceFromStart,
-    
-    // Speeds (slightly higher than hardest curve since you maintain flow)
-    speedCruise: Math.round(baseSpeed.speedCruise * 1.05),
-    speedFast: Math.round(baseSpeed.speedFast * 1.05),
-    speedRace: Math.round(baseSpeed.speedRace * 1.05)
-  }
-}
-
-/**
- * Apply road-type specific speed adjustments
- */
-function applyRoadTypeSpeedAdjustments(curves, roadCharacteristics) {
-  return curves.map(curve => {
-    const adjusted = { ...curve }
-    
-    if (roadCharacteristics.isHighway) {
-      // Highway: boost speeds for gentle curves (severity 1-2)
-      if (curve.severity <= 2) {
-        adjusted.speedCruise = Math.min(70, curve.speedCruise + 15)
-        adjusted.speedFast = Math.min(80, curve.speedFast + 15)
-        adjusted.speedRace = Math.min(90, curve.speedRace + 15)
-      } else if (curve.severity === 3) {
-        adjusted.speedCruise = Math.min(60, curve.speedCruise + 8)
-        adjusted.speedFast = Math.min(70, curve.speedFast + 8)
-        adjusted.speedRace = Math.min(80, curve.speedRace + 8)
-      }
-      adjusted.roadContext = 'highway'
-    } else if (roadCharacteristics.isTechnical) {
-      // Technical road: reduce all speeds by 10%
-      adjusted.speedCruise = Math.round(curve.speedCruise * 0.90)
-      adjusted.speedFast = Math.round(curve.speedFast * 0.90)
-      adjusted.speedRace = Math.round(curve.speedRace * 0.90)
-      adjusted.roadContext = 'technical'
-    } else {
-      // Mixed road: reduce cruise speeds slightly for safety
-      adjusted.speedCruise = Math.round(curve.speedCruise * 0.92)
-      adjusted.speedFast = Math.round(curve.speedFast * 0.95)
-      adjusted.roadContext = 'mixed'
-    }
-    
-    return adjusted
-  })
-}
-
-/**
- * Interpolate route to fixed-interval points
+ * Interpolate route to fixed intervals
  */
 function interpolateRoute(coordinates, intervalMeters) {
   const result = []
   let cumulativeDistance = 0
+  let nextTargetDistance = 0
   
   result.push({ coord: coordinates[0], distance: 0 })
-  
-  let nextTargetDistance = intervalMeters
   
   for (let i = 0; i < coordinates.length - 1; i++) {
     const segmentStart = coordinates[i]
@@ -322,16 +289,13 @@ function interpolateRoute(coordinates, intervalMeters) {
     const segmentLength = getDistance(segmentStart, segmentEnd)
     const segmentEndDistance = cumulativeDistance + segmentLength
     
-    while (nextTargetDistance <= segmentEndDistance) {
-      const distanceIntoSegment = nextTargetDistance - cumulativeDistance
-      const fraction = distanceIntoSegment / segmentLength
-      
-      const interpolatedCoord = [
-        segmentStart[0] + (segmentEnd[0] - segmentStart[0]) * fraction,
-        segmentStart[1] + (segmentEnd[1] - segmentStart[1]) * fraction
+    while (nextTargetDistance <= segmentEndDistance && nextTargetDistance > cumulativeDistance) {
+      const t = (nextTargetDistance - cumulativeDistance) / segmentLength
+      const interpolated = [
+        segmentStart[0] + t * (segmentEnd[0] - segmentStart[0]),
+        segmentStart[1] + t * (segmentEnd[1] - segmentStart[1])
       ]
-      
-      result.push({ coord: interpolatedCoord, distance: nextTargetDistance })
+      result.push({ coord: interpolated, distance: nextTargetDistance })
       nextTargetDistance += intervalMeters
     }
     
@@ -526,7 +490,6 @@ function detectGradualCurves(points, headings, usedPoints, roadCharacteristics) 
 
 /**
  * Create a curve object with all properties
- * FIXED: Direction is now based on ENTRY heading change, not total
  */
 function createCurveObject(points, headings, startIndex, endIndex, totalHeadingChange, segmentChanges) {
   const startDist = points[startIndex].distance
@@ -537,11 +500,8 @@ function createCurveObject(points, headings, startIndex, endIndex, totalHeadingC
   const severity = getSeverityFromRadius(radius, absAngle)
   
   // Determine direction from the FIRST significant heading change
-  // Positive heading change = turning RIGHT (clockwise)
-  // Negative heading change = turning LEFT (counter-clockwise)
   let entryDirection = 'RIGHT'
   if (segmentChanges && segmentChanges.length > 0) {
-    // Find first significant change (>1 degree)
     for (const seg of segmentChanges) {
       if (Math.abs(seg.change) > 1) {
         entryDirection = seg.change > 0 ? 'RIGHT' : 'LEFT'
@@ -560,16 +520,12 @@ function createCurveObject(points, headings, startIndex, endIndex, totalHeadingC
   const entryPosition = points[startIndex].coord
   const exitPosition = points[Math.min(endIndex + 1, points.length - 1)].coord
   
-  // Entry and exit headings for accurate direction calculation
-  const entryHeading = headings[startIndex] || 0
-  const exitHeading = headings[Math.min(endIndex, headings.length - 1)] || 0
-  
   return {
     id: 0,
     position,
     entryPosition,
     exitPosition,
-    direction: entryDirection, // Now correctly reflects first turn direction
+    direction: entryDirection,
     severity,
     modifier: null,
     radius: Math.round(radius),
@@ -579,8 +535,8 @@ function createCurveObject(points, headings, startIndex, endIndex, totalHeadingC
     startIndex,
     endIndex,
     segmentChanges,
-    entryHeading,
-    exitHeading,
+    entryHeading: headings[startIndex] || 0,
+    exitHeading: headings[Math.min(endIndex, headings.length - 1)] || 0,
     ...getSpeedRecommendations(severity)
   }
 }
@@ -590,6 +546,9 @@ function createCurveObject(points, headings, startIndex, endIndex, totalHeadingC
  */
 function analyzeCurveShape(curves, points, headings) {
   return curves.map(curve => {
+    // Skip sweepers - they don't tighten/open
+    if (curve.isSweeper) return curve
+    
     const { segmentChanges, severity, totalAngle, length } = curve
     
     if (!segmentChanges || segmentChanges.length < 3) {
@@ -628,7 +587,6 @@ function analyzeCurveShape(curves, points, headings) {
 
 /**
  * Detect S-curves and chicanes
- * FIXED: Use entry direction of first curve, not total direction
  */
 function detectChicanes(curves, points) {
   if (curves.length < 2) return curves
@@ -640,38 +598,21 @@ function detectChicanes(curves, points) {
     const current = curves[i]
     const next = curves[i + 1]
     
-    if (next) {
+    // Skip sweepers from chicane detection
+    if (current.isSweeper) {
+      result.push(current)
+      i++
+      continue
+    }
+    
+    if (next && !next.isSweeper) {
       const distanceBetween = next.distanceFromStart - (current.distanceFromStart + current.length)
       const oppositeDirection = current.direction !== next.direction
       
-      // Only create chicanes if:
-      // 1. Curves are opposite direction
-      // 2. Close together (< 150m)
-      // 3. At least one curve is severity 2+ (not just road noise)
-      const hasSignificantCurve = current.severity >= 2 || next.severity >= 2
-      
-      if (oppositeDirection && distanceBetween < CHICANE_MAX_DISTANCE && distanceBetween >= 0 && hasSignificantCurve) {
-        const third = curves[i + 2]
-        let isTripleChicane = false
-        
-        if (third) {
-          const distToThird = third.distanceFromStart - (next.distanceFromStart + next.length)
-          const thirdOpposite = next.direction !== third.direction
-          
-          if (thirdOpposite && distToThird < CHICANE_MAX_DISTANCE && distToThird >= 0) {
-            isTripleChicane = true
-          }
-        }
-        
-        if (isTripleChicane) {
-          const chicane = createChicane([current, next, third], points)
-          result.push(chicane)
-          i += 3
-        } else {
-          const chicane = createChicane([current, next], points)
-          result.push(chicane)
-          i += 2
-        }
+      if (oppositeDirection && distanceBetween < CHICANE_MAX_DISTANCE && distanceBetween >= 0) {
+        const chicane = createChicane(current, next, points)
+        result.push(chicane)
+        i += 2
       } else {
         result.push(current)
         i++
@@ -686,39 +627,144 @@ function detectChicanes(curves, points) {
 }
 
 /**
- * Create a chicane/S-curve from multiple curves
- * FIXED: startDirection is now the direction of the FIRST turn
+ * Create a chicane from two curves
  */
-function createChicane(curves, points) {
+function createChicane(curve1, curve2, points) {
+  const maxSeverity = Math.max(curve1.severity, curve2.severity)
+  const totalLength = (curve2.distanceFromStart + curve2.length) - curve1.distanceFromStart
+  
+  return {
+    ...curve1,
+    isChicane: true,
+    chicaneType: maxSeverity >= 3 ? 'CHICANE' : 'S_CURVE',
+    startDirection: curve1.direction,
+    severity: maxSeverity,
+    severitySequence: `${curve1.severity}-${curve2.severity}`,
+    length: Math.round(totalLength),
+    exitPosition: curve2.exitPosition,
+    containedCurves: [curve1, curve2],
+    ...getSpeedRecommendations(maxSeverity)
+  }
+}
+
+/**
+ * Detect technical sections
+ */
+function detectTechnicalSections(curves, interpolatedPoints) {
+  if (curves.length < TECHNICAL_SECTION_MIN_CURVES) return curves
+  
+  const result = []
+  let i = 0
+  
+  while (i < curves.length) {
+    const current = curves[i]
+    
+    // Skip chicanes and sweepers from technical section detection
+    if (current.isChicane || current.isSweeper) {
+      result.push(current)
+      i++
+      continue
+    }
+    
+    // Look for cluster of curves
+    const cluster = [curves[i]]
+    let j = i + 1
+    
+    while (j < curves.length) {
+      const prev = cluster[cluster.length - 1]
+      const curr = curves[j]
+      
+      if (curr.isChicane || curr.isSweeper) {
+        j++
+        continue
+      }
+      
+      const gap = curr.distanceFromStart - (prev.distanceFromStart + prev.length)
+      
+      if (gap <= TECHNICAL_SECTION_MAX_GAP) {
+        cluster.push(curr)
+        j++
+      } else {
+        break
+      }
+    }
+    
+    if (cluster.length >= TECHNICAL_SECTION_MIN_CURVES) {
+      let directionChanges = 0
+      for (let k = 1; k < cluster.length; k++) {
+        if (cluster[k].direction !== cluster[k-1].direction) {
+          directionChanges++
+        }
+      }
+      
+      if (directionChanges >= 2) {
+        const technicalSection = createTechnicalSection(cluster, interpolatedPoints)
+        result.push(technicalSection)
+        i = j
+        continue
+      }
+    }
+    
+    result.push(curves[i])
+    i++
+  }
+  
+  return result
+}
+
+/**
+ * Create a technical section from a cluster of curves
+ */
+function createTechnicalSection(curves, points) {
   const first = curves[0]
   const last = curves[curves.length - 1]
   
+  const totalLength = (last.distanceFromStart + last.length) - first.distanceFromStart
   const maxSeverity = Math.max(...curves.map(c => c.severity))
-  const type = curves.length === 3 ? 'CHICANE' : 'S-CURVE'
-  const severitySequence = curves.map(c => c.severity).join('-')
+  const avgSeverity = curves.reduce((sum, c) => sum + c.severity, 0) / curves.length
   
-  // FIXED: startDirection is the direction of the FIRST curve
-  // This is already correct in the curve object since we fixed createCurveObject
-  const startDirection = first.direction
+  let directionChanges = 0
+  for (let i = 1; i < curves.length; i++) {
+    if (curves[i].direction !== curves[i-1].direction) {
+      directionChanges++
+    }
+  }
+  
+  let character = 'windy'
+  if (directionChanges >= curves.length - 1) {
+    character = 'switchbacks'
+  } else if (avgSeverity <= 2) {
+    character = 'sweeping'
+  } else if (maxSeverity >= 5) {
+    character = 'technical'
+  }
+  
+  const severitySequence = curves.map(c => c.severity).join('-')
+  const directionSequence = curves.map(c => c.direction === 'LEFT' ? 'L' : 'R').join('')
+  
+  const baseSpeed = getSpeedRecommendations(maxSeverity)
   
   return {
     id: 0,
     position: first.position,
     entryPosition: first.entryPosition,
     exitPosition: last.exitPosition,
-    direction: startDirection, // First turn direction
+    direction: first.direction,
     severity: maxSeverity,
-    modifier: type,
-    isChicane: true,
-    chicaneType: type,
-    startDirection: startDirection, // Explicit first turn direction
+    avgSeverity: Math.round(avgSeverity * 10) / 10,
+    modifier: character.toUpperCase(),
+    isTechnicalSection: true,
+    sectionCharacter: character,
+    curveCount: curves.length,
+    directionChanges,
     severitySequence,
-    curves: curves,
-    radius: Math.min(...curves.map(c => c.radius)),
-    totalAngle: curves.reduce((sum, c) => sum + c.totalAngle, 0),
-    length: (last.distanceFromStart + last.length) - first.distanceFromStart,
+    directionSequence,
+    containedCurves: curves,
+    length: Math.round(totalLength),
     distanceFromStart: first.distanceFromStart,
-    ...getSpeedRecommendations(maxSeverity)
+    speedCruise: Math.round(baseSpeed.speedCruise * 1.05),
+    speedFast: Math.round(baseSpeed.speedFast * 1.05),
+    speedRace: Math.round(baseSpeed.speedRace * 1.05)
   }
 }
 
@@ -734,8 +780,8 @@ function mergeCurves(curves) {
   while (i < curves.length) {
     const current = curves[i]
     
-    // Skip chicanes and technical sections
-    if (current.isChicane || current.isTechnicalSection) {
+    // Skip chicanes, technical sections, and sweepers
+    if (current.isChicane || current.isTechnicalSection || current.isSweeper) {
       result.push(current)
       i++
       continue
@@ -743,7 +789,7 @@ function mergeCurves(curves) {
     
     const next = curves[i + 1]
     
-    if (next && !next.isChicane && !next.isTechnicalSection) {
+    if (next && !next.isChicane && !next.isTechnicalSection && !next.isSweeper) {
       const distanceBetween = next.distanceFromStart - (current.distanceFromStart + current.length)
       const sameDirection = current.direction === next.direction
       
@@ -753,7 +799,7 @@ function mergeCurves(curves) {
         let j = i + 2
         while (j < curves.length) {
           const another = curves[j]
-          if (another.isChicane || another.isTechnicalSection) break
+          if (another.isChicane || another.isTechnicalSection || another.isSweeper) break
           
           const distToAnother = another.distanceFromStart - (merged.distanceFromStart + merged.length)
           if (another.direction === merged.direction && distToAnother < MIN_CURVE_SEPARATION && distToAnother >= 0) {
@@ -803,6 +849,32 @@ function mergeTwoCurves(a, b) {
 }
 
 /**
+ * Apply road-type specific speed adjustments
+ */
+function applyRoadTypeSpeedAdjustments(curves, roadCharacteristics) {
+  return curves.map(curve => {
+    const adjusted = { ...curve }
+    
+    // Sweepers already have their speeds set
+    if (curve.isSweeper) return adjusted
+    
+    if (roadCharacteristics.isHighway) {
+      if (curve.severity <= 2) {
+        adjusted.speedCruise = Math.min(70, curve.speedCruise + 15)
+        adjusted.speedFast = Math.min(80, curve.speedFast + 15)
+        adjusted.speedRace = Math.min(90, curve.speedRace + 15)
+      } else if (curve.severity === 3) {
+        adjusted.speedCruise = Math.min(60, curve.speedCruise + 8)
+        adjusted.speedFast = Math.min(70, curve.speedFast + 8)
+        adjusted.speedRace = Math.min(80, curve.speedRace + 8)
+      }
+    }
+    
+    return adjusted
+  })
+}
+
+/**
  * Get basic modifier without shape analysis
  */
 function getBasicModifier(totalAngle, severity, length) {
@@ -814,6 +886,49 @@ function getBasicModifier(totalAngle, severity, length) {
   if (length > 120) return 'LONG'
   
   return null
+}
+
+/**
+ * Get speed recommendations based on severity
+ */
+function getSpeedRecommendations(severity) {
+  const speeds = {
+    1: { speedCruise: 55, speedFast: 65, speedRace: 75 },
+    2: { speedCruise: 50, speedFast: 60, speedRace: 70 },
+    3: { speedCruise: 45, speedFast: 55, speedRace: 65 },
+    4: { speedCruise: 35, speedFast: 45, speedRace: 55 },
+    5: { speedCruise: 25, speedFast: 35, speedRace: 45 },
+    6: { speedCruise: 20, speedFast: 30, speedRace: 40 },
+  }
+  return speeds[severity] || speeds[3]
+}
+
+/**
+ * Log results
+ */
+function logResults(curves) {
+  console.log(`📊 Final: ${curves.length} curves`)
+  
+  const sweepers = curves.filter(c => c.isSweeper)
+  const chicanes = curves.filter(c => c.isChicane)
+  const technical = curves.filter(c => c.isTechnicalSection)
+  const regular = curves.filter(c => !c.isSweeper && !c.isChicane && !c.isTechnicalSection)
+  
+  console.log(`  🌊 Sweepers: ${sweepers.length}`)
+  if (sweepers.length > 0) {
+    sweepers.forEach(s => console.log(`    - ${s.direction} ${s.sweeperAngle}° @ ${s.distanceFromStart}m`))
+  }
+  
+  console.log(`  🔀 Chicanes: ${chicanes.length}`)
+  console.log(`  🏔️ Technical sections: ${technical.length}`)
+  console.log(`  🔄 Regular curves: ${regular.length}`)
+  
+  const breakdown = {
+    easy: curves.filter(c => c.severity <= 2).length,
+    medium: curves.filter(c => c.severity === 3 || c.severity === 4).length,
+    hard: curves.filter(c => c.severity >= 5).length
+  }
+  console.log(`Severity: ${breakdown.easy} easy, ${breakdown.medium} medium, ${breakdown.hard} hard`)
 }
 
 // ================================
@@ -859,34 +974,16 @@ function getSeverityFromRadius(radius, totalAngle) {
   else if (totalAngle > 120) severity = Math.max(severity, 4)
   else if (totalAngle > 90) severity = Math.max(severity, Math.min(6, severity + 1))
   else if (totalAngle > 60) severity = Math.max(severity, Math.min(5, severity + 1))
-  
-  return Math.min(6, severity)
+
+  return Math.min(6, Math.max(1, severity))
 }
 
-function getSpeedRecommendations(severity) {
-  // UPDATED: Reduced cruise speeds by ~8-10% based on road test feedback
-  const baseSpeeds = {
-    1: { cruise: 60, fast: 72, race: 85 },
-    2: { cruise: 50, fast: 62, race: 75 },
-    3: { cruise: 40, fast: 52, race: 65 },
-    4: { cruise: 32, fast: 42, race: 55 },
-    5: { cruise: 24, fast: 32, race: 45 },
-    6: { cruise: 18, fast: 24, race: 35 }
-  }
-  const speeds = baseSpeeds[severity] || baseSpeeds[3]
-  return {
-    speedCruise: speeds.cruise,
-    speedFast: speeds.fast,
-    speedRace: speeds.race
-  }
-}
-
-function getDistance(pos1, pos2) {
+function getDistance(coord1, coord2) {
   const R = 6371e3
-  const φ1 = pos1[1] * Math.PI / 180
-  const φ2 = pos2[1] * Math.PI / 180
-  const Δφ = (pos2[1] - pos1[1]) * Math.PI / 180
-  const Δλ = (pos2[0] - pos1[0]) * Math.PI / 180
+  const φ1 = coord1[1] * Math.PI / 180
+  const φ2 = coord2[1] * Math.PI / 180
+  const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180
+  const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180
 
   const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
             Math.cos(φ1) * Math.cos(φ2) *
@@ -896,44 +993,14 @@ function getDistance(pos1, pos2) {
   return R * c
 }
 
-function logResults(curves) {
-  console.log(`Final curve count: ${curves.length}`)
-  
-  const chicanes = curves.filter(c => c.isChicane)
-  const technical = curves.filter(c => c.isTechnicalSection)
-  const merged = curves.filter(c => c.isMerged)
-  const tightening = curves.filter(c => c.modifier === 'TIGHTENS')
-  const opening = curves.filter(c => c.modifier === 'OPENS')
-  
-  console.log(`  - Chicanes/S-curves: ${chicanes.length}`)
-  console.log(`  - Technical sections: ${technical.length}`)
-  console.log(`  - Merged curves: ${merged.length}`)
-  console.log(`  - Tightening: ${tightening.length}`)
-  console.log(`  - Opening: ${opening.length}`)
-  
-  const breakdown = {
-    easy: curves.filter(c => c.severity <= 2).length,
-    medium: curves.filter(c => c.severity === 3 || c.severity === 4).length,
-    hard: curves.filter(c => c.severity >= 5).length
-  }
-  console.log(`Severity: ${breakdown.easy} easy, ${breakdown.medium} medium, ${breakdown.hard} hard`)
-  
-  // Log technical sections detail
-  technical.forEach(t => {
-    console.log(`  Technical section: ${t.curveCount} curves, ${t.length}m, character=${t.sectionCharacter}`)
-  })
-}
-
 /**
  * Filter curves to only those ahead of current position
- * IMPROVED: Better distance calculation and passed-curve detection
  */
 export function getUpcomingCurves(curves, currentPosition, heading, maxDistance = 1000) {
   if (!curves || !currentPosition) return []
 
   return curves
     .map(curve => {
-      // Calculate distance to curve ENTRY (not apex)
       const targetPoint = curve.entryPosition || curve.position
       const distance = getDistance(currentPosition, targetPoint)
       const bearingToCurve = getBearing(currentPosition, targetPoint)
@@ -943,12 +1010,7 @@ export function getUpcomingCurves(curves, currentPosition, heading, maxDistance 
       while (angleDiff < -180) angleDiff += 360
       
       const absAngleDiff = Math.abs(angleDiff)
-      
-      // More aggressive "behind us" detection
-      // If curve is close (<50m) and significantly to the side (>70°), consider it passed
       const isPassed = distance < 50 && absAngleDiff > 70
-      
-      // Curve is "ahead" if within 100° of heading (unless passed)
       const isAhead = absAngleDiff < 100 && !isPassed
       
       return { 
