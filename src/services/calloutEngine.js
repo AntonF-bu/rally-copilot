@@ -1,7 +1,6 @@
 // ================================
-// Callout Engine v3.0
-// FIXED: Proper warning distances for highway speeds
-// Simplified and reliable
+// Callout Engine v3.1
+// FIXED: Announce ALL curves (including sev 1), proper chicane direction
 // ================================
 
 export const DRIVING_MODE = {
@@ -12,101 +11,98 @@ export const DRIVING_MODE = {
 }
 
 // ================================
-// WARNING DISTANCES - FIXED FOR HIGH SPEED
-// At 75 MPH (33.5 m/s), you travel 500m in 15 seconds
+// WARNING DISTANCES (meters)
+// Based on reaction time, not just distance
 // ================================
 
-const TIMING_CONFIG = {
+const BASE_DISTANCES = {
   highway: {
-    earlyDistance: 800,    // ~24 seconds at 75mph - announce hard curves early
-    mainDistance: 500,     // ~15 seconds at 75mph - main callout
-    finalDistance: 200,    // ~6 seconds at 75mph - final warning
+    early: 400,     // ~12 seconds at 75mph for hard curves
+    main: 250,      // ~7 seconds at 75mph
+    final: 100,     // ~3 seconds
   },
   spirited: {
-    earlyDistance: 400,
-    mainDistance: 250,
-    finalDistance: 100,
+    early: 300,
+    main: 180,
+    final: 60,
   },
   technical: {
-    earlyDistance: 250,
-    mainDistance: 150,
-    finalDistance: 50,
+    early: 200,
+    main: 120,
+    final: 40,
   },
   urban: {
-    earlyDistance: 150,
-    mainDistance: 80,
-    finalDistance: 30,
+    early: 100,
+    main: 60,
+    final: 25,
   }
 }
 
-// Minimum severity to announce per mode
+// ================================
+// MINIMUM SEVERITY - NOW ANNOUNCES ALL!
+// ================================
+
 const MIN_SEVERITY = {
-  highway: 2,     // Announce sev 2+ on highway
-  spirited: 2,    // Announce sev 2+
-  technical: 2,   // Announce sev 2+
-  urban: 3        // Only sev 3+ in urban
+  highway: 1,     // FIXED: Announce ALL curves on highway
+  spirited: 1,    // Announce all
+  technical: 1,   // Announce all
+  urban: 2        // Skip sev 1 only in urban (too many tiny turns)
 }
 
 // ================================
-// EXPORTS
+// FUNCTIONS
 // ================================
 
 /**
- * Get warning distances for a mode and speed
+ * Get warning distances scaled by speed
  */
 export function getWarningDistances(mode, speedMph) {
-  const config = TIMING_CONFIG[mode] || TIMING_CONFIG.spirited
+  const base = BASE_DISTANCES[mode] || BASE_DISTANCES.spirited
   
-  // Scale distances based on speed
-  // At 30 mph, use base distances
-  // At 60 mph, use 1.5x distances
-  // At 90 mph, use 2x distances
-  const speedFactor = Math.max(1, speedMph / 40)
+  // Scale by speed: at 30mph use base, at 60mph use 1.5x, at 90mph use 2x
+  const speedFactor = Math.max(1, Math.min(2, speedMph / 45))
   
   return {
-    early: Math.round(config.earlyDistance * speedFactor),
-    main: Math.round(config.mainDistance * speedFactor),
-    final: Math.round(config.finalDistance * speedFactor)
+    early: Math.round(base.early * speedFactor),
+    main: Math.round(base.main * speedFactor),
+    final: Math.round(base.final * speedFactor)
   }
 }
 
 /**
  * Check if curve should be announced
+ * FIXED: Now announces severity 1 curves too!
  */
 export function shouldAnnounceCurve(mode, curve) {
   if (!curve) return false
   
-  // Always announce chicanes
+  // Always announce chicanes and S-curves
   if (curve.isChicane) return true
   
-  // Always announce severity 3+
-  if (curve.severity >= 3) return true
-  
-  // Check mode-specific minimum
-  const minSev = MIN_SEVERITY[mode] || 2
+  // Check minimum severity for mode
+  const minSev = MIN_SEVERITY[mode] || 1
   return curve.severity >= minSev
 }
 
 /**
- * Generate main callout text
+ * Generate main callout
+ * FIXED: Use correct direction for chicanes
  */
 export function generateCallout(mode, curve) {
   if (!curve) return null
   
-  const dir = curve.isChicane 
-    ? (curve.startDirection === 'LEFT' ? 'Left' : 'Right')
-    : (curve.direction === 'LEFT' ? 'Left' : 'Right')
-  
-  // Chicane
+  // CHICANE - use the FIRST turn direction
   if (curve.isChicane) {
+    // The startDirection tells us which way we turn FIRST
+    const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
     const type = curve.chicaneType === 'CHICANE' ? 'Chicane' : 'S curve'
-    return `${type} ${curve.severitySequence}`
+    return `${type} ${firstDir} ${curve.severitySequence || ''}`
   }
   
   // Regular curve
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
   let text = `${dir} ${curve.severity}`
   
-  // Add modifier
   if (curve.modifier) {
     const mods = {
       'TIGHTENS': 'tightens',
@@ -114,51 +110,47 @@ export function generateCallout(mode, curve) {
       'LONG': 'long',
       'HAIRPIN': 'hairpin'
     }
-    const mod = mods[curve.modifier] || curve.modifier.toLowerCase()
-    text += ` ${mod}`
+    text += ` ${mods[curve.modifier] || curve.modifier.toLowerCase()}`
   }
   
   return text
 }
 
 /**
- * Generate early warning callout
+ * Generate early warning (for hard curves)
  */
 export function generateEarlyWarning(mode, curve) {
   if (!curve) return null
   
-  const dir = curve.isChicane
-    ? (curve.startDirection === 'LEFT' ? 'Left' : 'Right')
-    : (curve.direction === 'LEFT' ? 'Left' : 'Right')
-  
   if (curve.isChicane) {
-    return `Chicane ahead`
+    const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
+    return `Chicane ${firstDir} ahead`
   }
   
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
   return `${dir} ${curve.severity} ahead`
 }
 
 /**
- * Generate final warning callout
+ * Generate final warning (for very hard curves)
  */
 export function generateFinalWarning(mode, curve) {
-  if (!curve) return null
+  if (!curve || curve.severity < 5) return null
   
-  const dir = curve.isChicane
-    ? (curve.startDirection === 'LEFT' ? 'Left' : 'Right')
-    : (curve.direction === 'LEFT' ? 'Left' : 'Right')
-  
-  if (curve.severity >= 5) {
-    return `${dir} now`
+  if (curve.isChicane) {
+    const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
+    return `${firstDir} now`
   }
-  return null // No final warning for easier curves
+  
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  return `${dir} now`
 }
 
-// No clear callouts - disabled
+// Clear callouts disabled
 export function shouldCallClear() { return false }
 export function generateClearCallout() { return null }
 
-// Severity colors for route display
+// Severity colors
 export const SEVERITY_COLORS = {
   1: '#22c55e',
   2: '#84cc16',
@@ -172,12 +164,12 @@ export function getSeverityColor(severity) {
   return SEVERITY_COLORS[severity] || '#22c55e'
 }
 
-// Voice config (simplified)
+// Voice timing
 export const VOICE_CONFIG = {
-  highway: { minPauseBetween: 2000 },
-  spirited: { minPauseBetween: 1500 },
-  technical: { minPauseBetween: 1200 },
-  urban: { minPauseBetween: 2000 }
+  highway: { minPauseBetween: 1500 },
+  spirited: { minPauseBetween: 1200 },
+  technical: { minPauseBetween: 1000 },
+  urban: { minPauseBetween: 1500 }
 }
 
 export default {
