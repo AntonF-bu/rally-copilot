@@ -123,8 +123,23 @@ export function analyzeHighwayBends(coordinates, segments) {
   
   console.log('🛣️ Highway Bend Analysis - Independent Detection')
   
+  // DEBUG: Log ALL segments to see what we're working with
+  console.log('📊 ALL segments received:', segments.map(s => ({
+    character: s.character,
+    start: Math.round(s.startDistance),
+    end: Math.round(s.endDistance),
+    length: Math.round(s.endDistance - s.startDistance)
+  })))
+  
   // Find highway (transit) segments
   const highwaySegments = segments.filter(s => s.character === 'transit')
+  
+  // DEBUG: Log transit segments specifically
+  console.log('🛣️ TRANSIT segments only:', highwaySegments.map(s => ({
+    start: Math.round(s.startDistance),
+    end: Math.round(s.endDistance),
+    length: Math.round(s.endDistance - s.startDistance)
+  })))
   
   if (!highwaySegments.length) {
     console.log('   No highway segments found')
@@ -151,6 +166,13 @@ export function analyzeHighwayBends(coordinates, segments) {
     allBends.push(...bends)
   })
   
+  // DEBUG: Log all detected bends before filtering
+  console.log('📍 ALL bends detected (before validation):', allBends.map(b => ({
+    dist: Math.round(b.distanceFromStart),
+    angle: b.angle,
+    dir: b.direction
+  })))
+  
   // Post-process: detect S-sweeps (two opposite bends in sequence)
   const processedBends = detectSSweeps(allBends)
   
@@ -164,10 +186,17 @@ export function analyzeHighwayBends(coordinates, segments) {
       bend.distanceFromStart <= seg.endDistance
     )
     if (!isInTransit) {
-      console.log(`   ⚠️ Filtered out bend at ${bend.distanceFromStart}m - not in transit zone`)
+      console.log(`   ⚠️ Filtered out bend at ${Math.round(bend.distanceFromStart)}m - not in transit zone`)
     }
     return isInTransit
   })
+  
+  // DEBUG: Log final validated bends
+  console.log('✅ FINAL validated bends:', validatedBends.map(b => ({
+    dist: Math.round(b.distanceFromStart),
+    angle: b.angle,
+    dir: b.direction
+  })))
   
   // Add coaching data
   const coachedBends = addCoachingData(validatedBends)
