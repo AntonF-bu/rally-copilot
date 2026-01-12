@@ -262,12 +262,31 @@ export function useHighwayMode() {
   }, [])
 
   // ================================
+  // COMPANION CHATTER
+  // Generates random chatter for long quiet stretches
+  // ================================
+  const getChatter = useCallback(() => {
+    if (!inHighwayZone) return null
+    
+    const config = getHighwayModeConfig(highwayMode)
+    if (!config.enableChatter) return null
+    
+    const chatter = getSilenceBreaker(lastCalloutTime, lastChatterTime)
+    if (chatter) {
+      recordChatterTime()
+      return chatter
+    }
+    return null
+  }, [inHighwayZone, highwayMode, lastCalloutTime, lastChatterTime, recordChatterTime])
+
+  // ================================
   // RETURN HOOK API
   // ================================
 
   return {
     // State
     isHighwayActive: inHighwayZone && highwayFeatures.sweepers,
+    inHighwayZone,  // Expose directly for debugging
     highwayMode,
     highwayStats,
     
@@ -279,10 +298,12 @@ export function useHighwayMode() {
     getNextHighwayCallout,
     getProgressCallout,
     getStatsCallout,
+    getChatter,  // NEW: For companion mode chatter
     onBendCompleted,
     
     // Actions
-    resetHighwayTrip
+    resetHighwayTrip,
+    recordCalloutTime
   }
 }
 
