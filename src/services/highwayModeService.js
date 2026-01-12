@@ -20,10 +20,10 @@ export const HIGHWAY_MODE = {
 const HIGHWAY_BEND_CONFIG = {
   sampleInterval: 10,       // meters - fine granularity
   slidingWindow: 200,       // meters - window for detecting gradual bends
-  minAngle: 10,             // degrees - only bends you'd feel at 75mph
+  minAngle: 8,              // degrees - lowered from 10 to catch more subtle bends
   maxAngle: 45,             // degrees - above this it's a real curve
-  minLength: 80,            // meters - minimum bend length (was 50)
-  minSpacing: 400,          // meters - minimum distance between markers
+  minLength: 60,            // meters - minimum bend length (lowered from 80)
+  minSpacing: 300,          // meters - minimum distance between markers (was 400)
   noMerge: true,            // Never merge highway bends
   noChicane: true           // Don't combine into chicanes - keep each bend separate
 }
