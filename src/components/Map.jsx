@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
+import { useHighwayMode } from '../hooks/useHighwayMode'
 
 // ================================
-// Map Component - v16 CLEAN
-// Fixed route visibility, removed problematic LngLatBounds
+// Map Component - v17
+// NEW: Transit zone filtering + highway bend markers
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -20,12 +21,16 @@ const SEVERITY_COLORS = {
   6: '#dc2626',
 }
 
+// Highway blue color for bend markers
+const HIGHWAY_BEND_COLOR = '#3b82f6'
+
 export default function Map() {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
+  const highwayMarkers = useRef([])  // NEW: Highway bend markers
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
@@ -45,6 +50,9 @@ export default function Map() {
   const routeZones = useStore(state => state.routeZones)
   const simulationProgress = useStore(state => state.simulationProgress)
 
+  // NEW: Get highway bends from hook
+  const { highwayBends, isHighwayActive } = useHighwayMode()
+
   // Calculate current zone character for zoom adjustment
   const currentZoneCharacter = (() => {
     if (!routeZones?.length || !routeData?.distance) return null
@@ -58,6 +66,16 @@ export default function Map() {
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
+
+  // NEW: Helper to check if a distance is within a transit zone
+  const isInTransitZone = useCallback((distance) => {
+    if (!routeZones?.length) return false
+    return routeZones.some(seg => 
+      seg.character === 'transit' && 
+      distance >= seg.startDistance && 
+      distance <= seg.endDistance
+    )
+  }, [routeZones])
 
   // Build severity segments for route coloring
   const buildSeveritySegments = useCallback((coordinates, curves, totalDistance) => {
@@ -408,7 +426,7 @@ export default function Map() {
     })
   }, [position, heading])
 
-  // Add curve markers - simple version
+  // Add curve markers - UPDATED: Skip curves in transit zones
   useEffect(() => {
     if (!map.current || !mapLoaded) return
 
@@ -421,6 +439,11 @@ export default function Map() {
 
     curves.forEach((curve) => {
       if (!curve.position) return
+      
+      // NEW: Skip curves in transit zones - highway system handles those
+      if (isInTransitZone(curve.distanceFromStart)) {
+        return
+      }
       
       const el = document.createElement('div')
       const isActive = activeCurve?.id === curve.id
@@ -457,7 +480,53 @@ export default function Map() {
       
       curveMarkers.current.push(marker)
     })
-  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded])
+  }, [routeData?.curves?.length, activeCurve?.id, mapLoaded, isInTransitZone])
+
+  // NEW: Add highway bend markers
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+
+    // Clear existing highway markers
+    highwayMarkers.current.forEach(m => m.remove())
+    highwayMarkers.current = []
+
+    if (!highwayBends?.length) return
+
+    highwayBends.forEach((bend) => {
+      if (!bend.position) return
+      
+      const el = document.createElement('div')
+      const isLeft = bend.direction === 'LEFT'
+      const dirArrow = isLeft ? '←' : '→'
+      
+      if (bend.isSSweep) {
+        // S-sweep marker - more prominent
+        const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
+        const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 8px ${HIGHWAY_BEND_COLOR}30;">
+            <span style="font-size:8px;font-weight:700;color:${HIGHWAY_BEND_COLOR};letter-spacing:0.5px;">S-SWEEP</span>
+            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend.angle}° ${dir2}${bend.secondBend.angle}°</span>
+          </div>
+        `
+      } else {
+        // Regular highway bend marker: [SW→ 12°]
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
+            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
+            <span style="font-size:10px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
+            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${bend.angle}°</span>
+          </div>
+        `
+      }
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat(bend.position)
+        .addTo(map.current)
+      
+      highwayMarkers.current.push(marker)
+    })
+  }, [highwayBends, mapLoaded])
 
   return (
     <div className="absolute inset-0">
