@@ -384,8 +384,10 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
       const sectionLength = lastBend.distanceFromStart - firstBend.distanceFromStart + (lastBend.length || 100)
       const maxAngle = Math.max(...clusterBends.map(b => b.isSSweep ? b.combinedAngle : b.angle))
       
-      // Always call it "active" - no scary names
-      const character = 'active'
+      // Determine section character
+      let character = 'sweeping'
+      if (maxAngle > 25 || totalAngle > 60) character = 'technical'
+      if (clusterSize >= 5 || totalAngle > 80) character = 'challenging'
       
       const section = {
         id: `hwy-section-${result.length + 1}`,
@@ -403,7 +405,7 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
         // Include individual bends for detailed callouts
         bends: clusterBends,
         // Generate callout text
-        calloutBasic: `Active section, ${clusterSize} bends`,
+        calloutBasic: `${character === 'technical' ? 'Technical' : 'Sweepy'} section, ${clusterSize} bends`,
         calloutDetailed: generateSectionCallout(clusterBends, character, sectionLength),
         // For UI compatibility
         direction: firstBend.direction,
@@ -430,12 +432,18 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
  * Narrates through the key bends with directions, angles, and speed targets
  */
 function generateSectionCallout(bends, character, length) {
-  if (!bends?.length) return 'Active section ahead.'
+  if (!bends?.length) return 'Section ahead.'
   
   const parts = []
   
-  // Always call it "Active section"
-  parts.push('Active section ahead')
+  // Opening based on character
+  if (character === 'challenging') {
+    parts.push('Challenging section ahead')
+  } else if (character === 'technical') {
+    parts.push('Technical stretch ahead')
+  } else {
+    parts.push('Sweeping section')
+  }
   
   // Narrate through key bends (limit to first 4-5 for brevity)
   const keyBends = bends.slice(0, 5)
@@ -488,8 +496,12 @@ function generateSectionCallout(bends, character, length) {
     parts.push(`${bends.length - 5} more bends follow`)
   }
   
-  // Simple closing
-  parts.push('Stay sharp')
+  // Closing advice
+  if (character === 'challenging') {
+    parts.push('Full attention')
+  } else if (character === 'technical') {
+    parts.push('Stay focused')
+  }
   
   return parts.join('. ') + '.'
 }
