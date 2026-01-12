@@ -2,11 +2,11 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
-import { analyzeRouteCharacter } from '../services/zoneService'
+import { analyzeRouteCharacter, ROUTE_CHARACTER } from '../services/zoneService'
 
 // ================================
-// Simulation Hook - v5
-// FIXED: Reliable curve updates with better filtering
+// Simulation Hook - v6
+// NEW: 75mph on highway zones
 // ================================
 
 // Demo route coordinates (Boston to Weston via scenic route)
@@ -18,6 +18,7 @@ export function useSimulation(enabled) {
     isRunning,
     mode,
     routeData,
+    routeZones,
     simulationPaused,
     simulationSpeed,
     setRouteData,
@@ -76,7 +77,7 @@ export function useSimulation(enabled) {
         coordinates: route.coordinates,
         curves,
         distance: segments.totalLength,
-        duration: Math.round(segments.totalLength / 15), // rough estimate
+        duration: Math.round(segments.totalLength / 15),
         name: 'Demo Route: Boston to Weston'
       }
 
@@ -138,30 +139,25 @@ export function useSimulation(enabled) {
 
     const animate = (timestamp) => {
       if (!lastTimeRef.current) lastTimeRef.current = timestamp
-      const deltaMs = Math.min(timestamp - lastTimeRef.current, 100) // Cap delta to prevent jumps
+      const deltaMs = Math.min(timestamp - lastTimeRef.current, 100)
       lastTimeRef.current = timestamp
 
-      // Sync with store progress (in case slider was dragged)
+      // Sync with store progress
       const storeProgress = useStore.getState().simulationProgress
       if (Math.abs(storeProgress - progressRef.current) > 0.01) {
         progressRef.current = storeProgress
-        // Reset last time to prevent jump
         lastTimeRef.current = timestamp
       }
 
-      // Check if paused
       if (simulationPaused) {
         animationRef.current = requestAnimationFrame(animate)
         return
       }
 
-      // Get simulation speed multiplier
       const speedMultiplier = simulationSpeed || 1
-
-      // Calculate current position along route
       const currentDistanceAlong = progressRef.current * totalLength
       
-      // Find which segment we're on
+      // Find current segment
       let accumulatedDist = 0
       let segmentIndex = 0
       for (let i = 0; i < lengths.length; i++) {
@@ -173,7 +169,7 @@ export function useSimulation(enabled) {
         if (i === lengths.length - 1) segmentIndex = i
       }
 
-      // Interpolate position within segment
+      // Interpolate position
       const segmentProgress = lengths[segmentIndex] > 0 
         ? (currentDistanceAlong - accumulatedDist) / lengths[segmentIndex]
         : 0
@@ -188,19 +184,16 @@ export function useSimulation(enabled) {
 
       setPosition(interpolatedPos)
 
-      // Calculate heading from next few points for smoothness
+      // Calculate heading
       const lookAheadIdx = Math.min(segmentIndex + 5, coordinates.length - 1)
       const heading = getBearing(interpolatedPos, coordinates[lookAheadIdx])
       setHeading(heading)
 
-      // ================================================================
-      // CRITICAL: Calculate curve distances properly
-      // ================================================================
+      // Calculate curve distances
       const curvesWithActualDistance = curves
-        // FILTER 1: Skip curves at very start of route (the "curve 1 at 0m" problem)
         .filter(curve => {
           const curveStart = curve.distanceFromStart || 0
-          return curveStart > 50 // Skip first 50m of route
+          return curveStart > 50
         })
         .map(curve => {
           const curveStart = curve.distanceFromStart || 0
@@ -208,11 +201,10 @@ export function useSimulation(enabled) {
           return {
             ...curve,
             distance: Math.max(0, actualDistance),
-            actualDistance // Keep the real value for sorting/filtering
+            actualDistance
           }
         })
       
-      // FILTER 2: Only include curves ahead of us (actualDistance > -30 means we haven't fully passed)
       const upcomingCurvesWithDist = curvesWithActualDistance
         .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
         .sort((a, b) => a.actualDistance - b.actualDistance)
@@ -220,66 +212,68 @@ export function useSimulation(enabled) {
 
       setUpcomingCurves(upcomingCurvesWithDist)
 
-      // Set active curve (one we're in or very close to)
       const activeCurve = upcomingCurvesWithDist.find(c => c.distance <= 30 && c.distance >= 0)
       setActiveCurve(activeCurve || null)
 
-      // Log for debugging (every ~3 seconds)
-      const now = Date.now()
-      if (now - lastLogTimeRef.current > 3000 && upcomingCurvesWithDist.length > 0) {
-        lastLogTimeRef.current = now
-        console.log(`📍 Demo simulation:
-          - Progress: ${(progressRef.current * 100).toFixed(1)}%
-          - Distance along: ${Math.round(currentDistanceAlong)}m / ${Math.round(totalLength)}m
-          - Speed: ${Math.round(currentSpeedRef.current)} mph (${speedMultiplier}x)
-          - Upcoming curves: ${upcomingCurvesWithDist.map(c => 
-              `${c.id}:${Math.round(c.distance)}m`
-            ).join(', ')}`)
+      // ================================================================
+      // ZONE-AWARE SPEED CALCULATION
+      // ================================================================
+      const zones = useStore.getState().routeZones
+      let currentZone = null
+      if (zones?.length) {
+        currentZone = zones.find(z => 
+          currentDistanceAlong >= z.startDistance && currentDistanceAlong <= z.endDistance
+        )
       }
-
-      // REALISTIC SPEED CALCULATION
+      
+      const isHighway = currentZone?.character === ROUTE_CHARACTER.TRANSIT
+      
+      // Get base speed - 75mph on highway, normal otherwise
+      const baseSpeed = isHighway ? 75 : getBaseSpeed(mode)
+      
       const nextCurve = upcomingCurvesWithDist[0]
-      const baseSpeed = getBaseSpeed(mode)
       
       // Calculate target speed based on upcoming curve
       if (nextCurve && nextCurve.distance < 300) {
         const curveSpeed = getCurveSpeed(nextCurve.severity, mode)
         
-        // Start slowing down based on distance to curve
         if (nextCurve.distance < 50) {
-          // In the curve - use curve speed
           targetSpeedRef.current = curveSpeed
         } else if (nextCurve.distance < 150) {
-          // Approaching curve - blend speeds
           const blendFactor = (nextCurve.distance - 50) / 100
           targetSpeedRef.current = curveSpeed + (baseSpeed - curveSpeed) * blendFactor
         } else if (nextCurve.distance < 300) {
-          // Preparing to slow - slight reduction
           const prepFactor = (nextCurve.distance - 150) / 150
           targetSpeedRef.current = baseSpeed - (baseSpeed - curveSpeed) * 0.3 * (1 - prepFactor)
         }
       } else {
-        // Open road - cruise at base speed
+        // Open road - cruise at base speed (75 on highway)
         targetSpeedRef.current = baseSpeed
       }
 
       // Smooth acceleration/deceleration
       const speedDiff = targetSpeedRef.current - currentSpeedRef.current
-      // Deceleration is faster than acceleration (realistic braking)
-      const maxAccel = speedDiff < 0 ? 15 : 8 // mph/s
+      const maxAccel = speedDiff < 0 ? 15 : 8
       const accel = Math.sign(speedDiff) * Math.min(Math.abs(speedDiff), maxAccel * (deltaMs / 1000))
       currentSpeedRef.current += accel
       
       setSpeed(currentSpeedRef.current)
 
-      // Update progress based on current speed
-      const speedMps = (currentSpeedRef.current * 1609.34) / 3600 // mph to m/s
+      // Update progress
+      const speedMps = (currentSpeedRef.current * 1609.34) / 3600
       const distanceTraveled = speedMps * (deltaMs / 1000) * speedMultiplier
       progressRef.current = Math.min(1, progressRef.current + distanceTraveled / totalLength)
       
       setSimulationProgress(progressRef.current)
 
-      // Check for end of route
+      // Log occasionally
+      const now = Date.now()
+      if (now - lastLogTimeRef.current > 3000 && upcomingCurvesWithDist.length > 0) {
+        lastLogTimeRef.current = now
+        console.log(`📍 Demo: ${(progressRef.current * 100).toFixed(1)}% | ${Math.round(currentSpeedRef.current)}mph | Zone: ${currentZone?.character || 'unknown'}`)
+      }
+
+      // Check for end
       if (progressRef.current >= 0.99) {
         console.log('🏁 Demo route complete!')
         useStore.getState().endTrip()
@@ -326,7 +320,6 @@ function getBaseSpeed(mode) {
 }
 
 function getCurveSpeed(severity, mode) {
-  // Base curve speeds by severity
   const baseSpeeds = {
     1: 50,
     2: 45,
@@ -347,7 +340,7 @@ function getCurveSpeed(severity, mode) {
 }
 
 function getDistanceBetween(coord1, coord2) {
-  const R = 6371e3 // Earth's radius in meters
+  const R = 6371e3
   const φ1 = coord1[1] * Math.PI / 180
   const φ2 = coord2[1] * Math.PI / 180
   const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180
