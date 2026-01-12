@@ -8,12 +8,13 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
+import { validateCurvesWithLLM } from '../services/llmCurveService'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 
 // ================================
-// Route Preview - v16
-// NEW: LLM zone classification during copilot prep
+// Route Preview - v17
+// NEW: Comprehensive LLM curve validation
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -511,47 +512,146 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
-      // PHASE 1.5: POST-PROCESSING - Highway Sandwich Rule
-      // Force any non-highway segment between two highway segments to highway
-      // This catches cases LLM misses (interchange curves, etc.)
+      // PHASE 1.5: POST-PROCESSING - Highway Continuity Rules
+      // Smart detection to fix misclassified highway segments
       // ========================================
-      const currentZones = routeCharacter.segments || []
-      if (currentZones.length >= 3) {
+      let currentZones = routeCharacter.segments || []
+      if (currentZones.length >= 2) {
         let fixedCount = 0
-        const fixedZones = currentZones.map((seg, i) => {
-          // Skip first and last segments
-          if (i === 0 || i === currentZones.length - 1) return seg
-          
+        
+        // Calculate total distance by character
+        const distanceByChar = {}
+        currentZones.forEach(seg => {
+          const len = (seg.endDistance || 0) - (seg.startDistance || 0)
+          distanceByChar[seg.character] = (distanceByChar[seg.character] || 0) + len
+        })
+        const totalDist = Object.values(distanceByChar).reduce((a, b) => a + b, 0)
+        const highwayPercent = ((distanceByChar['transit'] || 0) / totalDist) * 100
+        
+        console.log(`🔧 Route composition: Highway ${highwayPercent.toFixed(0)}%, checking for fixes...`)
+        
+        // RULE 1: If route is predominantly highway (>60%), convert short non-highway segments
+        const isHighwayRoute = highwayPercent > 60
+        
+        let fixedZones = currentZones.map((seg, i) => {
+          const segLength = (seg.endDistance || 0) - (seg.startDistance || 0)
+          const segLengthMiles = segLength / 1609.34
           const prevSeg = currentZones[i - 1]
           const nextSeg = currentZones[i + 1]
           
-          // If this segment is NOT highway but both neighbors ARE highway
-          if (seg.character !== 'transit' && 
-              prevSeg.character === 'transit' && 
-              nextSeg.character === 'transit') {
-            console.log(`🔧 Fixing sandwiched segment ${seg.id}: ${seg.character} → transit (highway)`)
+          // Skip if already highway
+          if (seg.character === 'transit') return seg
+          
+          // RULE 2: Sandwiched between two highway segments → force highway
+          if (prevSeg?.character === 'transit' && nextSeg?.character === 'transit') {
+            console.log(`🔧 Fixing sandwiched segment ${seg.id}: ${seg.character} → transit`)
             fixedCount++
-            return {
-              ...seg,
-              character: 'transit',
-              behavior: routeCharacter.segments[0]?.behavior, // Copy highway behavior
-              sandwichFixed: true
+            return { ...seg, character: 'transit', sandwichFixed: true }
+          }
+          
+          // RULE 3: Short segment (<3mi) at START of predominantly highway route
+          if (i === 0 && nextSeg?.character === 'transit' && segLengthMiles < 3 && isHighwayRoute) {
+            console.log(`🔧 Fixing short start segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
+            fixedCount++
+            return { ...seg, character: 'transit', startFixed: true }
+          }
+          
+          // RULE 4: Short segment (<3mi) at END of predominantly highway route
+          if (i === currentZones.length - 1 && prevSeg?.character === 'transit' && segLengthMiles < 3 && isHighwayRoute) {
+            console.log(`🔧 Fixing short end segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
+            fixedCount++
+            return { ...seg, character: 'transit', endFixed: true }
+          }
+          
+          // RULE 5: On a highway route, any technical segment <5mi surrounded by highway is suspect
+          if (isHighwayRoute && segLengthMiles < 5) {
+            // Check if there's highway within 2 segments in either direction
+            const nearbyHighway = currentZones.slice(Math.max(0, i-2), i+3).some(
+              (s, idx) => idx !== (i - Math.max(0, i-2)) && s.character === 'transit'
+            )
+            if (nearbyHighway) {
+              console.log(`🔧 Fixing isolated segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi, nearby highway)`)
+              fixedCount++
+              return { ...seg, character: 'transit', isolatedFixed: true }
             }
           }
+          
           return seg
         })
         
+        // RULE 6: Second pass - merge any remaining tiny gaps
+        // If we have [HWY][TECH][HWY] pattern after first pass, the TECH should be gone
+        // But check for [HWY][TECH][TECH][HWY] → both TECH should become HWY
+        if (fixedZones.length >= 4) {
+          fixedZones = fixedZones.map((seg, i) => {
+            if (seg.character === 'transit') return seg
+            if (i === 0 || i === fixedZones.length - 1) return seg
+            
+            // Look for highway within 2 positions on each side
+            const hasHighwayBefore = fixedZones.slice(Math.max(0, i-2), i).some(s => s.character === 'transit')
+            const hasHighwayAfter = fixedZones.slice(i+1, Math.min(fixedZones.length, i+3)).some(s => s.character === 'transit')
+            
+            const segLength = (seg.endDistance || 0) - (seg.startDistance || 0)
+            const segLengthMiles = segLength / 1609.34
+            
+            if (hasHighwayBefore && hasHighwayAfter && segLengthMiles < 8 && isHighwayRoute) {
+              console.log(`🔧 Second pass: fixing ${seg.id}: ${seg.character} → transit`)
+              fixedCount++
+              return { ...seg, character: 'transit', secondPassFixed: true }
+            }
+            return seg
+          })
+        }
+        
         if (fixedCount > 0) {
-          console.log(`🔧 Fixed ${fixedCount} sandwiched segment(s) to highway`)
+          console.log(`🔧 Fixed ${fixedCount} segment(s) for highway continuity`)
           setRouteCharacter(prev => ({ ...prev, segments: fixedZones }))
           setRouteZones(fixedZones)
           
           // Re-analyze highway bends with fixed zones
           const bends = analyzeHighwayBends(routeData.coordinates, fixedZones)
           setHighwayBends(bends)
-          console.log(`🛣️ Re-analyzed highway bends after sandwich fix: ${bends.length}`)
+          console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
         }
       }
+      
+      // ========================================
+      // PHASE 1.75: LLM Curve Validation
+      // Comprehensive curve analysis and enhancement
+      // ========================================
+      if (hasLLMApiKey() && routeData?.curves?.length > 0) {
+        setCopilotProgress(15)
+        setCopilotStatus('🤖 AI analyzing curves...')
+        
+        try {
+          const currentZones = routeCharacter.segments || []
+          const enhancedCurves = await validateCurvesWithLLM(
+            routeData.curves,
+            currentZones,
+            routeData,
+            getLLMApiKey()
+          )
+          
+          if (enhancedCurves?.length > 0) {
+            // Update route data with enhanced curves
+            setRouteData(prev => ({ ...prev, curves: enhancedCurves }))
+            
+            // Count enhancements
+            const chicanes = enhancedCurves.filter(c => c.isChicaneStart).length
+            const adjusted = enhancedCurves.filter(c => c.severityAdjusted).length
+            const priority = enhancedCurves.filter(c => c.highwayPriority).length
+            
+            if (chicanes > 0 || adjusted > 0 || priority > 0) {
+              console.log(`🤖 Curve enhancements: ${chicanes} chicanes, ${adjusted} severity adjustments, ${priority} highway priority`)
+              setLlmEnhanced(true)
+            }
+          }
+        } catch (curveError) {
+          console.warn('⚠️ LLM curve validation failed:', curveError)
+        }
+      }
+      
+      setCopilotProgress(20)
       
       // ========================================
       // PHASE 2: Voice Preloading
