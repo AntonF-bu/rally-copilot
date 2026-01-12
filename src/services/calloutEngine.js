@@ -1,6 +1,6 @@
 // ================================
-// Callout Engine v2.0
-// Context-aware timing, content, and pacing
+// Callout Engine v2.1
+// FIXED: Clear callouts only for technical mode
 // ================================
 
 import { ROUTE_CHARACTER, CHARACTER_BEHAVIORS } from './zoneService'
@@ -55,7 +55,7 @@ export const VOICE_CONFIG = {
   highway: {
     speed: 0.9,           // Slower speech
     stability: 0.85,      // Smooth, consistent
-    minPauseBetween: 1500, // ms between callouts (reduced for demo responsiveness)
+    minPauseBetween: 1500, // ms between callouts
     style: 'relaxed'
   },
   spirited: {
@@ -73,7 +73,7 @@ export const VOICE_CONFIG = {
   urban: {
     speed: 0.9,
     stability: 0.85,
-    minPauseBetween: 1500, // reduced from 6000
+    minPauseBetween: 1500,
     style: 'casual'
   }
 }
@@ -104,11 +104,8 @@ const CALLOUT_TEMPLATES = {
   },
   spirited: {
     curve: (dir, sev, mod) => `${dir} ${sev}${mod ? ', ' + mod : ''}`,
-    straight: (dist, nextCurve) => {
-      if (dist < 300) return null
-      if (nextCurve) return `Clear. ${nextCurve.direction === 'LEFT' ? 'Left' : 'Right'} ${nextCurve.severity} ahead.`
-      return `Clear, ${Math.round(dist/100)*100} meters`
-    }
+    // NO straight/clear callouts for spirited - just announce curves
+    straight: () => null
   },
   technical: {
     curve: (dir, sev, mod, speed) => {
@@ -128,7 +125,7 @@ const CALLOUT_TEMPLATES = {
     clear: (dist) => {
       if (dist > 300) return `Clear, ${Math.round(dist/50)*50} meters`
       if (dist > 150) return 'Clear ahead'
-      return 'Straight'
+      return null // Don't say anything for short straights
     },
     push: 'Opens, push',
     breathe: 'Breathe'
@@ -237,24 +234,26 @@ export function getWarningDistances(mode, userSpeedMph, expectedSpeedMph) {
 }
 
 /**
- * Check if it's time for a "clear" callout in technical mode
+ * Check if it's time for a "clear" callout
+ * FIXED: Only enable for TECHNICAL mode, and with stricter conditions
  */
 export function shouldCallClear(mode, timeSinceLastCallout, distanceToNextCurve) {
-  if (mode !== DRIVING_MODE.TECHNICAL) return false
-  
-  // In technical mode, never silent more than 5 seconds
-  // OR if there's a long straight (> 200m) mention it
-  const maxSilence = 5000 // ms
-  
-  if (timeSinceLastCallout > maxSilence && distanceToNextCurve > 100) {
-    return true
+  // ONLY technical mode gets clear callouts
+  if (mode !== DRIVING_MODE.TECHNICAL) {
+    return false
   }
   
-  if (distanceToNextCurve > 200 && timeSinceLastCallout > 2000) {
-    return true
+  // Must have significant distance to next curve (> 400m = real straight)
+  if (distanceToNextCurve < 400) {
+    return false
   }
   
-  return false
+  // Must have been silent for a while (> 8 seconds)
+  if (timeSinceLastCallout < 8000) {
+    return false
+  }
+  
+  return true
 }
 
 // ================================
@@ -300,6 +299,7 @@ export function generateModeCallout(mode, curve, phase, options = {}) {
       return `${dir} now`
     
     case 'clear':
+      // Only technical mode has clear template
       if (mode === DRIVING_MODE.TECHNICAL && templates.clear) {
         return templates.clear(distanceToNext)
       }
@@ -334,31 +334,25 @@ export function generateChicaneCallout(mode, chicane, phase) {
 
 /**
  * Generate straight/clear callout
+ * FIXED: Only for technical mode, with reasonable distances
  */
 export function generateClearCallout(mode, distanceMeters, nextCurve, speedUnit) {
-  if (mode === DRIVING_MODE.TECHNICAL) {
-    if (distanceMeters > 300) {
-      const distText = speedUnit === 'kmh' 
-        ? `${Math.round(distanceMeters/100)*100} meters`
-        : `${Math.round(distanceMeters * 3.28084 / 100) * 100} feet`
-      return `Clear, ${distText}`
-    }
-    return 'Clear ahead'
+  // ONLY technical mode gets clear callouts
+  if (mode !== DRIVING_MODE.TECHNICAL) {
+    return null
   }
   
-  if (mode === DRIVING_MODE.HIGHWAY && distanceMeters > 1500) {
-    const distText = speedUnit === 'kmh'
-      ? `${Math.round(distanceMeters/1000)} kilometers`
-      : `${Math.round(distanceMeters/1609)} miles`
-    return `Straight for ${distText}`
+  // Only announce if there's a real straight (> 400m)
+  if (distanceMeters < 400) {
+    return null
   }
   
-  if (mode === DRIVING_MODE.SPIRITED && distanceMeters > 400 && nextCurve) {
-    const nextDir = nextCurve.direction === 'LEFT' ? 'left' : 'right'
-    return `Clear. ${nextDir.charAt(0).toUpperCase() + nextDir.slice(1)} ${nextCurve.severity} ahead.`
-  }
+  // Format distance
+  const distText = speedUnit === 'kmh' 
+    ? `${Math.round(distanceMeters/100)*100} meters`
+    : `${Math.round(distanceMeters * 3.28084 / 500) * 500} feet` // Round to 500ft
   
-  return null  // No callout needed
+  return `Clear, ${distText}`
 }
 
 /**
