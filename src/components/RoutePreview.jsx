@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
@@ -196,27 +196,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setRouteCharacter(analysis)
       setRouteZones(analysis.segments)
       
-      // NEW: Filter out curves in transit zones - highway system handles those
-      if (analysis.segments?.length && curves?.length) {
-        const transitSegments = analysis.segments.filter(s => s.character === 'transit')
-        const nonHighwayCurves = curves.filter(curve => {
-          const isInTransit = transitSegments.some(seg => 
-            curve.distanceFromStart >= seg.startDistance && 
-            curve.distanceFromStart <= seg.endDistance
-          )
-          return !isInTransit
-        })
-        
-        // Update routeData with filtered curves
-        setRouteData(prev => ({
-          ...prev,
-          curves: nonHighwayCurves,
-          allCurves: curves  // Keep original for reference if needed
-        }))
-        
-        console.log(`📍 Curve filtering: ${curves.length} total → ${nonHighwayCurves.length} non-highway`)
-      }
-      
       // NEW: Run independent highway bend analysis
       if (!highwayAnalyzedRef.current && analysis.segments?.length) {
         highwayAnalyzedRef.current = true
@@ -227,12 +206,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         // Log breakdown
         if (bends.length > 0) {
           const sSweeps = bends.filter(b => b.isSSweep)
-          const sections = bends.filter(b => b.isSection)
-          const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep && !b.isSection)
-          console.log(`   - Sections: ${sections.length}`)
+          const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
           console.log(`   - S-sweeps: ${sSweeps.length}`)
           console.log(`   - Sweepers: ${sweepers.length}`)
-          console.log(`   - Other bends: ${bends.length - sSweeps.length - sections.length - sweepers.length}`)
+          console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
         }
       }
       
@@ -704,13 +681,28 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
-  // Add curve markers - curves are already filtered to exclude transit zones
+  // Helper: Check if a distance is within a transit zone
+  const isInTransitZone = useCallback((distance) => {
+    if (!routeCharacter.segments?.length) return false
+    return routeCharacter.segments.some(seg => 
+      seg.character === 'transit' && 
+      distance >= seg.startDistance && 
+      distance <= seg.endDistance
+    )
+  }, [routeCharacter.segments])
+
+  // Add curve markers - SKIP curves in transit zones (highway system handles those)
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
     
     curves?.forEach(curve => {
       if (!curve.position) return
+      
+      // Skip curves in transit/highway zones - the highway bend system handles those
+      if (isInTransitZone(curve.distanceFromStart)) {
+        return
+      }
       
       const color = getCurveColor(curve.severity)
       const el = document.createElement('div')
@@ -724,7 +716,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       el.onclick = () => handleCurveClick(curve)
       markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(map))
     })
-  }, [])
+  }, [isInTransitZone])
 
   // NEW: Add highway bend markers
   const addHighwayBendMarkers = useCallback((map, bends) => {
@@ -740,18 +732,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      if (bend.isSection) {
-        // SECTION marker - consolidated cluster - always "ACTIVE"
-        const bgColor = '#f59e0b'  // Amber/orange for active sections
-        el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
-            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
-            <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
-            <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
-          </div>
-        `
-      } else if (bend.isSSweep) {
-        // S-sweep marker
+      const isLeft = bend.direction === 'LEFT'
+      const dirArrow = isLeft ? '←' : '→'
+      
+      if (bend.isSSweep) {
+        // S-sweep marker - more prominent
         const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
         const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
         el.innerHTML = `
@@ -762,8 +747,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         `
       } else {
         // Regular highway bend marker: [SW→ 12°]
-        const isLeft = bend.direction === 'LEFT'
-        const dirArrow = isLeft ? '←' : '→'
         el.innerHTML = `
           <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
             <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
@@ -823,17 +806,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setMapLoaded(true)
       addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments, routeData.curves)
       addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
-      
-      // Fit bounds with error handling
-      try {
-        const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-        mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
-      } catch (err) {
-        console.warn('fitBounds failed, using fallback:', err)
-        // Fallback: just center on first coordinate
-        mapRef.current.setCenter(routeData.coordinates[0])
-        mapRef.current.setZoom(11)
-      }
+      const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
+      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
     mapRef.current.on('style.load', () => rebuildRoute())
     return () => { 
@@ -1026,7 +1000,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
                     style={{ background: `${HIGHWAY_BEND_COLOR}20`, color: HIGHWAY_BEND_COLOR, border: `1px solid ${HIGHWAY_BEND_COLOR}40` }}
                   >
-                    {highwayBends.length} highway {highwayBends.length === 1 ? 'marker' : 'markers'}
+                    {highwayBends.length} sweeps
                   </span>
                 )}
                 {routeCharacter.summary.funPercentage > 0 && (
