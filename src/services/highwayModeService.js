@@ -1,9 +1,10 @@
 // ================================
-// Highway Mode Service v1.0
-// Enhances highway driving with sweeper detection and mode-specific features
+// Highway Mode Service v2.0
+// NEW: Independent highway bend detection (Option A)
 // 
 // This is an ADDITIVE service - it does NOT modify existing curve detection.
-// It post-processes existing curve data to add highway-specific features.
+// It independently analyzes highway segments to catch bends that would
+// otherwise be merged/filtered by the main detection system.
 // ================================
 
 // ================================
@@ -15,18 +16,59 @@ export const HIGHWAY_MODE = {
   COMPANION: 'companion' // Full engagement: chatter, stats, gamification
 }
 
-// Sweeper thresholds - these are GENTLE curves the normal system might skip
+// Highway bend detection thresholds - MORE SENSITIVE than main detection
+const HIGHWAY_BEND_CONFIG = {
+  sampleInterval: 10,       // meters - fine granularity
+  slidingWindow: 200,       // meters - window for detecting gradual bends
+  minAngle: 4,              // degrees - very sensitive! (main uses 8 for highway)
+  maxAngle: 45,             // degrees - above this it's a real curve
+  minLength: 50,            // meters - minimum bend length
+  noMerge: true,            // Never merge highway bends
+  noChicane: true           // Don't combine into chicanes - keep each bend separate
+}
+
+// Sweeper thresholds (subset of highway bends)
 const SWEEPER_CONFIG = {
-  minAngle: 8,        // Minimum degrees to qualify as sweeper (already detected)
+  minAngle: 8,        // Minimum degrees to qualify as sweeper
   maxAngle: 25,       // Above this, it's a real curve, not a sweeper
-  minLength: 150,     // Minimum curve length in meters (sweepers are long and gentle)
+  minLength: 150,     // Minimum curve length in meters
   maxSeverity: 2      // Sweepers are severity 1-2 max
 }
 
-// Callout templates
-const SWEEPER_CALLOUTS = {
-  basic: (direction, angle) => `Sweeper ${direction}, ${Math.round(angle)} degrees`,
-  companion: (direction, angle) => `Sweeper ${direction}, ${Math.round(angle)} degrees`
+// Coaching callout templates
+const COACHING_TEMPLATES = {
+  // Gentle sweep (4-12°)
+  gentleSweep: (dir, angle, length) => {
+    const lengthDesc = length > 400 ? 'very long' : length > 200 ? 'long' : ''
+    return `${lengthDesc} gentle ${dir} sweep, ${angle} degrees`.trim().replace(/\s+/g, ' ')
+  },
+  
+  // Moderate sweep (12-25°)
+  moderateSweep: (dir, angle, speed) => 
+    `${dir} sweep, ${angle} degrees. Target ${speed}.`,
+  
+  // S-sweep (two bends in sequence)
+  sSweep: (dir1, angle1, dir2, angle2, gap) => 
+    `S sweep: ${dir1} ${angle1}, then ${dir2} ${angle2}. ${gap < 100 ? 'Quick transition.' : ''}`.trim(),
+  
+  // Detailed coaching (Companion mode)
+  detailed: (bend) => {
+    const parts = []
+    const lengthDesc = bend.length > 400 ? 'Very long' : bend.length > 200 ? 'Long' : ''
+    const angleDesc = bend.angle < 10 ? 'soft' : bend.angle < 20 ? 'moderate' : 'firm'
+    
+    parts.push(`${lengthDesc} ${angleDesc} ${bend.direction.toLowerCase()}, ${bend.angle} degrees`.trim())
+    
+    if (bend.optimalSpeed) {
+      parts.push(`Target ${bend.optimalSpeed}`)
+    }
+    
+    if (bend.throttleAdvice) {
+      parts.push(bend.throttleAdvice)
+    }
+    
+    return parts.join('. ').replace(/\s+/g, ' ') + '.'
+  }
 }
 
 // Silence breaker chatter pool (for Companion mode)
@@ -61,43 +103,413 @@ const PROGRESS_TEMPLATES = {
   oneMile: '1 mile to destination'
 }
 
-// Stats callout templates
-const STATS_TEMPLATES = {
-  sweepersCleared: (count) => `${count} sweepers cleared`,
-  averageSpeed: (speed) => `Averaging ${Math.round(speed)}, solid pace`,
-  sectionComplete: (sweepers, miles, avgSpeed) => 
-    `Highway section complete. ${sweepers} sweepers, ${Math.round(miles)} miles, averaging ${Math.round(avgSpeed)}.`
+
+// ================================
+// HIGHWAY BEND DETECTION (Option A)
+// Independent analysis that doesn't touch curveDetection.js
+// ================================
+
+/**
+ * Analyze highway segments independently for all bends
+ * This runs AFTER main curve detection and finds bends that were merged/filtered
+ * 
+ * @param {Array} coordinates - Full route coordinates
+ * @param {Array} segments - Route character segments from zoneService.js
+ * @returns {Array} - Highway bends with full detail
+ */
+export function analyzeHighwayBends(coordinates, segments) {
+  if (!coordinates?.length || !segments?.length) return []
+  
+  console.log('🛣️ Highway Bend Analysis - Independent Detection')
+  
+  // Find highway (transit) segments
+  const highwaySegments = segments.filter(s => s.character === 'transit')
+  
+  if (!highwaySegments.length) {
+    console.log('   No highway segments found')
+    return []
+  }
+  
+  const allBends = []
+  
+  highwaySegments.forEach((segment, segIdx) => {
+    console.log(`   Analyzing highway segment ${segIdx + 1}: ${Math.round(segment.startDistance)}m - ${Math.round(segment.endDistance)}m`)
+    
+    // Extract coordinates for this segment
+    const segmentCoords = extractSegmentCoordinates(coordinates, segment)
+    
+    if (segmentCoords.length < 10) {
+      console.log(`   Skipping - too few points (${segmentCoords.length})`)
+      return
+    }
+    
+    // Run independent bend detection on this segment
+    const bends = detectHighwayBends(segmentCoords, segment.startDistance)
+    
+    console.log(`   Found ${bends.length} bends in segment`)
+    allBends.push(...bends)
+  })
+  
+  // Post-process: detect S-sweeps (two opposite bends in sequence)
+  const processedBends = detectSSweeps(allBends)
+  
+  // Add coaching data
+  const coachedBends = addCoachingData(processedBends)
+  
+  console.log(`🛣️ Highway Analysis Complete: ${coachedBends.length} bends total`)
+  
+  return coachedBends
+}
+
+/**
+ * Extract coordinates for a specific segment
+ */
+function extractSegmentCoordinates(coordinates, segment) {
+  const totalLength = estimateRouteLength(coordinates)
+  const startProgress = segment.startDistance / totalLength
+  const endProgress = segment.endDistance / totalLength
+  
+  const startIdx = Math.floor(startProgress * coordinates.length)
+  const endIdx = Math.min(Math.ceil(endProgress * coordinates.length), coordinates.length)
+  
+  return coordinates.slice(startIdx, endIdx)
+}
+
+/**
+ * Estimate total route length from coordinates
+ */
+function estimateRouteLength(coordinates) {
+  let total = 0
+  for (let i = 1; i < coordinates.length; i++) {
+    total += getDistance(coordinates[i-1], coordinates[i])
+  }
+  return total
+}
+
+/**
+ * Core highway bend detection - simplified, no merging
+ */
+function detectHighwayBends(coordinates, segmentStartDistance) {
+  const bends = []
+  
+  // Interpolate to fixed intervals
+  const points = interpolatePoints(coordinates, HIGHWAY_BEND_CONFIG.sampleInterval)
+  
+  if (points.length < 5) return bends
+  
+  // Calculate headings
+  const headings = []
+  for (let i = 0; i < points.length - 1; i++) {
+    headings.push(getBearing(points[i].coord, points[i + 1].coord))
+  }
+  
+  // Sliding window detection
+  const windowSize = Math.floor(HIGHWAY_BEND_CONFIG.slidingWindow / HIGHWAY_BEND_CONFIG.sampleInterval)
+  const usedPoints = new Set()
+  
+  let i = 0
+  while (i < headings.length - windowSize) {
+    // Skip if already part of a bend
+    let skip = false
+    for (let j = i; j < i + windowSize && !skip; j++) {
+      if (usedPoints.has(j)) skip = true
+    }
+    if (skip) { i++; continue }
+    
+    // Calculate heading change over window
+    let windowChange = 0
+    for (let j = i; j < i + windowSize - 1; j++) {
+      windowChange += getHeadingChange(headings[j], headings[j + 1])
+    }
+    
+    const absChange = Math.abs(windowChange)
+    
+    // Check if this qualifies as a bend
+    if (absChange >= HIGHWAY_BEND_CONFIG.minAngle) {
+      // Expand to find full extent of bend
+      let bendStart = i
+      let bendEnd = i + windowSize - 1
+      let totalChange = windowChange
+      const direction = Math.sign(windowChange)
+      
+      // Expand backwards
+      while (bendStart > 0 && !usedPoints.has(bendStart - 1)) {
+        const change = getHeadingChange(headings[bendStart - 1], headings[bendStart])
+        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {
+          totalChange += change
+          bendStart--
+        } else break
+      }
+      
+      // Expand forwards
+      while (bendEnd < headings.length - 1 && !usedPoints.has(bendEnd + 1)) {
+        const change = getHeadingChange(headings[bendEnd], headings[bendEnd + 1])
+        if (Math.sign(change) === direction && Math.abs(change) > 0.2) {
+          totalChange += change
+          bendEnd++
+        } else break
+      }
+      
+      // Create bend object
+      const bendLength = points[bendEnd].distance - points[bendStart].distance
+      const angle = Math.abs(Math.round(totalChange))
+      
+      if (angle >= HIGHWAY_BEND_CONFIG.minAngle && angle <= HIGHWAY_BEND_CONFIG.maxAngle) {
+        const bend = {
+          id: `hwy-${bends.length + 1}`,
+          type: 'highway_bend',
+          direction: totalChange > 0 ? 'RIGHT' : 'LEFT',
+          angle: angle,
+          length: Math.round(bendLength),
+          distanceFromStart: Math.round(segmentStartDistance + points[bendStart].distance),
+          position: points[Math.floor((bendStart + bendEnd) / 2)].coord,
+          entryPosition: points[bendStart].coord,
+          exitPosition: points[Math.min(bendEnd + 1, points.length - 1)].coord,
+          startIndex: bendStart,
+          endIndex: bendEnd,
+          // Sweeper classification
+          isSweeper: angle >= SWEEPER_CONFIG.minAngle && 
+                     angle <= SWEEPER_CONFIG.maxAngle && 
+                     bendLength >= SWEEPER_CONFIG.minLength,
+          isHighwayBend: true
+        }
+        
+        bends.push(bend)
+        
+        // Mark points as used
+        for (let j = bendStart; j <= bendEnd; j++) {
+          usedPoints.add(j)
+        }
+      }
+      
+      i = bendEnd + 1
+    } else {
+      i++
+    }
+  }
+  
+  return bends
+}
+
+/**
+ * Detect S-sweeps - two opposite direction bends in sequence
+ */
+function detectSSweeps(bends) {
+  if (bends.length < 2) return bends
+  
+  const result = []
+  let i = 0
+  
+  while (i < bends.length) {
+    const current = bends[i]
+    const next = bends[i + 1]
+    
+    if (next) {
+      const gap = next.distanceFromStart - (current.distanceFromStart + current.length)
+      const oppositeDirection = current.direction !== next.direction
+      
+      // S-sweep: opposite directions, close together
+      if (oppositeDirection && gap >= 0 && gap < 200) {
+        // Combine into S-sweep
+        const sSweep = {
+          ...current,
+          id: `hwy-s-${result.length + 1}`,
+          type: 'highway_s_sweep',
+          isSSweep: true,
+          firstBend: {
+            direction: current.direction,
+            angle: current.angle,
+            length: current.length
+          },
+          secondBend: {
+            direction: next.direction,
+            angle: next.angle,
+            length: next.length
+          },
+          gapDistance: Math.round(gap),
+          totalLength: (next.distanceFromStart + next.length) - current.distanceFromStart,
+          exitPosition: next.exitPosition,
+          combinedAngle: current.angle + next.angle
+        }
+        
+        result.push(sSweep)
+        i += 2
+        continue
+      }
+    }
+    
+    result.push(current)
+    i++
+  }
+  
+  return result
+}
+
+/**
+ * Add coaching data to bends
+ */
+function addCoachingData(bends) {
+  return bends.map(bend => {
+    // Calculate optimal speed based on angle and length
+    const optimalSpeed = calculateOptimalSpeed(bend)
+    
+    // Generate throttle advice
+    const throttleAdvice = generateThrottleAdvice(bend)
+    
+    return {
+      ...bend,
+      optimalSpeed,
+      throttleAdvice,
+      // Severity equivalent (for compatibility with existing UI)
+      severity: angleToSeverity(bend.angle),
+      // Modifier for display
+      modifier: bend.isSSweep ? 'S-SWEEP' : 
+                bend.length > 300 ? 'LONG' : 
+                bend.angle < 10 ? 'GENTLE' : null
+    }
+  })
+}
+
+/**
+ * Calculate optimal speed for a highway bend
+ */
+function calculateOptimalSpeed(bend) {
+  // Base speed for highway (75 mph)
+  const baseSpeed = 75
+  
+  // Reduce based on angle
+  let reduction = 0
+  if (bend.angle > 30) reduction = 15
+  else if (bend.angle > 20) reduction = 10
+  else if (bend.angle > 15) reduction = 5
+  else if (bend.angle > 10) reduction = 3
+  
+  // S-sweeps need more reduction due to transition
+  if (bend.isSSweep) {
+    reduction += 5
+  }
+  
+  return Math.round(baseSpeed - reduction)
+}
+
+/**
+ * Generate throttle advice for coaching callouts
+ */
+function generateThrottleAdvice(bend) {
+  if (bend.isSSweep) {
+    return 'Lift through transition, power out of second bend'
+  }
+  
+  if (bend.angle < 10) {
+    return 'Maintain throttle'
+  } else if (bend.angle < 15) {
+    return 'Light lift, smooth through'
+  } else if (bend.angle < 25) {
+    return 'Ease off entry, progressive throttle from apex'
+  } else {
+    return 'Brake before entry, accelerate from apex'
+  }
+}
+
+/**
+ * Convert angle to severity equivalent
+ */
+function angleToSeverity(angle) {
+  if (angle < 10) return 1
+  if (angle < 20) return 2
+  if (angle < 30) return 3
+  if (angle < 40) return 4
+  return 5
 }
 
 
 // ================================
-// SWEEPER DETECTION
-// Post-processes existing curve data to identify sweepers
+// INTERPOLATION & GEOMETRY HELPERS
+// ================================
+
+function interpolatePoints(coordinates, intervalMeters) {
+  const result = []
+  let cumulativeDistance = 0
+  
+  result.push({ coord: coordinates[0], distance: 0 })
+  
+  for (let i = 1; i < coordinates.length; i++) {
+    const segmentDist = getDistance(coordinates[i-1], coordinates[i])
+    const prevDist = cumulativeDistance
+    cumulativeDistance += segmentDist
+    
+    // Add intermediate points
+    const numPoints = Math.floor(segmentDist / intervalMeters)
+    for (let j = 1; j <= numPoints; j++) {
+      const ratio = j / (numPoints + 1)
+      const interpCoord = [
+        coordinates[i-1][0] + (coordinates[i][0] - coordinates[i-1][0]) * ratio,
+        coordinates[i-1][1] + (coordinates[i][1] - coordinates[i-1][1]) * ratio
+      ]
+      result.push({ 
+        coord: interpCoord, 
+        distance: prevDist + segmentDist * ratio 
+      })
+    }
+    
+    result.push({ coord: coordinates[i], distance: cumulativeDistance })
+  }
+  
+  return result
+}
+
+function getDistance(coord1, coord2) {
+  const R = 6371e3 // Earth radius in meters
+  const φ1 = coord1[1] * Math.PI / 180
+  const φ2 = coord2[1] * Math.PI / 180
+  const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180
+  const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180
+
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+
+  return R * c
+}
+
+function getBearing(coord1, coord2) {
+  const φ1 = coord1[1] * Math.PI / 180
+  const φ2 = coord2[1] * Math.PI / 180
+  const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180
+
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
+}
+
+function getHeadingChange(heading1, heading2) {
+  let diff = heading2 - heading1
+  while (diff > 180) diff -= 360
+  while (diff < -180) diff += 360
+  return diff
+}
+
+
+// ================================
+// SWEEPER DETECTION (Original - works with main curve data)
 // ================================
 
 /**
  * Analyze curves and tag sweepers for highway zones
- * Does NOT modify original curves - returns enhanced copy
- * 
- * @param {Array} curves - Existing curve data from curveDetection.js
- * @param {Array} segments - Route character segments from zoneService.js
- * @returns {Array} - Curves with added sweeper metadata
+ * This works with the EXISTING curve data from curveDetection.js
  */
 export function identifySweepers(curves, segments) {
   if (!curves?.length) return []
   
-  // Find highway (transit) segments
   const highwaySegments = segments?.filter(s => s.character === 'transit') || []
   
   return curves.map(curve => {
-    // Check if curve is in a highway segment
     const inHighway = isInHighwaySegment(curve, highwaySegments)
     
-    if (!inHighway) {
-      return curve // Not on highway, return unchanged
-    }
+    if (!inHighway) return curve
     
-    // Check if this qualifies as a sweeper
     const isSweeper = checkIfSweeper(curve)
     
     if (isSweeper) {
@@ -110,56 +522,32 @@ export function identifySweepers(curves, segments) {
       }
     }
     
-    // Regular curve on highway
-    return {
-      ...curve,
-      inHighwayZone: true
-    }
+    return { ...curve, inHighwayZone: true }
   })
 }
 
-/**
- * Check if a curve falls within a highway segment
- */
 function isInHighwaySegment(curve, highwaySegments) {
   if (!highwaySegments?.length) return false
-  
   const curveDistance = curve.distanceFromStart || 0
-  
   return highwaySegments.some(seg => 
     curveDistance >= seg.startDistance && curveDistance <= seg.endDistance
   )
 }
 
-/**
- * Determine if a curve qualifies as a sweeper
- */
 function checkIfSweeper(curve) {
-  // Must be low severity
   if (curve.severity > SWEEPER_CONFIG.maxSeverity) return false
   
-  // Get angle (different curve objects store this differently)
   const angle = curve.angle || curve.totalAngle || Math.abs(curve.totalHeadingChange) || 0
-  
-  // Must be within sweeper angle range
   if (angle < SWEEPER_CONFIG.minAngle || angle > SWEEPER_CONFIG.maxAngle) return false
   
-  // Prefer longer curves (sweepers are gentle and extended)
   const length = curve.length || 0
   if (length > 0 && length < SWEEPER_CONFIG.minLength * 0.5) return false
   
   return true
 }
 
-/**
- * Estimate angle from severity if not directly available
- */
 function estimateAngle(curve) {
-  // Rough mapping: severity 1 ≈ 10-15°, severity 2 ≈ 15-25°
-  const severityToAngle = {
-    1: 12,
-    2: 20
-  }
+  const severityToAngle = { 1: 12, 2: 20 }
   return severityToAngle[curve.severity] || 15
 }
 
@@ -169,51 +557,73 @@ function estimateAngle(curve) {
 // ================================
 
 /**
- * Generate highway-specific callout for a curve
- * 
- * @param {Object} curve - Curve with sweeper metadata
- * @param {string} highwayMode - 'basic' or 'companion'
- * @returns {Object} - Callout config { text, type, priority }
+ * Generate highway-specific callout for a bend
+ * Supports both basic and coaching (companion) modes
  */
-export function generateHighwayCallout(curve, highwayMode = HIGHWAY_MODE.BASIC) {
-  if (!curve) return null
+export function generateHighwayCallout(bend, highwayMode = HIGHWAY_MODE.BASIC) {
+  if (!bend) return null
   
-  // Check if it's a sweeper
-  if (curve.isSweeper) {
-    const direction = curve.sweeperDirection || (curve.direction === 'LEFT' ? 'left' : 'right')
-    const angle = curve.sweeperAngle || estimateAngle(curve)
-    
-    return {
-      text: SWEEPER_CALLOUTS[highwayMode](direction, angle),
-      type: 'sweeper',
-      priority: 2,
-      curve: curve
+  // S-sweep
+  if (bend.isSSweep) {
+    const text = COACHING_TEMPLATES.sSweep(
+      bend.firstBend.direction.toLowerCase(),
+      bend.firstBend.angle,
+      bend.secondBend.direction.toLowerCase(),
+      bend.secondBend.angle,
+      bend.gapDistance
+    )
+    return { text, type: 's_sweep', priority: 1, bend }
+  }
+  
+  // Highway bend with coaching
+  if (bend.isHighwayBend) {
+    if (highwayMode === HIGHWAY_MODE.COMPANION) {
+      return {
+        text: COACHING_TEMPLATES.detailed(bend),
+        type: 'highway_bend',
+        priority: 1,
+        bend
+      }
+    } else {
+      // Basic mode - simpler callout
+      const text = bend.angle < 12 
+        ? COACHING_TEMPLATES.gentleSweep(bend.direction.toLowerCase(), bend.angle, bend.length)
+        : COACHING_TEMPLATES.moderateSweep(bend.direction.toLowerCase(), bend.angle, bend.optimalSpeed)
+      return { text, type: 'highway_bend', priority: 1, bend }
     }
   }
   
-  // Regular curve on highway - use standard callout
-  // (The existing calloutEngine handles this)
+  // Legacy sweeper (from main curve data)
+  if (bend.isSweeper) {
+    const direction = bend.sweeperDirection || (bend.direction === 'LEFT' ? 'left' : 'right')
+    const angle = bend.sweeperAngle || estimateAngle(bend)
+    return {
+      text: `Sweeper ${direction}, ${Math.round(angle)} degrees`,
+      type: 'sweeper',
+      priority: 2,
+      bend
+    }
+  }
+  
   return null
 }
 
 /**
  * Generate apex timing callout (Companion mode only)
- * Returns a delayed callout to be queued
  */
-export function generateApexCallout(curve, currentSpeed) {
-  if (!curve?.isSweeper) return null
+export function generateApexCallout(bend, currentSpeed) {
+  if (!bend?.isHighwayBend && !bend?.isSweeper) return null
   
-  // Calculate time to apex (middle of curve)
-  const curveLength = curve.length || 200 // Default estimate
-  const speedMetersPerSec = (currentSpeed * 1609.34) / 3600 // mph to m/s
-  const timeToApex = (curveLength / 2) / speedMetersPerSec
+  const bendLength = bend.length || 200
+  const speedMetersPerSec = (currentSpeed * 1609.34) / 3600
+  const timeToApex = (bendLength / 2) / speedMetersPerSec
   
   return {
     text: 'Apex... now',
     type: 'apex',
     priority: 1,
-    delayMs: Math.max(500, timeToApex * 1000 - 500), // Slightly early
-    curve: curve
+    delayMs: Math.max(500, timeToApex * 1000 - 500),
+    bend
   }
 }
 
@@ -222,46 +632,24 @@ export function generateApexCallout(curve, currentSpeed) {
 // COMPANION MODE: CHATTER SYSTEM
 // ================================
 
-/**
- * Get silence breaker if enough time has passed
- * 
- * @param {number} lastCalloutTime - Timestamp of last callout
- * @param {number} lastChatterTime - Timestamp of last chatter
- * @returns {Object|null} - Chatter callout or null
- */
 export function getSilenceBreaker(lastCalloutTime, lastChatterTime) {
   const now = Date.now()
   const timeSinceCallout = now - lastCalloutTime
   const timeSinceChatter = now - lastChatterTime
   
-  // Random threshold between 45-60 seconds
   const silenceThreshold = 45000 + Math.random() * 15000
   
-  // Don't break silence if we just had a callout or chatter
   if (timeSinceCallout < silenceThreshold) return null
-  if (timeSinceChatter < 30000) return null // At least 30s between chatter
+  if (timeSinceChatter < 30000) return null
   
-  // Pick random silence breaker
   const text = SILENCE_BREAKERS[Math.floor(Math.random() * SILENCE_BREAKERS.length)]
   
-  return {
-    text,
-    type: 'chatter',
-    priority: 3 // Low priority - can be skipped if curve coming
-  }
+  return { text, type: 'chatter', priority: 3 }
 }
 
-/**
- * Get sweeper completion feedback (Companion mode)
- */
 export function getSweeperFeedback() {
   const text = SWEEPER_FEEDBACK[Math.floor(Math.random() * SWEEPER_FEEDBACK.length)]
-  return {
-    text,
-    type: 'feedback',
-    priority: 3,
-    delayMs: 1500 // Slight delay after sweeper
-  }
+  return { text, type: 'feedback', priority: 3, delayMs: 1500 }
 }
 
 
@@ -269,14 +657,6 @@ export function getSweeperFeedback() {
 // PROGRESS & STATS TRACKING
 // ================================
 
-/**
- * Check for progress milestone callouts
- * 
- * @param {number} distanceTraveled - Distance traveled in meters
- * @param {number} totalDistance - Total route distance in meters
- * @param {Set} announcedMilestones - Set of already announced milestones
- * @returns {Object|null} - Progress callout or null
- */
 export function checkProgressMilestone(distanceTraveled, totalDistance, announcedMilestones) {
   if (!totalDistance) return null
   
@@ -295,54 +675,32 @@ export function checkProgressMilestone(distanceTraveled, totalDistance, announce
   for (const milestone of milestones) {
     if (!announcedMilestones.has(milestone.id) && milestone.check()) {
       announcedMilestones.add(milestone.id)
-      return {
-        text: milestone.text,
-        type: 'progress',
-        priority: 2
-      }
+      return { text: milestone.text, type: 'progress', priority: 2 }
     }
   }
   
   return null
 }
 
-/**
- * Generate stats callout (periodic in Companion mode)
- */
 export function generateStatsCallout(stats, type = 'sweepers') {
   switch (type) {
     case 'sweepers':
       if (stats.sweepersCleared > 0 && stats.sweepersCleared % 10 === 0) {
-        return {
-          text: STATS_TEMPLATES.sweepersCleared(stats.sweepersCleared),
-          type: 'stats',
-          priority: 3
-        }
+        return { text: `${stats.sweepersCleared} sweepers cleared`, type: 'stats', priority: 3 }
       }
       break
-      
     case 'speed':
       if (stats.averageSpeed > 0) {
-        return {
-          text: STATS_TEMPLATES.averageSpeed(stats.averageSpeed),
-          type: 'stats',
-          priority: 3
-        }
+        return { text: `Averaging ${Math.round(stats.averageSpeed)}, solid pace`, type: 'stats', priority: 3 }
       }
       break
-      
     case 'section_complete':
       return {
-        text: STATS_TEMPLATES.sectionComplete(
-          stats.sweepersCleared,
-          stats.highwayMiles,
-          stats.averageSpeed
-        ),
+        text: `Highway section complete. ${stats.sweepersCleared} sweepers, ${Math.round(stats.highwayMiles)} miles, averaging ${Math.round(stats.averageSpeed)}.`,
         type: 'stats',
         priority: 2
       }
   }
-  
   return null
 }
 
@@ -351,9 +709,6 @@ export function generateStatsCallout(stats, type = 'sweepers') {
 // HIGHWAY STATS STATE
 // ================================
 
-/**
- * Create initial highway stats state
- */
 export function createHighwayStats() {
   return {
     sweepersCleared: 0,
@@ -366,39 +721,18 @@ export function createHighwayStats() {
   }
 }
 
-/**
- * Update highway stats
- */
 export function updateHighwayStats(stats, event) {
   switch (event.type) {
     case 'sweeper_cleared':
-      return {
-        ...stats,
-        sweepersCleared: stats.sweepersCleared + 1
-      }
-      
+      return { ...stats, sweepersCleared: stats.sweepersCleared + 1 }
     case 'enter_highway':
-      return {
-        ...stats,
-        highwayStartTime: Date.now(),
-        speedSamples: []
-      }
-      
+      return { ...stats, highwayStartTime: Date.now(), speedSamples: [] }
     case 'speed_sample':
       const newSamples = [...stats.speedSamples, event.speed].slice(-50)
       const avg = newSamples.reduce((a, b) => a + b, 0) / newSamples.length
-      return {
-        ...stats,
-        speedSamples: newSamples,
-        averageSpeed: avg
-      }
-      
+      return { ...stats, speedSamples: newSamples, averageSpeed: avg }
     case 'distance_update':
-      return {
-        ...stats,
-        highwayMiles: event.miles
-      }
-      
+      return { ...stats, highwayMiles: event.miles }
     default:
       return stats
   }
@@ -409,16 +743,10 @@ export function updateHighwayStats(stats, event) {
 // INTEGRATION HELPERS
 // ================================
 
-/**
- * Check if highway mode features should be active
- */
 export function shouldUseHighwayMode(currentCharacter) {
   return currentCharacter === 'transit'
 }
 
-/**
- * Get highway mode config based on setting
- */
 export function getHighwayModeConfig(modeSetting) {
   const configs = {
     [HIGHWAY_MODE.BASIC]: {
@@ -453,8 +781,12 @@ export default {
   // Constants
   HIGHWAY_MODE,
   SWEEPER_CONFIG,
+  HIGHWAY_BEND_CONFIG,
   
-  // Sweeper detection
+  // NEW: Independent highway bend detection
+  analyzeHighwayBends,
+  
+  // Sweeper detection (works with main curve data)
   identifySweepers,
   
   // Callout generation
