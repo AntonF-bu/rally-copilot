@@ -1,4 +1,4 @@
- import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
@@ -7,12 +7,13 @@ import { getRoute } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
+import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 
 // ================================
-// Route Preview - v15
-// NEW: Highway bend markers + highway mode toggle
+// Route Preview - v16
+// NEW: LLM zone classification during copilot prep
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -31,7 +32,7 @@ const HIGHWAY_BEND_COLOR = '#3b82f6'
 export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const mapRef = useRef(null)
   const markersRef = useRef([])
-  const highwayMarkersRef = useRef([])  // NEW: Separate ref for highway markers
+  const highwayMarkersRef = useRef([])
   const zoneLayersRef = useRef([])
   const [mapContainer, setMapContainer] = useState(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -45,11 +46,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
   
-  // NEW: Highway bends state
+  // Highway bends state
   const [highwayBends, setHighwayBends] = useState([])
   const [showHighwayBends, setShowHighwayBends] = useState(true)
   
-  // NEW: Highway mode from store
+  // Highway mode from store
   const { highwayMode, setHighwayMode } = useHighwayStore()
   
   // Fly-through state
@@ -66,11 +67,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const fetchedRef = useRef(false)
   const elevationFetchedRef = useRef(false)
   const characterFetchedRef = useRef(false)
-  const highwayAnalyzedRef = useRef(false)  // NEW
+  const highwayAnalyzedRef = useRef(false)
   
-  // Route character state (replaces zones)
+  // Route character state
   const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null, censusTracts: [] })
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
+  
+  // NEW: LLM enhancement state
+  const [llmEnhanced, setLlmEnhanced] = useState(false)
   
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
@@ -91,7 +95,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   const mapContainerRef = useCallback((node) => { if (node) setMapContainer(node) }, [])
 
-  // Route stats - UPDATED to include highway bends
+  // Route stats
   const routeStats = useMemo(() => {
     const dist = routeData?.distance ? (routeData.distance / (settings.units === 'metric' ? 1000 : 1609.34)) : 0
     return {
@@ -100,7 +104,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       duration: routeData?.duration ? Math.round(routeData.duration / 60) : 0,
       curves: routeData?.curves?.length || 0,
       sharpCurves: routeData?.curves?.filter(c => c.severity >= 4).length || 0,
-      // NEW: Highway bend stats
       highwayBendCount: highwayBends.length,
       sSweepCount: highwayBends.filter(b => b.isSSweep).length
     }
@@ -185,7 +188,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData?.coordinates, fetchElevationData])
 
-  // Fetch route character analysis - UPDATED to also analyze highway bends
+  // Fetch route character analysis
   const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
     if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
     characterFetchedRef.current = true
@@ -196,14 +199,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setRouteCharacter(analysis)
       setRouteZones(analysis.segments)
       
-      // NEW: Run independent highway bend analysis
+      // Run independent highway bend analysis
       if (!highwayAnalyzedRef.current && analysis.segments?.length) {
         highwayAnalyzedRef.current = true
         const bends = analyzeHighwayBends(coordinates, analysis.segments)
         setHighwayBends(bends)
         console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
         
-        // Log breakdown
         if (bends.length > 0) {
           const sSweeps = bends.filter(b => b.isSSweep)
           const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
@@ -234,7 +236,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current) {
       const visibility = newVisibility ? 'visible' : 'none'
       
-      // Toggle all sleeve and border layers
       for (let i = 0; i < 100; i++) {
         ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-'].forEach(prefix => {
           try {
@@ -247,7 +248,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [showSleeve])
 
-  // NEW: Toggle highway bend markers visibility
+  // Toggle highway bend markers visibility
   const handleToggleHighwayBends = useCallback(() => {
     const newVisibility = !showHighwayBends
     setShowHighwayBends(newVisibility)
@@ -283,9 +284,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setRouteData(reversed)
     elevationFetchedRef.current = false
     characterFetchedRef.current = false
-    highwayAnalyzedRef.current = false  // NEW: Reset highway analysis
-    setHighwayBends([])  // NEW: Clear highway bends
+    highwayAnalyzedRef.current = false
+    setHighwayBends([])
     setElevationData([])
+    setLlmEnhanced(false)
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
@@ -428,7 +430,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current && curve.position) mapRef.current.flyTo({ center: curve.position, zoom: 16, pitch: 45, duration: 800 })
   }
 
-  // NEW: Handle highway bend click
+  // Handle highway bend click
   const handleHighwayBendClick = (bend) => {
     setSelectedCurve({
       ...bend,
@@ -451,25 +453,80 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [isPreparingCopilot, setIsPreparingCopilot] = useState(false)
   const [copilotProgress, setCopilotProgress] = useState(0)
   const [copilotReady, setCopilotReady] = useState(false)
+  const [copilotStatus, setCopilotStatus] = useState('')
 
+  // ================================
+  // HANDLE START - WITH LLM INTEGRATION
+  // ================================
   const handleStart = async () => { 
     await initAudio()
     
     setIsPreparingCopilot(true)
     setCopilotProgress(0)
+    setCopilotStatus('Initializing...')
     
     try {
+      // ========================================
+      // PHASE 1: LLM Zone Validation (NEW!)
+      // ========================================
+      if (hasLLMApiKey() && routeCharacter.segments?.length > 0) {
+        setCopilotProgress(5)
+        setCopilotStatus('🤖 AI analyzing route zones...')
+        console.log('🤖 Starting LLM zone validation...')
+        
+        try {
+          const validatedZones = await validateZonesWithLLM(
+            routeCharacter.segments,
+            routeData,
+            getLLMApiKey()
+          )
+          
+          // Apply LLM-corrected zones
+          if (validatedZones?.length > 0) {
+            setRouteCharacter(prev => ({ ...prev, segments: validatedZones }))
+            setRouteZones(validatedZones)
+            
+            // Log any corrections
+            const corrections = validatedZones.filter(z => z.llmOverride)
+            if (corrections.length > 0) {
+              console.log(`🤖 LLM corrected ${corrections.length} zone(s)`)
+              setLlmEnhanced(true)
+              
+              // Re-analyze highway bends with corrected zones
+              const bends = analyzeHighwayBends(routeData.coordinates, validatedZones)
+              setHighwayBends(bends)
+              console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
+            }
+          }
+        } catch (llmError) {
+          console.warn('⚠️ LLM validation failed, using rule-based zones:', llmError)
+        }
+        
+        setCopilotProgress(20)
+      } else {
+        if (!hasLLMApiKey()) {
+          console.log('ℹ️ No OpenAI API key - skipping LLM zone validation')
+        }
+        setCopilotProgress(20)
+      }
+      
+      // ========================================
+      // PHASE 2: Voice Preloading
+      // ========================================
+      setCopilotStatus('Loading voice callouts...')
       const { preloadCopilotVoices } = await import('../hooks/useSpeech')
       
       await preloadCopilotVoices(
         routeData?.curves || [],
         routeCharacter.segments || [],
         ({ percent }) => {
-          setCopilotProgress(Math.min(percent, 99))
+          // Map voice loading 20-99%
+          setCopilotProgress(20 + Math.min(percent * 0.79, 79))
         }
       )
       
       setCopilotProgress(100)
+      setCopilotStatus('Ready!')
       setCopilotReady(true)
       
     } catch (err) {
@@ -483,6 +540,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setIsPreparingCopilot(false)
     setCopilotReady(false)
     setCopilotProgress(0)
+    setCopilotStatus('')
     onStartNavigation()
   }
 
@@ -691,7 +749,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     )
   }, [routeCharacter.segments])
 
-  // Add curve markers - SKIP curves in transit zones (highway system handles those)
+  // Add curve markers - SKIP curves in transit zones
   const addMarkers = useCallback((map, curves, coords) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
@@ -699,7 +757,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     curves?.forEach(curve => {
       if (!curve.position) return
       
-      // Skip curves in transit/highway zones - the highway bend system handles those
+      // Skip curves in transit/highway zones
       if (isInTransitZone(curve.distanceFromStart)) {
         return
       }
@@ -718,9 +776,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [isInTransitZone])
 
-// NEW: Add highway bend markers - WITH ACTIVE SECTION SUPPORT
+  // Add highway bend markers - WITH ACTIVE SECTION SUPPORT
   const addHighwayBendMarkers = useCallback((map, bends) => {
-    // Clear existing highway markers
     highwayMarkersRef.current.forEach(m => m.remove())
     highwayMarkersRef.current = []
     
@@ -732,9 +789,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // ========== ACTIVE SECTION marker ==========
+      // ACTIVE SECTION marker
       if (bend.isSection) {
-        const bgColor = '#f59e0b'  // Amber/orange for active sections
+        const bgColor = '#f59e0b'
         el.innerHTML = `
           <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:6px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
             <span style="font-size:10px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
@@ -743,7 +800,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         `
       }
-      // ========== S-SWEEP marker ==========
+      // S-SWEEP marker
       else if (bend.isSSweep) {
         const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
         const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
@@ -754,7 +811,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         `
       }
-      // ========== Regular SW marker ==========
+      // Regular SW marker
       else {
         const isLeft = bend.direction === 'LEFT'
         const dirArrow = isLeft ? '←' : '→'
@@ -780,7 +837,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
     
-    // Clean up all layer types
     for (let i = 0; i < 100; i++) {
       ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-', 'glow-', 'line-'].forEach(p => { 
         if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
@@ -802,7 +858,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeCharacter.segments, mapLoaded])
 
-  // NEW: Add highway markers when bends are detected
+  // Add highway markers when bends are detected
   useEffect(() => {
     if (mapRef.current && mapLoaded && highwayBends.length > 0) {
       addHighwayBendMarkers(mapRef.current, highwayBends)
@@ -846,6 +902,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         progress={copilotProgress} 
         isComplete={copilotReady}
         onComplete={handleCopilotReady}
+        status={copilotStatus}
       />
     )
   }
@@ -879,7 +936,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 <path d="M3 9h18M9 21V9"/>
               </svg>
             </button>
-            {/* Highway bends toggle - only show if route has highway sections */}
+            {/* Highway bends toggle */}
             {hasHighwaySections && highwayBends.length > 0 && (
               <button 
                 onClick={handleToggleHighwayBends} 
@@ -1014,6 +1071,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     {highwayBends.length} sweeps
                   </span>
                 )}
+                {/* NEW: LLM Enhanced badge */}
+                {llmEnhanced && (
+                  <span 
+                    className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                    style={{ background: '#8b5cf620', color: '#8b5cf6', border: '1px solid #8b5cf640' }}
+                  >
+                    🤖 AI Enhanced
+                  </span>
+                )}
                 {routeCharacter.summary.funPercentage > 0 && (
                   <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
                     {routeCharacter.summary.funPercentage}% fun
@@ -1042,7 +1108,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               ))}
             </div>
 
-            {/* Highway mode toggle - only show if route has highway sections */}
+            {/* Highway mode toggle */}
             {hasHighwaySections && (
               <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
                 <button 
@@ -1136,9 +1202,9 @@ function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   )
 }
 
-// Curve list modal - WITH ACTIVE SECTION SUPPORT
+// Curve list modal
 function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSelectBend, onClose }) {
-  const [showTab, setShowTab] = useState('curves')  // 'curves' or 'highway'
+  const [showTab, setShowTab] = useState('curves')
   
   const getSpd = (s) => { 
     const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
@@ -1239,7 +1305,7 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
   )
 }
 
-// Curve popup - WITH ACTIVE SECTION SUPPORT
+// Curve popup
 function CurvePopup({ curve, mode, settings, onClose }) {
   const getSpd = (s) => { 
     const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
