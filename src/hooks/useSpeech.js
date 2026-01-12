@@ -2,33 +2,34 @@ import { useCallback, useEffect, useRef } from 'react'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v4 - iOS Audio Fix
-// Proper audio context unlocking for Safari
+// Speech Hook v5 - Stable Voice Fix
+// Increased stability to prevent choppy audio
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
 // Voice style configurations
+// FIXED: Increased stability across all modes to prevent choppiness
 export const VOICE_STYLES = {
   relaxed: {
-    stability: 0.90,
+    stability: 0.92,        // Very stable for highway
     similarity_boost: 0.80,
-    style: 0.10,
+    style: 0.05,            // Minimal style variation
     playbackRate: 0.95,
     label: 'Highway'
   },
   normal: {
-    stability: 0.75,
+    stability: 0.88,        // Increased from 0.75
     similarity_boost: 0.80,
-    style: 0.15,
+    style: 0.08,            // Reduced from 0.15
     playbackRate: 1.0,
     label: 'Spirited'
   },
   urgent: {
-    stability: 0.60,
-    similarity_boost: 0.75,
-    style: 0.25,
-    playbackRate: 1.1,
+    stability: 0.85,        // FIXED: Was 0.60 - way too low, caused choppiness
+    similarity_boost: 0.80,
+    style: 0.10,            // FIXED: Was 0.25 - too much variation
+    playbackRate: 1.05,     // Slightly faster, but not too fast
     label: 'Technical'
   }
 }
