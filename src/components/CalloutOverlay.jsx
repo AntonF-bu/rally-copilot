@@ -71,10 +71,20 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     const totalDist = routeData?.distance || 15000
     const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
     
-    const segment = routeZones.find(s => 
+    // Sort zones by startDistance to ensure correct order
+    const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
+    
+    // Find zone containing current distance
+    const segment = sortedZones.find(s => 
       currentDist >= s.startDistance && currentDist <= s.endDistance
     )
-    return segment?.character || routeZones[0]?.character || null
+    
+    // If found, use it. Otherwise find the zone that starts closest to 0 (for initial state)
+    if (segment) return segment.character
+    
+    // For distance=0 or gaps, find the first zone that covers the start
+    const startZone = sortedZones.find(s => s.startDistance <= 100) || sortedZones[0]
+    return startZone?.character || null
   }, [routeZones, simulationProgress, routeData?.distance, userDistance])
   
   const characterColors = currentCharacter ? CHARACTER_COLORS[currentCharacter] : null
