@@ -291,8 +291,23 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [setRouteZones, routeData, setHighwayBends])
 
+  // CRITICAL: Detect curves if routeData doesn't have them
   useEffect(() => {
-    if (routeData?.coordinates?.length > 0 && !characterFetchedRef.current) {
+    if (routeData?.coordinates?.length > 0 && (!routeData.curves || routeData.curves.length === 0)) {
+      console.log('🔍 RoutePreview: No curves in routeData, detecting...')
+      const curves = detectCurves(routeData.coordinates)
+      console.log(`🔍 RoutePreview: Detected ${curves.length} curves`)
+      
+      // Update routeData with curves
+      useStore.getState().setRouteData({
+        ...routeData,
+        curves
+      })
+    }
+  }, [routeData?.coordinates, routeData?.curves])
+
+  useEffect(() => {
+    if (routeData?.coordinates?.length > 0 && routeData?.curves?.length > 0 && !characterFetchedRef.current) {
       fetchRouteCharacter(routeData.coordinates, routeData.curves)
     }
   }, [routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
