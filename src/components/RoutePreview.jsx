@@ -8,14 +8,15 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
-import { runCoDriverAgent, formatAgentOutput } from '../services/aiCoDriverAgent'
+import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from '../services/highwayCalloutGenerator'
+import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v21
-// NEW: AI Co-Driver Agent - intelligent analysis
+// Route Preview - v22
+// NEW: Rule-based callouts + optional AI polish
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -278,53 +279,62 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         
         const rawBends = analyzeHighwayBends(coordinates, activeZones)
         console.log(`🛣️ Found ${rawBends.length} raw highway bends`)
-        setHighwayBendsLocal(rawBends) // Store raw bends for reference
-        setHighwayBends(rawBends) // Also store in global store
+        setHighwayBendsLocal(rawBends)
+        setHighwayBends(rawBends)
         updateStage('highway', 'complete')
         
-        // Step 4: AI Co-Driver Agent (intelligent analysis)
-        if (hasLLMApiKey() && rawBends.length > 0) {
+        // Step 4: Generate callout slots (rule-based, instant)
+        if (rawBends.length > 0) {
           updateStage('aiCurves', 'loading')
-          console.log('🤖 Running AI Co-Driver Agent...')
+          console.log('📋 Generating callout slots (rule-based)...')
+          
           try {
-            const agentOutput = await runCoDriverAgent({
-              highwayBends: rawBends,
-              zones: activeZones,
-              routeData
-            }, getLLMApiKey(), (progress) => {
-              setAgentProgress(progress)
-              console.log(`   Agent iteration ${progress.iteration}...`)
+            // RULES: Generate slots with positions
+            const slots = generateCalloutSlots(rawBends, activeZones, routeData)
+            const slotsWithPositions = addPositionsToSlots(slots, coordinates, routeData.distance)
+            
+            console.log(`📋 Generated ${slotsWithPositions.length} slots`)
+            slotsWithPositions.forEach(s => {
+              console.log(`   📍 Mile ${s.triggerMile.toFixed(1)}: ${s.type} - "${s.templateText}"`)
             })
             
-            if (agentOutput.success) {
-              const formatted = formatAgentOutput(agentOutput)
-              console.log(`🤖 Agent complete:`)
-              console.log(`   Callouts: ${formatted.callouts.length}`)
-              console.log(`   Confidence: ${formatted.confidence}%`)
-              console.log(`   Reasoning steps: ${formatted.reasoning?.length || 0}`)
-              
-              // Interpolate positions for callouts
-              const calloutsWithPositions = formatted.callouts.map(c => {
-                const position = interpolatePosition(coordinates, c.triggerDistance, routeData.distance)
-                console.log(`📍 Callout "${c.text?.substring(0,30)}": mile=${c.triggerMile}, dist=${c.triggerDistance}m, pos=${position}`)
-                return { ...c, position }
-              })
-              
-              setCuratedCallouts(calloutsWithPositions)
-              setAgentResult(formatted)
-              setCurveEnhanced(true)
-              
-              // Store in global store for navigation
-              useStore.getState().setCuratedHighwayCallouts(calloutsWithPositions)
-              useStore.getState().setAgentBriefing(formatted)
-            } else {
-              console.warn('⚠️ Agent did not complete successfully:', agentOutput.error)
+            // AI POLISH: Optional, single API call
+            let finalSlots = slotsWithPositions
+            if (hasLLMApiKey()) {
+              console.log('✨ Attempting AI polish...')
+              finalSlots = await polishCalloutsWithAI(slotsWithPositions, {
+                routeData,
+                zones: activeZones
+              }, getLLMApiKey())
             }
-            updateStage('aiCurves', 'complete')
-          } catch (agentErr) {
-            console.warn('⚠️ AI Co-Driver Agent failed:', agentErr)
-            updateStage('aiCurves', 'complete')
+            
+            // Format for display
+            const formattedCallouts = formatSlotsForDisplay(finalSlots)
+            
+            console.log(`✅ Final callouts: ${formattedCallouts.length}`)
+            formattedCallouts.forEach(c => {
+              console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" pos=${c.position}`)
+            })
+            
+            setCuratedCallouts(formattedCallouts)
+            setAgentResult({
+              summary: {
+                summary: `${formattedCallouts.length} callouts generated`,
+                rhythm: 'Rule-based with AI polish',
+                difficulty: 'auto'
+              },
+              reasoning: [`Generated ${slots.length} slots from rules`],
+              confidence: 95
+            })
+            setCurveEnhanced(true)
+            
+            // Store in global store
+            useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+            
+          } catch (genErr) {
+            console.warn('⚠️ Callout generation failed:', genErr)
           }
+          updateStage('aiCurves', 'complete')
         }
       }
       
@@ -338,22 +348,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setIsPreviewLoading(false)
     }
   }, [setRouteZones, routeData, setHighwayBends])
-  
-  // Helper: Interpolate position along route from distance
-  const interpolatePosition = useCallback((coordinates, distance, totalDistance) => {
-    if (!coordinates?.length || !totalDistance) return null
-    
-    const ratio = Math.min(Math.max(distance / totalDistance, 0), 1)
-    const index = Math.floor(ratio * (coordinates.length - 1))
-    const nextIndex = Math.min(index + 1, coordinates.length - 1)
-    
-    const segmentRatio = (ratio * (coordinates.length - 1)) - index
-    
-    const lng = coordinates[index][0] + (coordinates[nextIndex][0] - coordinates[index][0]) * segmentRatio
-    const lat = coordinates[index][1] + (coordinates[nextIndex][1] - coordinates[index][1]) * segmentRatio
-    
-    return [lng, lat]
-  }, [])
 
   // CRITICAL: Detect curves if routeData doesn't have them
   useEffect(() => {
