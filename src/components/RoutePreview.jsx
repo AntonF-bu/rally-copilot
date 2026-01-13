@@ -10,13 +10,14 @@ import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeServic
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
 import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from '../services/highwayCalloutGenerator'
 import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
+import { dumpHighwayData } from '../services/highwayDataDebug'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v22
-// NEW: Rule-based callouts + optional AI polish
+// Route Preview - v23
+// NEW: Debug data dump for AI training
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -282,6 +283,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         setHighwayBendsLocal(rawBends)
         setHighwayBends(rawBends)
         updateStage('highway', 'complete')
+        
+        // DEBUG: Dump all highway data for analysis
+        console.log('🔍 Dumping highway data for analysis...')
+        const debugData = dumpHighwayData(rawBends, activeZones, routeData)
+        
+        // Store debug data globally for easy access in console
+        window.__highwayDebugData = debugData
+        console.log('💡 Access full data with: window.__highwayDebugData')
         
         // Step 4: Generate callout slots (rule-based, instant)
         if (rawBends.length > 0) {
