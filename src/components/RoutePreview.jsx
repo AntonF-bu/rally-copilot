@@ -998,38 +998,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
   // Helper: Check if a distance is within a transit zone
-  const isInCuratedZone = useCallback((distance, segments) => {
-    if (!segments?.length) return false
-    // Return true for ALL zones - curated callouts handle everything now
-    // Old markers are no longer used
-    return segments.some(seg => 
-      distance >= seg.startDistance && 
-      distance <= seg.endDistance
-    )
-  }, [])
-
   // Add curve markers - DISABLED: curated callouts handle all zones now
   const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
-    
-    // Skip ALL markers - curated callouts handle everything
-    // Old marker system is deprecated
-    return
-      
-      const color = getCurveColor(curve.severity)
-      const el = document.createElement('div')
-      el.style.cursor = 'pointer'
-      
-      if (curve.isChicane) {
-        el.innerHTML = `<div style="position:relative;background:#000d;padding:2px 5px;border-radius:5px;border:2px solid ${color};font-size:9px;font-weight:700;color:${color};text-align:center;">${curve.chicaneType === 'CHICANE' ? 'CH' : 'S'}${curve.startDirection === 'LEFT' ? '←' : '→'}<br/>${curve.severitySequence}</div>`
-      } else {
-        el.innerHTML = `<div style="display:flex;align-items:center;gap:2px;background:#000d;padding:2px 5px;border-radius:5px;border:1px solid ${color};"><svg width="9" height="9" viewBox="0 0 24 24" fill="${color}" style="transform:${curve.direction === 'LEFT' ? 'scaleX(-1)' : 'none'}"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/></svg><span style="font-size:11px;font-weight:700;color:${color};">${curve.severity}</span></div>`
-      }
-      el.onclick = () => handleCurveClick(curve)
-      markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(map))
-    })
-  }, [isInHighwayZone])
+    // Old marker system disabled - curated callouts handle everything
+  }, [])
 
   // Add highway markers - NOW SHOWS CURATED CALLOUTS (not raw bends)
   const addHighwayBendMarkers = useCallback((map, callouts) => {
