@@ -306,6 +306,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               // Interpolate positions for callouts
               const calloutsWithPositions = formatted.callouts.map(c => {
                 const position = interpolatePosition(coordinates, c.triggerDistance, routeData.distance)
+                console.log(`📍 Callout "${c.text?.substring(0,30)}": mile=${c.triggerMile}, dist=${c.triggerDistance}m, pos=${position}`)
                 return { ...c, position }
               })
               
