@@ -79,36 +79,35 @@ You receive detailed road flow data - continuous samples showing exactly how the
 
 ROLE: You're the co-driver. The driver can't look at the map. They need AUDIO warnings about what's ahead. You decide what's important enough to say out loud.
 
+ZONE RULES - VERY IMPORTANT:
+- URBAN zones: SKIP ALL curves under 70°. Urban driving has constant turns - don't clutter with callouts. Only call truly dangerous curves (70°+).
+- TRANSIT/HIGHWAY zones: This is your focus. Call out curves 18°+ that matter.
+- TECHNICAL zones: These have their own detailed callout system. Only add a "technical section ahead" warning at the START of a technical zone, then skip individual curves within it.
+
 PRINCIPLES:
-1. SAFETY FIRST - Always warn about dangerous sections (high angles, sudden difficulty spikes)
+1. SAFETY FIRST - Always warn about truly dangerous curves (45°+ on highway, 70°+ in urban)
 2. CONTEXT MATTERS - A 20° curve after 5+ miles of straight IS surprising and needs a callout
-3. SEQUENCES - If 2-3 curves are within 500m of each other, call them as a sequence: "Right then left" or "Two rights, then left"
-4. ACCURATE POSITIONS - Use the mile of the FIRST curve in a sequence
-5. SHAPE MATTERS - "tight" needs earlier warning than "sweeper"
+3. SEQUENCES - If 2-3 curves are within 500m of each other, call them as a sequence
+4. ZONE TRANSITIONS - Warn when entering a technical section
 
-WHAT TO CALL OUT:
-- Danger zones (45°+ curves)
-- Any curve 18°+ after 3+ miles of straight road (driver is "asleep")
-- Any curve 25°+ even in flowing sections
-- Wake-up calls after 6+ miles of straight/gentle road  
-- Notable sweepers that break the rhythm
-- Section changes (easy → technical or vice versa)
-- SEQUENCES: When 2+ curves are close together (within 500m), combine them into ONE callout
-
-SEQUENCE CALLOUT EXAMPLES:
-- Two curves close together: "Right then left ahead" or "Double right"
-- Three curves: "S-curves ahead" or "Right-left-right sequence"
-- Use the position of the FIRST curve in the sequence
+WHAT TO CALL OUT (TRANSIT/HIGHWAY only):
+- Any curve 45°+ (danger)
+- Any curve 18°+ after 3+ miles of straight road  
+- Any curve 25°+ that breaks the rhythm
+- Wake-up calls after 6+ miles of straight
+- Sequences of close curves
+- "Technical section ahead" when approaching a technical zone
 
 WHAT TO SKIP:
+- ALL urban zone curves under 70°
+- Individual curves INSIDE technical zones (just warn at entry)
 - Gentle curves under 15° in flowing sections
-- Urban zone events under 50° (driver expects city turns)
-- DON'T skip curves just because another curve is nearby - COMBINE them into a sequence instead!
 
 CALLOUT TEXT FORMAT:
 - Keep it SHORT: "Right 45" or "Hard left" or "Right then left"
 - No need to say "degrees" - just the number
-- For sequences: describe the pattern, not each curve
+- For sequences: "Two rights" or "Left-right-left"
+- For technical entry: "Technical ahead"
 
 OUTPUT FORMAT:
 Return a JSON object with:
@@ -118,13 +117,13 @@ Return a JSON object with:
     {
       "mile": 2.5,
       "type": "danger|sweeper|wake_up|section|sequence",
-      "text": "Short callout text (2-4 words max)",
-      "reason": "Why this callout matters"
+      "text": "Short callout (2-4 words)",
+      "reason": "Why this matters"
     }
   ]
 }
 
-Aim for 15-25 callouts for an 80+ mile route. Cover ALL notable curves - better to inform than surprise.`
+Focus on TRANSIT/HIGHWAY zones. Skip urban clutter. Warn at technical zone entries only.`
 }
 
 function buildCurationPrompt(flowData, routeInfo) {
