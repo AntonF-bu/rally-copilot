@@ -83,7 +83,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
     isFavorite, toggleFavorite, settings,
-    globalZoneOverrides, routeZoneOverrides, setRouteZones,
+    globalZoneOverrides, routeZoneOverrides, setRouteZones, setHighwayBends,
     editedCurves, customCallouts
   } = useStore()
   const { initAudio, preloadRouteAudio, speak } = useSpeech()
