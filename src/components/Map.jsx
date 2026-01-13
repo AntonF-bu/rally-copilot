@@ -2,26 +2,21 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
-import { useHighwayMode } from '../hooks/useHighwayMode'
+import { CHARACTER_COLORS } from '../services/zoneService'
 
 // ================================
-// Map Component - v17
-// NEW: Transit zone filtering + highway bend markers
+// Map Component - v18
+// REWRITTEN: Match RoutePreview exactly
+// Uses sleeves, severity gradients, zone-filtered markers
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
 const SEVERITY_COLORS = {
-  0: '#22c55e',
-  1: '#22c55e',
-  2: '#84cc16',
-  3: '#eab308',
-  4: '#f97316',
-  5: '#ef4444',
-  6: '#dc2626',
+  0: '#22c55e', 1: '#22c55e', 2: '#84cc16',
+  3: '#eab308', 4: '#f97316', 5: '#ef4444', 6: '#dc2626',
 }
 
-// Highway blue color for bend markers
 const HIGHWAY_BEND_COLOR = '#3b82f6'
 
 export default function Map() {
@@ -30,7 +25,7 @@ export default function Map() {
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
-  const highwayMarkers = useRef([])  // NEW: Highway bend markers
+  const highwayMarkers = useRef([])
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
@@ -40,6 +35,7 @@ export default function Map() {
   const [showRecenter, setShowRecenter] = useState(false)
   const [isFollowing, setIsFollowing] = useState(true)
   
+  // Get all state from store
   const position = useStore(state => state.position)
   const heading = useStore(state => state.heading)
   const speed = useStore(state => state.speed)
@@ -48,29 +44,15 @@ export default function Map() {
   const mode = useStore(state => state.mode)
   const routeData = useStore(state => state.routeData)
   const routeZones = useStore(state => state.routeZones)
-  const simulationProgress = useStore(state => state.simulationProgress)
-  
-  // Get highwayBends directly from store (set by Preview)
   const highwayBends = useStore(state => state.highwayBends) || []
-
-  // Get isHighwayActive from hook
-  const { isHighwayActive } = useHighwayMode()
-
-  // Calculate current zone character for zoom adjustment
-  const currentZoneCharacter = (() => {
-    if (!routeZones?.length || !routeData?.distance) return null
-    const totalDist = routeData.distance
-    const currentDist = (simulationProgress || 0) * totalDist
-    const segment = routeZones.find(s => 
-      currentDist >= s.startDistance && currentDist <= s.endDistance
-    )
-    return segment?.character || null
-  })()
+  const simulationProgress = useStore(state => state.simulationProgress)
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Helper to check if a distance is within a transit zone
+  // ================================
+  // HELPER: Check if distance is in transit zone
+  // ================================
   const isInTransitZone = useCallback((distance) => {
     if (!routeZones?.length) return false
     return routeZones.some(seg => 
@@ -80,69 +62,138 @@ export default function Map() {
     )
   }, [routeZones])
 
-  // Build severity segments for route coloring
-  const buildSeveritySegments = useCallback((coordinates, curves, totalDistance) => {
-    if (!coordinates?.length) return []
-    if (!curves?.length) {
-      return [{ coords: coordinates, color: '#22c55e' }]
+  // ================================
+  // HELPER: Interpolate colors for gradient effect
+  // ================================
+  const interpolateColor = (color1, color2, progress) => {
+    const hex = (c) => parseInt(c.slice(1), 16)
+    const r1 = (hex(color1) >> 16) & 255, g1 = (hex(color1) >> 8) & 255, b1 = hex(color1) & 255
+    const r2 = (hex(color2) >> 16) & 255, g2 = (hex(color2) >> 8) & 255, b2 = hex(color2) & 255
+    const r = Math.round(r1 + (r2 - r1) * progress)
+    const g = Math.round(g1 + (g2 - g1) * progress)
+    const b = Math.round(b1 + (b2 - b1) * progress)
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+  }
+
+  // ================================
+  // BUILD SLEEVE SEGMENTS (zone coloring)
+  // Matches RoutePreview exactly
+  // ================================
+  const buildSleeveSegments = useCallback((coords, characterSegments) => {
+    if (!coords?.length) return []
+    if (!characterSegments?.length) {
+      return [{ coords, color: CHARACTER_COLORS.technical?.primary || '#f97316', character: 'technical' }]
     }
-
-    const segments = []
-    const totalDist = totalDistance || 15000
-    let lastIdx = 0
     
-    const sortedCurves = [...curves].sort((a, b) => 
-      (a.distanceFromStart || 0) - (b.distanceFromStart || 0)
-    )
-
-    sortedCurves.forEach(curve => {
-      const curveDist = curve.distanceFromStart || 0
-      const warningDist = 200
+    const segments = []
+    const totalDist = routeData?.distance || 15000
+    
+    characterSegments.forEach((seg) => {
+      let segCoords
       
-      const curveProgress = curveDist / totalDist
-      const warningProgress = Math.max(0, (curveDist - warningDist) / totalDist)
-      
-      const curveIdx = Math.min(Math.floor(curveProgress * coordinates.length), coordinates.length - 1)
-      const warningIdx = Math.floor(warningProgress * coordinates.length)
-      
-      if (warningIdx > lastIdx) {
-        segments.push({
-          coords: coordinates.slice(lastIdx, warningIdx + 1),
-          color: '#22c55e'
-        })
+      if (seg.coordinates?.length > 1) {
+        segCoords = seg.coordinates
+      } else if (seg.startIndex !== undefined && seg.endIndex !== undefined) {
+        segCoords = coords.slice(seg.startIndex, seg.endIndex + 1)
+      } else {
+        const startProgress = Math.max(0, seg.startDistance / totalDist)
+        const endProgress = Math.min(1, seg.endDistance / totalDist)
+        const startIdx = Math.floor(startProgress * coords.length)
+        const endIdx = Math.min(Math.ceil(endProgress * coords.length), coords.length)
+        segCoords = coords.slice(startIdx, endIdx + 1)
       }
       
-      if (curveIdx > warningIdx) {
-        const color = SEVERITY_COLORS[curve.severity] || SEVERITY_COLORS[3]
+      if (segCoords?.length > 1) {
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
         segments.push({
-          coords: coordinates.slice(warningIdx, curveIdx + 1),
-          color
+          coords: segCoords,
+          color: colors?.primary || '#f97316',
+          character: seg.character
         })
       }
-      
-      lastIdx = curveIdx
     })
     
-    if (lastIdx < coordinates.length - 1) {
-      segments.push({
-        coords: coordinates.slice(lastIdx),
-        color: '#22c55e'
-      })
-    }
-    
     return segments
-  }, [])
+  }, [routeData?.distance])
 
-  // Add route to map
-  const addRouteToMap = useCallback(() => {
-    if (!map.current || !routeData?.coordinates?.length) {
-      return false
+  // ================================
+  // BUILD SEVERITY SEGMENTS (curve coloring with gradients)
+  // Matches RoutePreview exactly
+  // ================================
+  const buildSeveritySegments = useCallback((coords, curves) => {
+    if (!coords?.length) return [{ coords, color: '#22c55e' }]
+    if (!curves?.length) return [{ coords, color: '#22c55e' }]
+
+    const totalDist = routeData?.distance || 15000
+    const gradientDist = 150
+    
+    const coordColors = coords.map(() => SEVERITY_COLORS[0])
+    
+    curves.forEach(curve => {
+      if (!curve.distanceFromStart) return
+      
+      // Skip curves in transit zones - they don't affect coloring
+      if (isInTransitZone(curve.distanceFromStart)) return
+      
+      const curveDist = curve.distanceFromStart
+      const severity = curve.severity || 3
+      const curveColor = SEVERITY_COLORS[Math.min(severity, 6)]
+      
+      const warningStart = curveDist - gradientDist
+      const warningEnd = curveDist
+      const curveStart = curveDist
+      const curveEnd = curveDist + (curve.length || 50)
+      const recoveryStart = curveEnd
+      const recoveryEnd = curveEnd + (gradientDist * 0.5)
+      
+      coords.forEach((coord, i) => {
+        const coordDist = (i / coords.length) * totalDist
+        
+        if (coordDist >= warningStart && coordDist < warningEnd) {
+          const progress = (coordDist - warningStart) / gradientDist
+          coordColors[i] = interpolateColor(SEVERITY_COLORS[0], curveColor, progress)
+        }
+        
+        if (coordDist >= curveStart && coordDist < curveEnd) {
+          coordColors[i] = curveColor
+        }
+        
+        if (coordDist >= recoveryStart && coordDist < recoveryEnd) {
+          const progress = (coordDist - recoveryStart) / (gradientDist * 0.5)
+          coordColors[i] = interpolateColor(curveColor, SEVERITY_COLORS[0], progress)
+        }
+      })
+    })
+    
+    // Build segments from color array
+    const segments = []
+    let currentSegment = { coords: [coords[0]], color: coordColors[0] }
+    
+    for (let i = 1; i < coords.length; i++) {
+      if (coordColors[i] === currentSegment.color) {
+        currentSegment.coords.push(coords[i])
+      } else {
+        currentSegment.coords.push(coords[i])
+        segments.push(currentSegment)
+        currentSegment = { coords: [coords[i]], color: coordColors[i] }
+      }
     }
+    segments.push(currentSegment)
+    
+    return segments.filter(s => s.coords.length > 1)
+  }, [routeData?.distance, isInTransitZone])
+
+  // ================================
+  // ADD ROUTE TO MAP
+  // Includes sleeves + severity line
+  // ================================
+  const addRouteToMap = useCallback(() => {
+    if (!map.current || !routeData?.coordinates?.length) return false
     
     console.log('🗺️ Adding route to map...', routeData.coordinates.length, 'points')
     
     try {
-      // Clear any existing route layers
+      // Clear existing layers
       routeLayersRef.current.forEach(id => {
         try {
           if (map.current.getLayer(id)) map.current.removeLayer(id)
@@ -151,77 +202,118 @@ export default function Map() {
       })
       routeLayersRef.current = []
 
-      // Add outline first (underneath)
-      map.current.addSource('route-outline-source', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: routeData.coordinates }
-        }
-      })
-      
-      map.current.addLayer({
-        id: 'route-outline-layer',
-        type: 'line',
-        source: 'route-outline-source',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': '#000000',
-          'line-width': 12,
-          'line-opacity': 0.5
-        }
-      })
-      routeLayersRef.current.push('route-outline-source', 'route-outline-layer')
+      const coords = routeData.coordinates
+      const sleeveSegs = buildSleeveSegments(coords, routeZones)
+      const routeSegs = buildSeveritySegments(coords, routeData.curves)
 
-      // Add severity-colored segments
-      const segments = buildSeveritySegments(routeData.coordinates, routeData.curves, routeData.distance)
-      
-      segments.forEach((segment, i) => {
-        if (segment.coords.length < 2) return
+      // Add SLEEVE layers (zone coloring - wide transparent)
+      sleeveSegs.forEach((seg, i) => {
+        const srcId = `sleeve-src-${i}`
+        const layerId = `sleeve-${i}`
         
-        const sourceId = `route-segment-${i}`
-        const glowLayerId = `route-glow-${i}`
-        const lineLayerId = `route-line-${i}`
-
-        map.current.addSource(sourceId, {
+        map.current.addSource(srcId, {
           type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'LineString', coordinates: segment.coords }
-          }
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } }
         })
-
+        
         map.current.addLayer({
-          id: glowLayerId,
+          id: layerId,
           type: 'line',
-          source: sourceId,
+          source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': segment.color,
+            'line-color': seg.color,
+            'line-width': 40,
+            'line-opacity': 0.25
+          }
+        })
+        
+        routeLayersRef.current.push(srcId, layerId)
+      })
+
+      // Add sleeve borders (dashed lines)
+      sleeveSegs.forEach((seg, i) => {
+        const srcId = `sleeve-border-src-${i}`
+        const topId = `sleeve-border-top-${i}`
+        const bottomId = `sleeve-border-bottom-${i}`
+        
+        map.current.addSource(srcId, {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } }
+        })
+        
+        map.current.addLayer({
+          id: topId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'butt' },
+          paint: {
+            'line-color': seg.color,
+            'line-width': 1.5,
+            'line-opacity': 0.5,
+            'line-dasharray': [4, 6],
+            'line-offset': 20
+          }
+        })
+        
+        map.current.addLayer({
+          id: bottomId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'butt' },
+          paint: {
+            'line-color': seg.color,
+            'line-width': 1.5,
+            'line-opacity': 0.5,
+            'line-dasharray': [4, 6],
+            'line-offset': -20
+          }
+        })
+        
+        routeLayersRef.current.push(srcId, topId, bottomId)
+      })
+
+      // Add ROUTE LINE layers (severity coloring with glow)
+      routeSegs.forEach((seg, i) => {
+        const srcId = `route-src-${i}`
+        const glowId = `route-glow-${i}`
+        const lineId = `route-line-${i}`
+        
+        map.current.addSource(srcId, {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } }
+        })
+        
+        // Glow layer
+        map.current.addLayer({
+          id: glowId,
+          type: 'line',
+          source: srcId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': seg.color,
             'line-width': 14,
             'line-blur': 6,
-            'line-opacity': 0.4
+            'line-opacity': 0.5
           }
         })
-
+        
+        // Main line
         map.current.addLayer({
-          id: lineLayerId,
+          id: lineId,
           type: 'line',
-          source: sourceId,
+          source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': segment.color,
-            'line-width': 6,
-            'line-opacity': 0.95
+            'line-color': seg.color,
+            'line-width': 5
           }
         })
-
-        routeLayersRef.current.push(sourceId, glowLayerId, lineLayerId)
+        
+        routeLayersRef.current.push(srcId, glowId, lineId)
       })
 
-      console.log(`🗺️ Route added: ${segments.length} segments`)
+      console.log(`🗺️ Route added: ${routeSegs.length} segments`)
       routeAddedRef.current = true
       return true
       
@@ -229,9 +321,124 @@ export default function Map() {
       console.error('Route rendering error:', e)
       return false
     }
-  }, [routeData, buildSeveritySegments])
+  }, [routeData, routeZones, buildSleeveSegments, buildSeveritySegments])
 
-  // Initialize map
+  // ================================
+  // ADD CURVE MARKERS
+  // Skip curves in transit zones!
+  // ================================
+  const addCurveMarkers = useCallback(() => {
+    if (!map.current || !routeData?.curves?.length) return
+    
+    // Clear existing
+    curveMarkers.current.forEach(m => m.remove())
+    curveMarkers.current = []
+    
+    let added = 0
+    let skipped = 0
+    
+    console.log(`🗺️ Curve markers: ${routeData.curves.length} curves, ${routeZones?.length || 0} zones`)
+    
+    routeData.curves.forEach((curve) => {
+      if (!curve.position) return
+      
+      // SKIP curves in transit zones!
+      if (isInTransitZone(curve.distanceFromStart)) {
+        skipped++
+        return
+      }
+      
+      const color = getCurveColor(curve.severity)
+      const el = document.createElement('div')
+      el.style.cursor = 'pointer'
+      
+      if (curve.isChicane) {
+        el.innerHTML = `
+          <div style="position:relative;background:#000d;padding:2px 5px;border-radius:5px;border:2px solid ${color};font-size:9px;font-weight:700;color:${color};text-align:center;">
+            ${curve.chicaneType === 'CHICANE' ? 'CH' : 'S'}${curve.startDirection === 'LEFT' ? '←' : '→'}<br/>${curve.severitySequence}
+          </div>
+        `
+      } else {
+        const arrow = curve.direction === 'LEFT' ? '←' : '→'
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:2px;background:#000d;padding:2px 5px;border-radius:5px;border:1px solid ${color};">
+            <span style="font-size:11px;font-weight:700;color:${color};">${arrow}${curve.severity}</span>
+          </div>
+        `
+      }
+      
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat(curve.position)
+        .addTo(map.current)
+      
+      curveMarkers.current.push(marker)
+      added++
+    })
+    
+    console.log(`🗺️ Curve markers: added ${added}, skipped ${skipped} in transit zones`)
+  }, [routeData?.curves, routeZones, isInTransitZone])
+
+  // ================================
+  // ADD HIGHWAY BEND MARKERS
+  // ================================
+  const addHighwayBendMarkers = useCallback(() => {
+    if (!map.current || !mapLoaded) return
+
+    // Clear existing
+    highwayMarkers.current.forEach(m => m.remove())
+    highwayMarkers.current = []
+
+    console.log(`🗺️ Highway bend markers: ${highwayBends?.length || 0} bends available`)
+    
+    if (!highwayBends?.length) return
+
+    highwayBends.forEach((bend) => {
+      if (!bend.position) return
+      
+      const el = document.createElement('div')
+      
+      if (bend.isSection) {
+        const bgColor = '#f59e0b'
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
+            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
+            <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
+            <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
+          </div>
+        `
+      } else if (bend.isSSweep) {
+        const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
+        const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
+        el.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 8px ${HIGHWAY_BEND_COLOR}30;">
+            <span style="font-size:8px;font-weight:700;color:${HIGHWAY_BEND_COLOR};letter-spacing:0.5px;">S-SWEEP</span>
+            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend?.angle || ''}° ${dir2}${bend.secondBend?.angle || ''}°</span>
+          </div>
+        `
+      } else {
+        const dirArrow = bend.direction === 'LEFT' ? '←' : '→'
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
+            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
+            <span style="font-size:10px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
+            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${bend.angle}°</span>
+          </div>
+        `
+      }
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat(bend.position)
+        .addTo(map.current)
+      
+      highwayMarkers.current.push(marker)
+    })
+    
+    console.log(`🗺️ Highway bend markers: added ${highwayMarkers.current.length} markers`)
+  }, [highwayBends, mapLoaded])
+
+  // ================================
+  // INITIALIZE MAP
+  // ================================
   useEffect(() => {
     if (map.current) return
 
@@ -250,7 +457,6 @@ export default function Map() {
     map.current.on('load', () => {
       console.log('🗺️ Map loaded')
       
-      // Add terrain
       try {
         map.current.addSource('mapbox-dem', {
           type: 'raster-dem',
@@ -259,16 +465,6 @@ export default function Map() {
           maxzoom: 14
         })
         map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 })
-
-        map.current.addLayer({
-          id: 'sky',
-          type: 'sky',
-          paint: {
-            'sky-type': 'atmosphere',
-            'sky-atmosphere-sun': [0.0, 90.0],
-            'sky-atmosphere-sun-intensity': 15
-          }
-        })
       } catch (e) {
         console.log('Terrain setup error:', e)
       }
@@ -292,14 +488,17 @@ export default function Map() {
     }
   }, [])
 
-  // Add route when map is loaded and routeData is available
+  // ================================
+  // ADD ROUTE WHEN READY
+  // ================================
   useEffect(() => {
-    if (!mapLoaded) return
-    if (!routeData?.coordinates?.length) return
+    if (!mapLoaded || !routeData?.coordinates?.length) return
     
     addRouteToMap()
+    addCurveMarkers()
+    addHighwayBendMarkers()
     
-    // Fit bounds - SAFE version using array format instead of LngLatBounds
+    // Fit bounds if not running
     if (!isRunning && routeData.coordinates.length >= 2) {
       const lngs = routeData.coordinates.map(c => c[0])
       const lats = routeData.coordinates.map(c => c[1])
@@ -309,9 +508,20 @@ export default function Map() {
       ]
       map.current?.fitBounds(bounds, { padding: 80, duration: 1000 })
     }
-  }, [mapLoaded, routeData?.coordinates?.length, addRouteToMap, isRunning])
+  }, [mapLoaded, routeData, routeZones, addRouteToMap, addCurveMarkers, addHighwayBendMarkers, isRunning])
 
-  // Create user marker
+  // ================================
+  // UPDATE HIGHWAY MARKERS WHEN BENDS CHANGE
+  // ================================
+  useEffect(() => {
+    if (mapLoaded && highwayBends?.length > 0) {
+      addHighwayBendMarkers()
+    }
+  }, [highwayBends, mapLoaded, addHighwayBendMarkers])
+
+  // ================================
+  // CREATE USER MARKER
+  // ================================
   useEffect(() => {
     if (!map.current || !mapLoaded || userMarker.current) return
 
@@ -339,230 +549,66 @@ export default function Map() {
 
   }, [mapLoaded, modeColor])
 
-  // Update user marker color when mode changes
+  // ================================
+  // UPDATE USER POSITION
+  // ================================
+  useEffect(() => {
+    if (!userMarker.current || !position) return
+    userMarker.current.setLngLat(position)
+  }, [position])
+
+  // ================================
+  // UPDATE HEADING
+  // ================================
   useEffect(() => {
     if (!userMarkerEl.current) return
-    
-    const divs = userMarkerEl.current.querySelectorAll('div')
     const arrow = userMarkerEl.current.querySelector('#heading-arrow')
-    if (divs[1]) divs[1].style.borderColor = modeColor
-    if (divs[2]) {
-      divs[2].style.background = modeColor
-      divs[2].style.boxShadow = `0 2px 15px ${modeColor}80`
+    if (arrow) {
+      arrow.style.transform = `translateX(-50%) rotate(${heading}deg)`
     }
-    if (arrow) arrow.style.borderBottomColor = modeColor
-  }, [modeColor])
+  }, [heading])
 
-  // Update position and camera
+  // ================================
+  // CAMERA FOLLOW
+  // ================================
   useEffect(() => {
-    if (!map.current || !mapLoaded || !userMarker.current) return
+    if (!map.current || !position || !isFollowing || !isRunning) return
     
-    if (position) {
-      userMarker.current.setLngLat(position)
-
-      if (userMarkerEl.current) {
-        const arrow = userMarkerEl.current.querySelector('#heading-arrow')
-        if (arrow) {
-          arrow.style.transform = `translateX(-50%) rotate(${heading || 0}deg)`
-        }
-      }
-
-      if (isRunning && isFollowing && !isAnimatingRef.current) {
-        const now = Date.now()
-        const timeSinceLastUpdate = now - lastCameraUpdateRef.current
-        
-        const currentSpeed = speed || 0
-        const minUpdateInterval = currentSpeed > 40 ? 300 : currentSpeed > 20 ? 400 : 600
-        
-        if (timeSinceLastUpdate >= minUpdateInterval) {
-          lastCameraUpdateRef.current = now
-          isAnimatingRef.current = true
-          
-          const duration = currentSpeed > 50 ? 500 : currentSpeed > 30 ? 700 : 900
-          
-          // Zoom out more on highway (transit) zones for better visibility
-          const isHighway = currentZoneCharacter === 'transit'
-          let zoom
-          if (isHighway) {
-            // Highway: zoom out more
-            zoom = currentSpeed > 60 ? 14 : currentSpeed > 40 ? 14.5 : 15
-          } else {
-            // Normal zones
-            zoom = currentSpeed > 50 ? 15.5 : currentSpeed > 30 ? 16 : 16.5
-          }
-          
-          map.current.easeTo({
-            center: position,
-            bearing: heading || 0,
-            pitch: isHighway ? 50 : 60, // Slightly lower pitch on highway too
-            zoom: zoom,
-            duration: duration,
-            easing: (t) => t * (2 - t)
-          })
-        }
-      }
-    }
-  }, [position, heading, isRunning, mapLoaded, isFollowing, speed])
-
-  // Reset following when navigation starts
-  useEffect(() => {
-    if (isRunning) {
-      setIsFollowing(true)
-      setShowRecenter(false)
-    }
-  }, [isRunning])
-
-  // Recenter handler
-  const handleRecenter = useCallback(() => {
-    if (!map.current || !position) return
+    const now = Date.now()
+    if (now - lastCameraUpdateRef.current < 100) return
+    if (isAnimatingRef.current) return
     
-    setIsFollowing(true)
-    setShowRecenter(false)
+    lastCameraUpdateRef.current = now
     isAnimatingRef.current = true
+    
+    const targetZoom = speed > 60 ? 14 : speed > 30 ? 14.5 : 15
     
     map.current.easeTo({
       center: position,
-      bearing: heading || 0,
+      bearing: heading,
+      zoom: targetZoom,
       pitch: 60,
-      zoom: 16,
-      duration: 500
+      duration: 300,
+      easing: (t) => t
     })
-  }, [position, heading])
+  }, [position, heading, isFollowing, isRunning, speed])
 
-  // Add curve markers - FILTER OUT curves in transit zones (highway handles those)
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return
-
-    // Clear existing markers
-    curveMarkers.current.forEach(m => m.remove())
-    curveMarkers.current = []
-
-    const curves = routeData?.curves
-    if (!curves?.length) return
-
-    // Debug: log zone filtering
-    console.log(`🗺️ Curve markers: ${curves.length} curves, ${routeZones?.length || 0} zones`)
-    
-    let skippedCount = 0
-    let addedCount = 0
-
-    curves.forEach((curve) => {
-      if (!curve.position) return
-      
-      // Skip curves in transit zones - highway system handles those
-      const inTransit = routeZones?.some(seg => 
-        seg.character === 'transit' && 
-        curve.distanceFromStart >= seg.startDistance && 
-        curve.distanceFromStart <= seg.endDistance
-      )
-      
-      if (inTransit) {
-        skippedCount++
-        return
-      }
-      
-      addedCount++
-      const el = document.createElement('div')
-      const isActive = activeCurve?.id === curve.id
-      const color = getCurveColor(curve.severity)
-      
-      const direction = curve.isChicane ? curve.startDirection : curve.direction
-      const isLeft = direction === 'LEFT'
-      
-      if (curve.isChicane) {
-        const dirChar = isLeft ? '←' : '→'
-        const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
-        
-        el.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
-            <span style="font-size: 10px; font-weight: 700; color: ${isActive ? 'white' : color};">${typeLabel}${dirChar}</span>
-            <span style="font-size: 11px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severitySequence}</span>
-          </div>
-        `
-      } else {
-        el.innerHTML = `
-          <div style="display: flex; align-items: center; gap: 3px; background: ${isActive ? color : 'rgba(0,0,0,0.85)'}; padding: 4px 8px; border-radius: 8px; border: 2px solid ${color}; box-shadow: 0 2px 10px ${color}40;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="${isActive ? 'white' : color}" style="transform: ${isLeft ? 'scaleX(-1)' : 'none'}">
-              <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z"/>
-            </svg>
-            <span style="font-size: 14px; font-weight: 700; color: ${isActive ? 'white' : color};">${curve.severity}</span>
-            ${curve.modifier ? `<span style="font-size: 9px; color: ${isActive ? 'white' : color}; opacity: 0.8;">${curve.modifier}</span>` : ''}
-          </div>
-        `
-      }
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(curve.position)
-        .addTo(map.current)
-      
-      curveMarkers.current.push(marker)
-    })
-    
-    console.log(`🗺️ Curve markers: added ${addedCount}, skipped ${skippedCount} in transit zones`)
-  }, [routeData?.curves, activeCurve?.id, mapLoaded, routeZones])
-
-  // NEW: Add highway bend markers
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return
-
-    // Clear existing highway markers
-    highwayMarkers.current.forEach(m => m.remove())
-    highwayMarkers.current = []
-
-    console.log(`🗺️ Highway bend markers: ${highwayBends?.length || 0} bends available`)
-    
-    if (!highwayBends?.length) return
-
-    highwayBends.forEach((bend) => {
-      if (!bend.position) {
-        console.log(`🗺️ Skipping bend without position:`, bend.id)
-        return
-      }
-      
-      const el = document.createElement('div')
-      
-      if (bend.isSection) {
-        // SECTION marker - consolidated cluster - always "ACTIVE"
-        const bgColor = '#f59e0b'  // Amber/orange for active sections
-        el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
-            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
-            <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
-            <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
-          </div>
-        `
-      } else if (bend.isSSweep) {
-        // S-sweep marker
-        const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
-        const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 8px ${HIGHWAY_BEND_COLOR}30;">
-            <span style="font-size:8px;font-weight:700;color:${HIGHWAY_BEND_COLOR};letter-spacing:0.5px;">S-SWEEP</span>
-            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend.angle}° ${dir2}${bend.secondBend.angle}°</span>
-          </div>
-        `
-      } else {
-        // Regular highway bend marker
-        const isLeft = bend.direction === 'LEFT'
-        const dirArrow = isLeft ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
-            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
-            <span style="font-size:10px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
-            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${bend.angle}°</span>
-          </div>
-        `
-      }
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(bend.position)
-        .addTo(map.current)
-      
-      highwayMarkers.current.push(marker)
-    })
-    
-    console.log(`🗺️ Highway bend markers: added ${highwayMarkers.current.length} markers`)
-  }, [highwayBends, mapLoaded])
+  // ================================
+  // RECENTER HANDLER
+  // ================================
+  const handleRecenter = () => {
+    setIsFollowing(true)
+    setShowRecenter(false)
+    if (position && map.current) {
+      map.current.easeTo({
+        center: position,
+        bearing: heading,
+        zoom: 15,
+        pitch: 60,
+        duration: 500
+      })
+    }
+  }
 
   return (
     <div className="absolute inset-0">
