@@ -1230,27 +1230,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI LOADING INDICATOR - Prominent */}
+        {/* AI LOADING - Compact inline */}
         {isLoadingAI && (
-          <div className="mb-3 p-3 bg-purple-900/30 rounded-lg border border-purple-500/50 animate-pulse">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-sm text-purple-300 font-medium">AI analyzing zones...</span>
-            </div>
-            <div className="text-[10px] text-purple-400/60 mt-1">Checking for misclassified sections</div>
+          <div className="mb-2 flex items-center gap-2 px-2 py-1.5 bg-purple-500/10 rounded-full border border-purple-500/30">
+            <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-[10px] text-purple-300">Analyzing zones...</span>
           </div>
         )}
 
-        {/* AI ZONE TOGGLE - Prominent comparison toggle */}
+        {/* AI ZONE TOGGLE - Compact inline style */}
         {!isLoadingAI && llmEnhanced && llmResult && llmResult.changes?.length > 0 && (
-          <div className="mb-3 p-2 bg-black/60 rounded-lg border border-purple-500/30">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] text-purple-400 font-medium">🤖 AI Zone Analysis</span>
-              <span className="text-[9px] text-white/40">{llmResult.changes?.length} improvements found</span>
-            </div>
-            
-            {/* Toggle buttons */}
-            <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
+          <div className="mb-2 flex items-center gap-2">
+            {/* Toggle pill */}
+            <div className="flex bg-black/60 rounded-full p-0.5 border border-purple-500/30">
               <button 
                 onClick={() => {
                   setUseEnhancedZones(false)
@@ -1260,10 +1252,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   const bends = analyzeHighwayBends(routeData.coordinates, zones)
                   setHighwayBends(bends)
                 }}
-                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                className="px-2.5 py-1 rounded-full text-[9px] font-bold transition-all"
                 style={{ 
                   background: !useEnhancedZones ? '#64748b' : 'transparent', 
-                  color: !useEnhancedZones ? '#fff' : '#fff6' 
+                  color: !useEnhancedZones ? '#fff' : '#fff5' 
                 }}
               >
                 Original
@@ -1277,25 +1269,28 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   const bends = analyzeHighwayBends(routeData.coordinates, zones)
                   setHighwayBends(bends)
                 }}
-                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                className="px-2.5 py-1 rounded-full text-[9px] font-bold transition-all flex items-center gap-1"
                 style={{ 
                   background: useEnhancedZones ? '#8b5cf6' : 'transparent', 
-                  color: useEnhancedZones ? '#fff' : '#fff6' 
+                  color: useEnhancedZones ? '#fff' : '#fff5' 
                 }}
               >
-                🤖 AI Enhanced
+                <span>AI</span>
+                <span className="opacity-70">({llmResult.changes?.length})</span>
               </button>
             </div>
             
-            {/* Show changes summary */}
-            <div className="mt-2 text-[9px] text-white/50 max-h-16 overflow-y-auto">
-              {llmResult.changes?.slice(0, 3).map((change, i) => (
-                <div key={i} className="truncate">• {change}</div>
-              ))}
-              {llmResult.changes?.length > 3 && (
-                <div className="text-white/30">+{llmResult.changes.length - 3} more changes</div>
-              )}
-            </div>
+            {/* Expandable changes - click to show */}
+            <button 
+              onClick={() => {
+                const details = llmResult.changes?.join('\n')
+                if (details) alert(details)
+              }}
+              className="text-[9px] text-purple-400/60 hover:text-purple-400 transition-colors"
+              title={llmResult.changes?.join('\n')}
+            >
+              view changes
+            </button>
           </div>
         )}
 
