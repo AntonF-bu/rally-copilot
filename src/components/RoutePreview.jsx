@@ -1001,17 +1001,18 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       const color = zoneColors[callout.zone] || '#3b82f6'
       
-      // Exact zone tag style: bg at 20%, border at 40%, text full color
+      // More visible style - solid background with good contrast
       el.innerHTML = `
         <div style="
-          background: ${color}20;
-          padding: 2px 8px;
+          background: ${color}40;
+          padding: 3px 10px;
           border-radius: 4px;
-          border: 1px solid ${color}40;
+          border: 2px solid ${color};
           cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.5);
         " 
-        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:10px;font-weight:500;color:${color};">${shortLabel}</span>
+        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;Zone: ${callout.zone}&#10;${callout.reason || ''}">
+          <span style="font-size:11px;font-weight:600;color:${color};">${shortLabel}</span>
         </div>
       `
       
