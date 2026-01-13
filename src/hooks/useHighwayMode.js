@@ -2,8 +2,6 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import useHighwayStore from '../services/highwayStore'
 import {
-  analyzeHighwayBends,
-  identifySweepers,
   generateHighwayCallout,
   generateApexCallout,
   getSilenceBreaker,
@@ -22,18 +20,20 @@ import {
 } from '../services/smartChatter'
 
 // ================================
-// useHighwayMode Hook v3.0
-// NEW: Smart data-backed chatter system
+// useHighwayMode Hook v4.0
+// SIMPLIFIED: No re-analysis - reads from store
+// Preview does all the work, Navigation just reads
 // ================================
 
 export function useHighwayMode() {
   const {
     routeData,
     routeZones,
+    highwayBends,  // NEW: Read directly from store (set by Preview)
     simulationProgress,
     isRunning,
     speed,
-    position  // Use position to calculate distance for GPS mode
+    position
   } = useStore()
 
   const {
@@ -57,7 +57,6 @@ export function useHighwayMode() {
 
   // ================================
   // DISTANCE CALCULATION
-  // Calculate distance along route from GPS position
   // ================================
   useEffect(() => {
     if (!isRunning || !routeData?.coordinates?.length) return
@@ -101,74 +100,58 @@ export function useHighwayMode() {
   // Helper to get current distance
   const getCurrentDistance = useCallback(() => {
     const totalDist = routeData?.distance || 15000
-    // Prefer calculated distance, fall back to simulation progress
     if (calculatedDistanceRef.current > 0) {
       return calculatedDistanceRef.current
     }
     return (simulationProgress || 0) * totalDist
   }, [routeData?.distance, simulationProgress])
 
-  // Store highway bends from independent detection
-  const highwayBendsRef = useRef([])
+  // Refs for tracking
   const announcedBendsRef = useRef(new Set())
-  const routeAnalyzedRef = useRef(false)
+  const previousZoneRef = useRef(null)
+  const lastRouteIdRef = useRef(null)
 
   // ================================
   // ROUTE INITIALIZATION
-  // Run independent highway bend detection when route loads
+  // Just log what we got from Preview - NO re-analysis
   // ================================
   
   useEffect(() => {
-    if (!routeData?.coordinates?.length || !routeZones?.length) {
-      routeAnalyzedRef.current = false
-      return
-    }
+    if (!routeData?.coordinates?.length || !routeZones?.length) return
     
-    // Only analyze once per route
-    if (routeAnalyzedRef.current) return
-    routeAnalyzedRef.current = true
+    // Track route changes
+    const routeId = `${routeData.coordinates.length}-${routeData.distance}`
+    if (lastRouteIdRef.current === routeId) return
+    lastRouteIdRef.current = routeId
     
-    // Reset smart chatter session for new route
+    // Reset for new route
+    announcedBendsRef.current = new Set()
     resetChatterSession()
     
-    // Run independent highway bend detection
-    const bends = analyzeHighwayBends(routeData.coordinates, routeZones)
-    highwayBendsRef.current = bends
+    // Log what Preview gave us (no re-analysis!)
+    console.log('🛣️ Navigation: Using zones from Preview:', 
+      routeZones.map(z => `${z.character}(${Math.round(z.startDistance)}-${Math.round(z.endDistance)}m)`).join(' → ')
+    )
     
-    console.log(`🛣️ Highway Mode: Found ${bends.length} highway bends`)
-    
-    // Log some details for debugging
-    if (bends.length > 0) {
-      const sSweeps = bends.filter(b => b.isSSweep)
-      const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
-      console.log(`   - S-sweeps: ${sSweeps.length}`)
-      console.log(`   - Sweepers: ${sweepers.length}`)
-      console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
-      
-      // Log first few bends for inspection
-      bends.slice(0, 3).forEach((b, i) => {
-        console.log(`   Bend ${i + 1}: ${b.direction} ${b.angle}° @ ${b.distanceFromStart}m${b.isSSweep ? ' (S-sweep)' : ''}`)
-      })
+    if (highwayBends?.length > 0) {
+      console.log(`🛣️ Navigation: Using ${highwayBends.length} highway bends from Preview`)
+      const sSweeps = highwayBends.filter(b => b.isSSweep)
+      const sections = highwayBends.filter(b => b.isSection)
+      const sweepers = highwayBends.filter(b => !b.isSSweep && !b.isSection)
+      console.log(`   - S-sweeps: ${sSweeps.length}, Sections: ${sections.length}, Sweepers: ${sweepers.length}`)
+    } else {
+      console.log('🛣️ Navigation: No highway bends from Preview')
     }
     
-    // Also tag sweepers on existing curves (backward compat)
-    if (routeData.curves?.length) {
-      const enhancedCurves = identifySweepers(routeData.curves, routeZones)
-      const sweeperCount = enhancedCurves.filter(c => c.isSweeper).length
-      console.log(`🛣️ Highway Mode: Tagged ${sweeperCount} sweepers on existing curves`)
-    }
-    
-  }, [routeData?.coordinates, routeZones])
+  }, [routeData?.coordinates?.length, routeData?.distance, routeZones, highwayBends])
 
   // Reset on route change
   useEffect(() => {
     announcedBendsRef.current = new Set()
-    routeAnalyzedRef.current = false
-    resetChatterSession()  // Reset smart chatter on route change
+    resetChatterSession()
   }, [routeData])
 
   // Track previous zone for completion detection
-  const previousZoneRef = useRef(null)
 
   // ================================
   // ZONE TRACKING
@@ -198,7 +181,6 @@ export function useHighwayMode() {
     // Track zone completion for smart chatter
     if (previousZoneRef.current && currentZone && 
         previousZoneRef.current.startDistance !== currentZone.startDistance) {
-      // Zone changed - record completion of previous zone
       onZoneComplete(previousZoneRef.current.character, currentDist)
     }
     previousZoneRef.current = currentZone
@@ -211,220 +193,115 @@ export function useHighwayMode() {
 
   // ================================
   // SPEED SAMPLING
-  // Track average speed for stats (Companion mode)
+  // ================================
+
+  useEffect(() => {
+    if (!isRunning) return
+    if (!inHighwayZone) return
+    if (!speed || speed < 20) return
+
+    addSpeedSample(speed)
+  }, [isRunning, inHighwayZone, speed, addSpeedSample])
+
+  // ================================
+  // SMART CHATTER UPDATES
   // ================================
 
   useEffect(() => {
     if (!isRunning) return
 
-    const interval = setInterval(() => {
-      if (speed > 0) {
-        const currentDist = getCurrentDistance()
-        
-        // Find current zone
-        const currentZone = routeZones?.find(z => 
-          currentDist >= z.startDistance && currentDist <= z.endDistance
-        )?.character || 'transit'
-        
-        // Feed stats system (existing)
-        if (inHighwayZone && highwayFeatures.stats) {
-          addSpeedSample(speed)
-        }
-        
-        // Feed smart chatter system (new)
-        updateChatterData({
-          speed,
-          distance: currentDist,
-          zoneType: currentZone
-        })
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [isRunning, inHighwayZone, speed, highwayFeatures.stats, addSpeedSample, routeZones, getCurrentDistance])
-
-  // ================================
-  // MAIN CALLOUT FUNCTION
-  // Returns next highway callout if one is due
-  // ================================
-
-  const getNextHighwayCallout = useCallback((currentDistance) => {
-    // Check if sweepers feature is enabled
-    if (!highwayFeatures.sweepers) return null
-
-    const config = getHighwayModeConfig(highwayMode)
-    const bends = highwayBendsRef.current
-    
-    if (!bends?.length) return null
-
-    // Find upcoming bends within range
-    const upcomingBends = bends.filter(bend => {
-      const distanceToBend = bend.distanceFromStart - currentDistance
-      return distanceToBend > 0 && distanceToBend < 500 // Look ahead 500m
-    })
-
-    if (upcomingBends.length === 0) {
-      // No bends coming up - check for chatter (Companion mode)
-      if (config.enableChatter && inHighwayZone) {
-        const chatter = getSilenceBreaker(lastCalloutTime, lastChatterTime)
-        if (chatter) {
-          recordChatterTime()
-          return chatter
-        }
-      }
-      return null
-    }
-
-    // Get closest bend
-    const nextBend = upcomingBends[0]
-    const distanceToBend = nextBend.distanceFromStart - currentDistance
-
-    // Check announcement windows based on bend type
-    const announceDistance = nextBend.isSection ? 450 :
-                            nextBend.isSSweep ? 400 : 
-                            nextBend.angle > 20 ? 350 : 
-                            nextBend.angle > 10 ? 300 : 250
-
-    // Check if we should announce
-    if (distanceToBend <= announceDistance && !announcedBendsRef.current.has(nextBend.id)) {
-      announcedBendsRef.current.add(nextBend.id)
-      
-      const callout = generateHighwayCallout(nextBend, highwayMode)
-      if (callout) {
-        recordCalloutTime()
-        
-        // Queue apex callout if enabled
-        if (config.enableApex && (nextBend.isHighwayBend || nextBend.isSweeper)) {
-          // Apex timing is handled separately via delay
-        }
-        
-        return callout
-      }
-    }
-
-    return null
-  }, [inHighwayZone, highwayFeatures.sweepers, highwayMode, lastCalloutTime, lastChatterTime, recordCalloutTime, recordChatterTime])
-
-  // ================================
-  // PROGRESS CALLOUTS
-  // ================================
-
-  const getProgressCallout = useCallback(() => {
-    if (!highwayFeatures.progress || !routeData?.distance) return null
-
-    const totalDist = routeData.distance
     const currentDist = getCurrentDistance()
+    const totalDist = routeData?.distance || 15000
 
-    return checkProgressMilestone(currentDist, totalDist, announcedMilestones)
-  }, [highwayFeatures.progress, routeData?.distance, getCurrentDistance, announcedMilestones])
-
-  // ================================
-  // SWEEPER/BEND COMPLETION
-  // ================================
-
-  const onBendCompleted = useCallback((bend) => {
-    if (!highwayFeatures.feedback) return null
-
-    incrementSweepersCleared()
-
-    // Random chance of feedback (not every time)
-    if (Math.random() < 0.4) {
-      return getSweeperFeedback()
-    }
-
-    return null
-  }, [highwayFeatures.feedback, incrementSweepersCleared])
+    updateChatterData({
+      distanceTraveled: currentDist,
+      totalDistance: totalDist,
+      currentSpeed: speed || 0,
+      currentZone: previousZoneRef.current?.character || null,
+      bendCount: highwayBends?.length || 0,
+      isHighway: inHighwayZone
+    })
+  }, [isRunning, speed, simulationProgress, position, routeData?.distance, inHighwayZone, highwayBends?.length, getCurrentDistance])
 
   // ================================
-  // STATS CALLOUTS (Companion mode)
+  // GET UPCOMING BEND
+  // Find next highway bend from Preview data
   // ================================
 
-  const getStatsCallout = useCallback(() => {
-    if (!highwayFeatures.stats) return null
-
-    // Check for milestone callouts (every 10 sweepers)
-    if (highwayStats.sweepersCleared > 0 && highwayStats.sweepersCleared % 10 === 0) {
-      return generateStatsCallout(highwayStats, 'sweepers')
-    }
-
-    return null
-  }, [highwayFeatures.stats, highwayStats])
-
-  // ================================
-  // GET HIGHWAY BENDS FOR DISPLAY
-  // Used by Map/RoutePreview to show markers
-  // ================================
-
-  const getHighwayBends = useCallback(() => {
-    return highwayBendsRef.current
-  }, [])
+  const getUpcomingBend = useCallback(() => {
+    if (!highwayBends?.length) return null
+    
+    const currentDist = getCurrentDistance()
+    
+    // Find next unannounced bend
+    const upcoming = highwayBends
+      .filter(b => {
+        const bendDist = b.distanceFromStart || 0
+        const distanceAhead = bendDist - currentDist
+        return distanceAhead > 0 && distanceAhead < 2000 && !announcedBendsRef.current.has(b.id)
+      })
+      .sort((a, b) => (a.distanceFromStart || 0) - (b.distanceFromStart || 0))
+    
+    return upcoming[0] || null
+  }, [highwayBends, getCurrentDistance])
 
   // ================================
-  // COMPANION CHATTER (SMART DATA-BACKED)
-  // Generates intelligent, data-driven callouts
+  // ANNOUNCE BEND
+  // Mark a bend as announced
   // ================================
+
+  const markBendAnnounced = useCallback((bendId) => {
+    announcedBendsRef.current.add(bendId)
+    recordCalloutTime()
+  }, [recordCalloutTime])
+
+  // ================================
+  // GET CHATTER
+  // Get smart chatter if conditions are right
+  // ================================
+
   const getChatter = useCallback(() => {
+    if (!isRunning || !highwayFeatures.chatter) return null
     if (!inHighwayZone) return null
     
-    const config = getHighwayModeConfig(highwayMode)
-    if (!config.enableChatter) return null
+    const now = Date.now()
+    if (now - lastChatterTime < 30000) return null
     
-    // Calculate current distance
-    const totalDist = routeData?.distance || 15000
-    const currentDist = getCurrentDistance()
-    
-    // Get current zone type
-    const currentZone = routeZones?.find(z => 
-      currentDist >= z.startDistance && currentDist <= z.endDistance
-    )?.character || 'transit'
-    
-    // Call smart chatter with all available data
-    const chatterResult = getSmartChatter({
-      speed: speed || 0,
-      userDistance: currentDist,
-      totalDistance: totalDist,
-      expectedDuration: routeData?.duration || 1800,
-      highwayBends: highwayBendsRef.current,
-      zones: routeZones,
-      curves: routeData?.curves,
-      currentZone,
-      speedLimit: 65  // TODO: Could get from zone data
-    })
-    
-    if (chatterResult) {
+    const chatter = getSmartChatter()
+    if (chatter) {
       recordChatterTime()
-      console.log(`🎤 SMART CHATTER [${chatterResult.type}]: "${chatterResult.text}"`)
-      return chatterResult.text
     }
-    
-    return null
-  }, [inHighwayZone, highwayMode, routeData, routeZones, speed, getCurrentDistance, recordChatterTime])
+    return chatter
+  }, [isRunning, highwayFeatures.chatter, inHighwayZone, lastChatterTime, recordChatterTime])
 
   // ================================
-  // RETURN HOOK API
+  // RETURN VALUES
   // ================================
 
   return {
     // State
-    isHighwayActive: inHighwayZone && highwayFeatures.sweepers,
-    inHighwayZone,  // Expose directly for debugging
+    isHighwayActive: inHighwayZone,
+    highwayBends: highwayBends || [],  // From store, not local ref
     highwayMode,
+    highwayFeatures,
     highwayStats,
     
-    // Data
-    highwayBends: highwayBendsRef.current,
-    getHighwayBends,
-    
-    // Callout functions
-    getNextHighwayCallout,
-    getProgressCallout,
-    getStatsCallout,
-    getChatter,  // NEW: For companion mode chatter
-    onBendCompleted,
-    
     // Actions
-    resetHighwayTrip,
-    recordCalloutTime
+    getUpcomingBend,
+    markBendAnnounced,
+    getChatter,
+    
+    // Helpers
+    generateHighwayCallout,
+    generateApexCallout,
+    getSilenceBreaker,
+    getSweeperFeedback,
+    checkProgressMilestone,
+    generateStatsCallout,
+    getHighwayModeConfig,
+    
+    // Distance
+    getCurrentDistance
   }
 }
 
