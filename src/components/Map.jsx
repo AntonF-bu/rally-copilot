@@ -41,7 +41,7 @@ export default function Map() {
   const mode = useStore(state => state.mode)
   const routeData = useStore(state => state.routeData)
   const routeZones = useStore(state => state.routeZones)
-  const highwayBends = useStore(state => state.highwayBends) || []
+  const curatedHighwayCallouts = useStore(state => state.curatedHighwayCallouts) || []
   const simulationProgress = useStore(state => state.simulationProgress)
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
@@ -229,7 +229,7 @@ export default function Map() {
   }, [routeData?.curves, routeZones, isInTransitZone])
 
   // ================================
-  // FIXED: Highway bend markers now use AI-enhanced callouts
+  // Highway markers - NOW SHOWS CURATED CALLOUTS (not raw bends)
   // ================================
   const addHighwayBendMarkers = useCallback(() => {
     if (!map.current || !mapLoaded) return
@@ -237,64 +237,46 @@ export default function Map() {
     highwayMarkers.current.forEach(m => m.remove())
     highwayMarkers.current = []
 
-    if (!highwayBends?.length) return
+    if (!curatedHighwayCallouts?.length) {
+      console.log('🗺️ No curated highway callouts to display')
+      return
+    }
 
-    // Log to verify we're getting enhanced bends from store
-    const enhancedCount = highwayBends.filter(b => b.llmEnhanced).length
-    const sectionCount = highwayBends.filter(b => b.isSection).length
-    console.log(`🗺️ Highway bend markers: ${highwayBends.length} total, ${sectionCount} sections, ${enhancedCount} AI-enhanced`)
+    console.log(`🗺️ Rendering ${curatedHighwayCallouts.length} curated highway callouts`)
 
-    highwayBends.forEach((bend) => {
-      if (!bend.position) return
+    curatedHighwayCallouts.forEach((callout) => {
+      if (!callout.position) return
 
       const el = document.createElement('div')
 
-      // ACTIVE SECTION - Use AI callout if available
-      if (bend.isSection) {
-        const isEnhanced = bend.llmEnhanced
-        const bgColor = isEnhanced ? '#10b981' : '#f59e0b' // Green if AI-enhanced, amber if not
-        
-        // USE THE AI CALLOUT - this is the key fix!
-        const displayText = bend.calloutShort || bend.calloutDetailed || `${bend.bendCount} bends`
-        
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:6px;border:1.5px solid ${bgColor};box-shadow:0 2px 8px ${bgColor}40;">
-            ${isEnhanced ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
-            <span style="font-size:10px;font-weight:600;color:${bgColor};white-space:nowrap;">${displayText}</span>
-          </div>
-        `
-      } 
-      // S-SWEEP marker
-      else if (bend.isSSweep) {
-        const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
-        const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};">
-            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">S</span>
-            <span style="font-size:9px;color:${HIGHWAY_BEND_COLOR};">${dir1}${dir2}</span>
-          </div>
-        `
-      } 
-      // Regular sweeper
-      else {
-        const dirArrow = bend.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};">
-            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
-            <span style="font-size:9px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
-          </div>
-        `
+      // Color based on type
+      const colors = {
+        section: '#10b981',   // Green for winding sections
+        sweeper: '#3b82f6',   // Blue for notable sweepers
+        straight: '#6b7280',  // Gray for straight stretches
+        highlight: '#f59e0b'  // Amber for highlights
       }
+      const bgColor = colors[callout.type] || colors.section
+      
+      // Display text (already curated by LLM)
+      const displayText = callout.shortText || callout.text || 'Section'
+      
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:5px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
+          ${callout.llmCurated ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
+          <span style="font-size:11px;font-weight:600;color:${bgColor};white-space:nowrap;">${displayText}</span>
+        </div>
+      `
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(bend.position)
+        .setLngLat(callout.position)
         .addTo(map.current)
 
       highwayMarkers.current.push(marker)
     })
 
-    console.log(`🗺️ Highway bend markers: added ${highwayMarkers.current.length} markers`)
-  }, [highwayBends, mapLoaded])
+    console.log(`🗺️ Added ${highwayMarkers.current.length} curated markers`)
+  }, [curatedHighwayCallouts, mapLoaded])
 
   useEffect(() => {
     if (map.current) return
@@ -362,10 +344,11 @@ export default function Map() {
   }, [mapLoaded, routeData, routeZones, addRouteToMap, addCurveMarkers, addHighwayBendMarkers, isRunning])
 
   useEffect(() => {
-    if (mapLoaded && highwayBends?.length > 0) {
+    if (mapLoaded && curatedHighwayCallouts?.length > 0) {
+      console.log('🗺️ Curated callouts changed, re-rendering markers')
       addHighwayBendMarkers()
     }
-  }, [highwayBends, mapLoaded, addHighwayBendMarkers])
+  }, [curatedHighwayCallouts, mapLoaded, addHighwayBendMarkers])
 
   useEffect(() => {
     if (!map.current || !mapLoaded || userMarker.current) return
