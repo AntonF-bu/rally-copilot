@@ -8,14 +8,14 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
-import { enhanceCurvesWithLLM, shouldEnhanceCurves } from '../services/llmCurveService'
+import { curateHighwayBends, shouldCurateHighway } from '../services/llmHighwayCurator'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v19
-// NEW: LLM Curve Enhancement Integration
+// Route Preview - v20
+// NEW: LLM Highway Curator - smart merging/filtering
 // Preview is single source of truth
 // ================================
 
@@ -49,11 +49,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
   
-  // LLM Curve Enhancement state
+  // LLM Curve Enhancement state - NOW CURATED CALLOUTS
   const [curveEnhanced, setCurveEnhanced] = useState(false)
-  const [curveEnhancementResult, setCurveEnhancementResult] = useState(null)
+  const [curatedCallouts, setCuratedCallouts] = useState([])
+  const [curationReasoning, setCurationReasoning] = useState('')
   
-  // Highway bends - LOCAL state for UI
+  // Highway bends - LOCAL state for UI (raw bends, before curation)
   const [highwayBends, setHighwayBendsLocal] = useState([])
   const [showHighwayBends, setShowHighwayBends] = useState(true)
   
@@ -275,57 +276,39 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         highwayAnalyzedRef.current = true
         updateStage('highway', 'loading')
         
-        let bends = analyzeHighwayBends(coordinates, activeZones)
-        console.log(`🛣️ Found ${bends.length} highway bends`)
+        const rawBends = analyzeHighwayBends(coordinates, activeZones)
+        console.log(`🛣️ Found ${rawBends.length} raw highway bends`)
+        setHighwayBends(rawBends) // Store raw bends for reference
         updateStage('highway', 'complete')
         
-        if (bends.length > 0) {
-          const sections = bends.filter(b => b.isSection)
-          console.log(`   - Active sections: ${sections.length}`)
-          
-          // Step 4: LLM Curve Enhancement
-          if (hasLLMApiKey() && shouldEnhanceCurves({ curves, highwayBends: bends })) {
-            updateStage('aiCurves', 'loading')
-            console.log('🤖 Running LLM curve enhancement...')
-            try {
-              const curveResult = await enhanceCurvesWithLLM({
-                curves: curves || [],
-                highwayBends: bends,
-                zones: activeZones,
-                routeData
-              }, getLLMApiKey())
+        // Step 4: LLM Highway Curation (merge, filter, prioritize)
+        if (hasLLMApiKey() && shouldCurateHighway(rawBends)) {
+          updateStage('aiCurves', 'loading')
+          console.log('🎯 Running LLM Highway Curator...')
+          try {
+            const curationResult = await curateHighwayBends({
+              highwayBends: rawBends,
+              zones: activeZones,
+              routeData
+            }, getLLMApiKey())
+            
+            if (curationResult.curatedCallouts?.length > 0) {
+              console.log(`🎯 Curator output: ${curationResult.curatedCallouts.length} curated callouts`)
+              console.log(`   Reasoning: ${curationResult.reasoning}`)
               
-              setCurveEnhancementResult(curveResult)
+              setCuratedCallouts(curationResult.curatedCallouts)
+              setCurationReasoning(curationResult.reasoning)
+              setCurveEnhanced(true)
               
-              if (curveResult.changes?.length > 0) {
-                console.log(`🤖 Curve Enhancement: ${curveResult.changes.length} changes`)
-                setCurveEnhanced(true)
-                
-                if (curveResult.curves?.length > 0) {
-                  useStore.getState().setRouteData({
-                    ...routeData,
-                    curves: curveResult.curves
-                  })
-                }
-                
-                if (curveResult.highwayBends?.length > 0) {
-                  bends = curveResult.highwayBends
-                }
-                
-                if (curveResult.calloutVariants && Object.keys(curveResult.calloutVariants).length > 0) {
-                  useStore.getState().setCalloutVariants(curveResult.calloutVariants)
-                }
-              }
-              updateStage('aiCurves', 'complete')
-            } catch (curveErr) {
-              console.warn('⚠️ LLM curve enhancement failed:', curveErr)
-              updateStage('aiCurves', 'complete')
+              // Store curated callouts in global store for navigation
+              useStore.getState().setCuratedHighwayCallouts(curationResult.curatedCallouts)
             }
+            updateStage('aiCurves', 'complete')
+          } catch (curateErr) {
+            console.warn('⚠️ LLM highway curation failed:', curateErr)
+            updateStage('aiCurves', 'complete')
           }
         }
-        
-        // Store final bends
-        setHighwayBends(bends)
       }
       
       setIsLoadingAI(false)
@@ -981,72 +964,65 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [isInTransitZone])
 
-  // Add highway bend markers - WITH ACTIVE SECTION SUPPORT
-  const addHighwayBendMarkers = useCallback((map, bends) => {
+  // Add highway markers - NOW SHOWS CURATED CALLOUTS (not raw bends)
+  const addHighwayBendMarkers = useCallback((map, callouts) => {
     highwayMarkersRef.current.forEach(m => m.remove())
     highwayMarkersRef.current = []
     
-    if (!showHighwayBends || !bends?.length) return
+    if (!showHighwayBends) return
     
-    bends.forEach(bend => {
-      if (!bend.position) return
+    // Use curated callouts if available, otherwise show nothing on highway
+    const markersToShow = callouts || curatedCallouts || []
+    
+    if (!markersToShow.length) {
+      console.log('🗺️ No curated callouts to display')
+      return
+    }
+    
+    console.log(`🗺️ Rendering ${markersToShow.length} curated highway callouts`)
+    
+    markersToShow.forEach(callout => {
+      if (!callout.position) return
       
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // ACTIVE SECTION marker - COMPACT design with AI callout
-      if (bend.isSection) {
-        const isEnhanced = bend.llmEnhanced
-        const bgColor = isEnhanced ? '#10b981' : '#f59e0b'
-        
-        // Use AI callout or generate a simple fallback
-        const displayText = bend.calloutShort || bend.calloutDetailed || `${bend.bendCount} bends`
-        
-        // Keep it SHORT for marker (max 25 chars)
-        const truncatedText = displayText.length > 28 
-          ? displayText.substring(0, 25) + '...' 
-          : displayText
-        
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:6px;border:1.5px solid ${bgColor};box-shadow:0 2px 8px ${bgColor}40;">
-            ${isEnhanced ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
-            <span style="font-size:10px;font-weight:600;color:${bgColor};white-space:nowrap;">${truncatedText}</span>
-          </div>
-        `
+      // Color based on type
+      const colors = {
+        section: '#10b981',   // Green for winding sections
+        sweeper: '#3b82f6',   // Blue for notable sweepers
+        straight: '#6b7280',  // Gray for straight stretches
+        highlight: '#f59e0b'  // Amber for highlights
       }
-      // S-SWEEP marker
-      else if (bend.isSSweep) {
-        const dir1 = bend.firstBend.direction === 'LEFT' ? '←' : '→'
-        const dir2 = bend.secondBend.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 8px ${HIGHWAY_BEND_COLOR}30;">
-            <span style="font-size:8px;font-weight:700;color:${HIGHWAY_BEND_COLOR};letter-spacing:0.5px;">S-SWEEP</span>
-            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend.angle}° ${dir2}${bend.secondBend.angle}°</span>
-          </div>
-        `
-      }
-      // Regular SW marker
-      else {
-        const isLeft = bend.direction === 'LEFT'
-        const dirArrow = isLeft ? '←' : '→'
-        el.innerHTML = `
-          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;">
-            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
-            <span style="font-size:10px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
-            <span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${bend.angle}°</span>
-          </div>
-        `
-      }
+      const bgColor = colors[callout.type] || colors.section
       
-      el.onclick = () => handleHighwayBendClick(bend)
+      // Display text (already curated by LLM)
+      const displayText = callout.shortText || callout.text || 'Section'
+      
+      el.innerHTML = `
+        <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:5px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
+          ${callout.llmCurated ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
+          <span style="font-size:11px;font-weight:600;color:${bgColor};white-space:nowrap;">${displayText}</span>
+        </div>
+      `
+      
+      el.onclick = () => {
+        setSelectedCurve({
+          ...callout,
+          isCuratedCallout: true
+        })
+        if (mapRef.current) {
+          mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
+        }
+      }
       
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(bend.position)
+        .setLngLat(callout.position)
         .addTo(map)
       
       highwayMarkersRef.current.push(marker)
     })
-  }, [showHighwayBends])
+  }, [showHighwayBends, curatedCallouts])
 
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
@@ -1062,8 +1038,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
     addMarkers(mapRef.current, data.curves, data.coordinates, charSegs)
-    addHighwayBendMarkers(mapRef.current, highwayBends)
-  }, [routeData, routeCharacter.segments, addRoute, addMarkers, addHighwayBendMarkers, highwayBends])
+    addHighwayBendMarkers(mapRef.current, curatedCallouts)
+  }, [routeData, routeCharacter.segments, addRoute, addMarkers, addHighwayBendMarkers, curatedCallouts])
 
   // Rebuild route when character analysis completes
   useEffect(() => {
@@ -1072,12 +1048,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeCharacter.segments, mapLoaded])
 
-  // Add highway markers when bends are detected
+  // Add highway markers when curated callouts are ready
   useEffect(() => {
-    if (mapRef.current && mapLoaded && highwayBends.length > 0) {
-      addHighwayBendMarkers(mapRef.current, highwayBends)
+    if (mapRef.current && mapLoaded && curatedCallouts.length > 0) {
+      console.log('🗺️ Curated callouts ready, rendering markers...')
+      addHighwayBendMarkers(mapRef.current, curatedCallouts)
     }
-  }, [highwayBends, mapLoaded, addHighwayBendMarkers])
+  }, [curatedCallouts, mapLoaded, addHighwayBendMarkers])
 
   // Initialize map
   useEffect(() => {
@@ -1370,30 +1347,67 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI CURVE ENHANCEMENT STATUS */}
-        {curveEnhanced && curveEnhancementResult?.changes?.length > 0 && (
-          <div className="mb-2 flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-              </svg>
-              <span className="text-[10px] text-emerald-400 font-medium">
-                AI Curves
-              </span>
-              <span className="text-[10px] text-emerald-400/70">
-                ({curveEnhancementResult.changes.length})
-              </span>
+        {/* AI HIGHWAY CURATION STATUS */}
+        {curveEnhanced && curatedCallouts.length > 0 && (
+          <div className="mb-2 flex flex-col gap-2">
+            {/* Header row */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <span className="text-[10px] text-emerald-400 font-medium">
+                  AI Curated
+                </span>
+                <span className="text-[10px] text-emerald-400/70">
+                  {highwayBends.length} → {curatedCallouts.length}
+                </span>
+              </div>
+              <button 
+                onClick={() => alert(curationReasoning || 'No reasoning available')}
+                className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors"
+              >
+                why?
+              </button>
             </div>
-            <button 
-              onClick={() => {
-                const details = curveEnhancementResult.changes?.join('\n')
-                if (details) alert(details)
-              }}
-              className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors"
-            >
-              view
-            </button>
+            
+            {/* Curated callouts preview */}
+            <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
+              {curatedCallouts.slice(0, 8).map((callout, i) => {
+                const colors = {
+                  section: '#10b981',
+                  sweeper: '#3b82f6',
+                  straight: '#6b7280',
+                  highlight: '#f59e0b'
+                }
+                const color = colors[callout.type] || colors.section
+                return (
+                  <button
+                    key={callout.id || i}
+                    onClick={() => {
+                      setSelectedCurve({ ...callout, isCuratedCallout: true })
+                      if (mapRef.current && callout.position) {
+                        mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
+                      }
+                    }}
+                    className="px-2 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:scale-105"
+                    style={{ 
+                      background: `${color}15`, 
+                      color: color, 
+                      border: `1px solid ${color}40` 
+                    }}
+                  >
+                    {callout.shortText || callout.text}
+                  </button>
+                )
+              })}
+              {curatedCallouts.length > 8 && (
+                <span className="text-[9px] text-white/40 self-center">
+                  +{curatedCallouts.length - 8} more
+                </span>
+              )}
+            </div>
           </div>
         )}
 
