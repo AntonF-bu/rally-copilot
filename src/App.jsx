@@ -263,18 +263,37 @@ export default function App() {
     }
     
     if (distanceToBend <= announceDistance) {
-      // Get callout from hook
+      // Generate callout text from bend data
       console.log(`🛣️ Getting callout for bend at ${Math.round(distanceToBend)}m`)
-      const callout = getNextHighwayCallout(userDistanceAlongRoute)
       
-      if (callout) {
-        console.log(`🛣️ HIGHWAY SPEAKING: "${callout.text}" @ ${Math.round(distanceToBend)}m`)
-        speak(callout.text, 'high')  // Use high priority like regular curves
+      // Build callout text directly from bend
+      let calloutText = ''
+      if (nextBend.isSection) {
+        calloutText = `Active section ahead. ${nextBend.bendCount} bends over ${Math.round(nextBend.length || 500)} meters.`
+      } else if (nextBend.isSSweep) {
+        const dir1 = nextBend.firstBend?.direction === 'LEFT' ? 'left' : 'right'
+        const dir2 = nextBend.secondBend?.direction === 'LEFT' ? 'left' : 'right'
+        calloutText = `S-sweep ahead. ${dir1} then ${dir2}.`
+      } else {
+        const dir = nextBend.direction === 'LEFT' ? 'left' : 'right'
+        const angle = nextBend.angle || 10
+        if (angle > 20) {
+          calloutText = `Sweeper ${dir}, ${angle} degrees.`
+        } else if (angle > 10) {
+          calloutText = `Gentle ${dir}, ${angle} degrees.`
+        } else {
+          calloutText = `Easy ${dir} ahead.`
+        }
+      }
+      
+      if (calloutText) {
+        console.log(`🛣️ HIGHWAY SPEAKING: "${calloutText}" @ ${Math.round(distanceToBend)}m`)
+        speak(calloutText, 'high')
         announcedHighwayBendsRef.current.add(nextBend.id)
         lastCalloutRef.current = now
         recordCalloutTime()
       } else {
-        console.log(`🛣️ WARNING: getNextHighwayCallout returned null!`)
+        console.log(`🛣️ WARNING: Could not generate callout for bend`)
       }
     }
   }, [isRunning, settings.voiceEnabled, highwayBends, userDistanceAlongRoute, getNextHighwayCallout, speak, recordCalloutTime])
