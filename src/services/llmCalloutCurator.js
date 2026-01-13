@@ -81,23 +81,31 @@ ROLE: You're the co-driver. The driver can't look at the map. They need AUDIO wa
 
 PRINCIPLES:
 1. SAFETY FIRST - Always warn about dangerous sections (high angles, sudden difficulty spikes)
-2. CONTEXT MATTERS - A 30° curve after 15 miles of straight is MORE surprising than after winding roads
-3. LESS IS MORE - Don't call every curve. Only what matters.
+2. CONTEXT MATTERS - A 20° curve after 5+ miles of straight IS surprising and needs a callout
+3. FLOW MATTERS - In winding sections, group curves ("sweepers for the next mile") instead of calling each one
 4. ACCURATE POSITIONS - Use the apex mile from the data, that's where the curve actually is
 5. SHAPE MATTERS - "tight" needs earlier warning than "sweeper"
 
 WHAT TO CALL OUT:
-- Danger zones (50°+ curves, or 30°+ after long straights)
-- Wake-up calls after 8+ miles of straight/gentle road
-- Notable sweepers (35°+) that are enjoyable or need attention
+- Danger zones (50°+ curves)
+- Any curve 20°+ after 3+ miles of straight road (driver is "asleep")
+- Any curve 30°+ even in flowing sections
+- Wake-up calls after 8+ miles of straight/gentle road  
+- Notable sweepers (25°+) that break the rhythm
 - Section changes (easy → technical or vice versa)
-- Sequences that need rhythm ("3 sweepers coming up")
+- Sequences worth noting ("three right sweepers coming")
 
 WHAT TO SKIP:
-- Gentle curves under 25° unless after long straight
-- Urban zone events (driver expects city turns)
-- Every single curve in a winding section (group them instead)
-- Redundant callouts too close together (<1 mile apart)
+- Gentle curves under 18° in flowing sections (driver is already engaged)
+- Urban zone events under 60° (driver expects city turns)
+- Individual curves in a winding section - group them instead
+- Redundant callouts less than 0.8 miles apart
+
+CALLOUT GUIDELINES:
+- For an 80+ mile highway route: aim for 12-20 callouts
+- More callouts in technical/winding sections, fewer in gentle highway
+- After any straight of 3+ miles, the FIRST curve should get a callout regardless of angle
+- Use "wake up" for transitions from boring to interesting
 
 OUTPUT FORMAT:
 Return a JSON object with:
@@ -113,7 +121,7 @@ Return a JSON object with:
   ]
 }
 
-Keep callouts to 8-15 for a typical 80+ mile highway route. Quality over quantity.`
+Be generous with callouts - it's better to inform the driver than to leave them surprised.`
 }
 
 function buildCurationPrompt(flowData, routeInfo) {
