@@ -202,7 +202,11 @@ export default function App() {
   // ================================
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled) return
-    if (!highwayBends?.length) return
+    if (!highwayBends?.length) {
+      // Log occasionally for debugging
+      if (Math.random() < 0.01) console.log('🛣️ No highway bends detected')
+      return
+    }
     
     const now = Date.now()
     const minPause = 1500 // Minimum pause between callouts
@@ -230,16 +234,24 @@ export default function App() {
                             nextBend.angle > 20 ? 350 : 
                             nextBend.angle > 10 ? 300 : 250
     
+    // Log when we're approaching
+    if (distanceToBend <= announceDistance + 50 && distanceToBend > announceDistance) {
+      console.log(`🛣️ Approaching bend: ${nextBend.direction} ${nextBend.angle}° @ ${Math.round(distanceToBend)}m (announce at ${announceDistance}m)`)
+    }
+    
     if (distanceToBend <= announceDistance) {
       // Get callout from hook
+      console.log(`🛣️ Getting callout for bend at ${Math.round(distanceToBend)}m`)
       const callout = getNextHighwayCallout(userDistanceAlongRoute)
       
       if (callout) {
-        console.log(`🛣️ HIGHWAY: "${callout.text}" @ ${Math.round(distanceToBend)}m`)
-        speak(callout.text, 'normal')
+        console.log(`🛣️ HIGHWAY SPEAKING: "${callout.text}" @ ${Math.round(distanceToBend)}m`)
+        speak(callout.text, 'high')  // Use high priority like regular curves
         announcedHighwayBendsRef.current.add(nextBend.id)
         lastCalloutRef.current = now
         recordCalloutTime()
+      } else {
+        console.log(`🛣️ WARNING: getNextHighwayCallout returned null!`)
       }
     }
   }, [isRunning, settings.voiceEnabled, highwayBends, userDistanceAlongRoute, getNextHighwayCallout, speak, recordCalloutTime])
@@ -255,8 +267,8 @@ export default function App() {
     const interval = setInterval(() => {
       const chatter = getChatter()
       if (chatter) {
-        console.log(`🎤 CHATTER: "${chatter.text}"`)
-        speak(chatter.text, 'low')
+        console.log(`🎤 CHATTER: "${chatter}"`)
+        speak(chatter, 'low')
       }
     }, 10000)
     
