@@ -126,12 +126,10 @@ function getCurveSystemPrompt() {
   return `You are a professional rally co-driver analyzing route data. Your job:
 
 1. VERIFY CURVES: Check if detected curves are real or false positives
-2. ENHANCE ACTIVE SECTIONS: Transform generic "Active section, X bends" into rich, useful callouts
+2. ENHANCE ACTIVE SECTIONS: Transform generic "Active section, X bends" into specific, useful callouts
 3. GENERATE CALLOUT VARIANTS: Create 2-3 alternative phrasings for variety
 
 PERSONALITY: Professional, data-backed, intelligent. Occasional dry wit, never annoying.
-Example good callout: "Sweeping section ahead - moderate right entry, flows through alternating bends, tightens on exit. Hold 65."
-Example bad callout: "Wow, exciting curves coming up! Get ready for fun!" (too cheesy)
 
 CURVE VERIFICATION RULES:
 - Parking lot turns, driveways = FALSE POSITIVE (remove)
@@ -139,12 +137,25 @@ CURVE VERIFICATION RULES:
 - Severity should match road type (highway curves rarely above 3)
 - Very short curves (<30m) in urban = usually intersection, not real curve
 
-ACTIVE SECTION ENHANCEMENT:
-- Describe the CHARACTER of the section (flowing, technical, alternating)
-- Note the ENTRY (direction, speed target)
-- Describe the MIDDLE (what to expect)
-- Note the EXIT (tightening, opening, direction)
-- Keep it under 25 words - must be speakable
+ACTIVE SECTION ENHANCEMENT - THIS IS CRITICAL:
+For each [SECTION], analyze the individual bends and create a SPECIFIC callout that describes:
+1. The ENTRY: What direction and how sharp? (e.g., "Right entry" or "Gentle left to start")
+2. The PATTERN: What happens in the middle? (e.g., "alternating lefts and rights", "three consecutive rights", "S-curves through")
+3. The EXIT: How does it end? (e.g., "opens on exit", "tightens at end", "left to finish")
+4. Optional SPEED/ADVICE if relevant
+
+GOOD SECTION CALLOUTS (specific, actionable):
+- "Right entry, three lefts then two rights, tightens at exit"
+- "Gentle left start, alternating S-curves, opens to straight"
+- "Technical section - tight right, left, right sequence, hold 55"
+- "Flowing rights through, watch for sharp left at exit"
+
+BAD SECTION CALLOUTS (too generic):
+- "Active section ahead" (says nothing useful)
+- "Multiple bends" (no detail)
+- "Maintain speed through curves" (obvious)
+
+Keep callouts under 60 characters - they must be speakable quickly.
 
 RESPOND WITH JSON ONLY:
 {
@@ -152,14 +163,15 @@ RESPOND WITH JSON ONLY:
     {"id": "curve-id", "action": "remove|adjust", "newSeverity": 3, "reason": "short"}
   ],
   "bendEnhancements": [
-    {"id": "bend-id", "callout": "Enhanced callout text here", "shortCallout": "Short version"}
+    {"id": "hwy-section-1", "callout": "Right entry, three lefts, opens at exit", "shortCallout": "3 lefts after right"}
   ],
   "calloutVariants": {
     "curve-id": ["Left 4 tightens", "Tightening left, severity 4", "Hard left ahead, tightens"]
   }
 }
 
-ONLY include items that need changes. Empty arrays if nothing to change.`
+ONLY include items that need changes. Empty arrays if nothing to change.
+For EVERY [SECTION] in the input, you MUST provide a bendEnhancement with a specific callout.`
 }
 
 // ================================
@@ -189,23 +201,36 @@ function buildCurvePrompt({ curves, highwayBends, zones, routeData }) {
     return `  ${c.id || `c${i}`}: ${c.direction} sev${c.severity} @${distMi}mi len=${len}m zone=${zone} ${flags.join(' ')}`
   }).join('\n') || '  No curves'
 
-  // Build highway bend list (focus on active sections)
+  // Build highway bend list (focus on active sections with FULL DETAIL)
   const bendList = highwayBends?.map((b, i) => {
     const distMi = ((b.distanceFromStart || 0) / 1609.34).toFixed(2)
     
     if (b.isSection) {
-      // Active section - needs enhancement
-      const bendDetails = b.bends?.map(inner => 
-        `${inner.direction}${inner.angle}°`
-      ).join(',') || 'no details'
+      // Active section - GIVE FULL BEND DETAILS so LLM can create specific callout
+      const bendSequence = b.bends?.map(inner => {
+        const dir = inner.direction === 'LEFT' ? 'L' : 'R'
+        const angle = inner.angle || '?'
+        if (inner.isSSweep) {
+          return `S(${inner.firstBend?.direction?.[0]}${inner.firstBend?.angle}→${inner.secondBend?.direction?.[0]}${inner.secondBend?.angle})`
+        }
+        return `${dir}${angle}`
+      }).join(', ') || 'no details'
       
-      return `  ${b.id}: [SECTION] ${b.bendCount} bends @${distMi}mi len=${b.length}m | bends: ${bendDetails} | current: "${b.calloutBasic}"`
+      // Count directions
+      const leftCount = b.bends?.filter(x => x.direction === 'LEFT' && !x.isSSweep).length || 0
+      const rightCount = b.bends?.filter(x => x.direction === 'RIGHT' && !x.isSSweep).length || 0
+      const sSweepCount = b.bends?.filter(x => x.isSSweep).length || 0
+      
+      return `  ${b.id}: [SECTION] ${b.bendCount} bends @${distMi}mi | L:${leftCount} R:${rightCount} S:${sSweepCount} | sequence: ${bendSequence} | current: "${b.calloutBasic}"`
     } else if (b.isSSweep) {
       return `  ${b.id}: S-SWEEP ${b.firstBend?.direction}${b.firstBend?.angle}°→${b.secondBend?.direction}${b.secondBend?.angle}° @${distMi}mi`
     } else {
       return `  ${b.id}: ${b.direction} ${b.angle}° @${distMi}mi len=${b.length}m ${b.isSweeper ? 'SWEEPER' : ''}`
     }
   }).join('\n') || '  No highway bends'
+
+  // Count sections that need enhancement
+  const sectionCount = highwayBends?.filter(b => b.isSection).length || 0
 
   return `ROUTE: ${totalMiles} miles total
 
@@ -215,16 +240,17 @@ ${zoneContext}
 CURVES TO VERIFY (${curves?.length || 0}):
 ${curveList}
 
-HIGHWAY BENDS TO ENHANCE (${highwayBends?.length || 0}):
+HIGHWAY BENDS TO ENHANCE (${highwayBends?.length || 0}, including ${sectionCount} SECTIONS):
 ${bendList}
 
-INSTRUCTIONS:
-1. Flag any curves that look like false positives (parking lots, driveways, very short urban)
-2. For [SECTION] bends, write a better callout that describes the feel and flow
-3. Generate 2-3 callout variants for curves severity 3+
+CRITICAL INSTRUCTIONS:
+1. For each [SECTION], analyze the bend sequence (L=left, R=right, S=S-sweep) and write a SPECIFIC callout
+2. Example: "L12, R15, R18, L10" → "Left entry, two rights in middle, left to exit"
+3. Example: "R8, R10, R12, R15" → "Four consecutive rights, progressively tighter"
+4. Be specific about the pattern - don't just say "multiple bends"
+5. Keep callouts under 60 characters
 
-Return JSON with curveChanges, bendEnhancements, calloutVariants.
-Only include items that need changes.`
+Return JSON with curveChanges, bendEnhancements (REQUIRED for all sections), calloutVariants.`
 }
 
 /**
