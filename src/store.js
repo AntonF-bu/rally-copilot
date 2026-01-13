@@ -59,6 +59,10 @@ const useStore = create(
       // Highway bends (not persisted - computed in Preview, used in Navigation)
       highwayBends: [],
       
+      // LLM-generated callout variants (not persisted - computed in Preview)
+      // Format: { "curve-id": ["variant1", "variant2", "variant3"] }
+      calloutVariants: {},
+      
       // Route editor state
       showRouteEditor: false,
       editedCurves: [],
@@ -183,6 +187,20 @@ const useStore = create(
       setHighwayBends: (bends) => set({ highwayBends: bends }),
       
       clearHighwayBends: () => set({ highwayBends: [] }),
+      
+      // ========== Callout Variants Actions ==========
+      setCalloutVariants: (variants) => set({ calloutVariants: variants }),
+      
+      clearCalloutVariants: () => set({ calloutVariants: {} }),
+      
+      // Get a random variant for a curve (or first one if no variants)
+      getCalloutVariant: (curveId) => {
+        const { calloutVariants } = get()
+        const variants = calloutVariants[curveId]
+        if (!variants || variants.length === 0) return null
+        // Return random variant
+        return variants[Math.floor(Math.random() * variants.length)]
+      },
       
       // ========== Route Editor Actions ==========
       setShowRouteEditor: (show) => set({ showRouteEditor: show }),
@@ -383,7 +401,8 @@ const useStore = create(
         destination: null,
         upcomingCurves: [],
         activeCurve: null,
-        highwayBends: []  // Also clear highway bends when route is cleared
+        highwayBends: [],
+        calloutVariants: {}  // Also clear callout variants when route is cleared
       }),
       
       setActiveCurve: (curve) => set({ activeCurve: curve }),
