@@ -470,10 +470,6 @@ function finalClassifyPoint(point) {
   return point.character || ROUTE_CHARACTER.TECHNICAL
 }
 
-  // Fallback to TECHNICAL
-  return point.character || ROUTE_CHARACTER.TECHNICAL
-}
-
 // ================================
 // ROAD INFO (unchanged from v2)
 // ================================
