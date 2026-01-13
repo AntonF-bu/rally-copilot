@@ -283,7 +283,8 @@ export function useHighwayMode() {
   return {
     // State
     isHighwayActive: inHighwayZone,
-    highwayBends: highwayBends || [],  // From store, not local ref
+    inHighwayZone,  // Also expose directly for backwards compatibility
+    highwayBends: highwayBends || [],
     highwayMode,
     highwayFeatures,
     highwayStats,
@@ -292,6 +293,13 @@ export function useHighwayMode() {
     getUpcomingBend,
     markBendAnnounced,
     getChatter,
+    
+    // Functions App.jsx expects
+    getNextHighwayCallout: getUpcomingBend,  // Alias
+    getProgressCallout: () => checkProgressMilestone(highwayStats),
+    onBendCompleted: incrementSweepersCleared,
+    resetHighwayTrip,
+    recordCalloutTime,
     
     // Helpers
     generateHighwayCallout,
