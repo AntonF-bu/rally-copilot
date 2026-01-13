@@ -1041,6 +1041,28 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     if (!showHighwayBends) return
     
+    // Helper to create short label for marker
+    const getShortLabel = (callout) => {
+      const text = callout.text || ''
+      
+      // Extract direction (L/R) and angle if present
+      const dirMatch = text.match(/\b(left|right|L|R)\b/i)
+      const angleMatch = text.match(/(\d+)/);
+      
+      if (callout.type === 'wake_up') return '!'
+      if (callout.type === 'sequence') return 'S'
+      
+      if (dirMatch && angleMatch) {
+        const dir = dirMatch[1][0].toUpperCase()  // L or R
+        return `${dir}${angleMatch[1]}`  // e.g., "L45" or "R78"
+      }
+      
+      if (angleMatch) return angleMatch[1]
+      if (dirMatch) return dirMatch[1][0].toUpperCase()
+      
+      return callout.type?.[0]?.toUpperCase() || '•'
+    }
+    
     // Use curated callouts if available, otherwise show nothing on highway
     const markersToShow = callouts || curatedCallouts || []
     
@@ -1059,20 +1081,36 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       
       // Color based on type
       const colors = {
-        section: '#10b981',   // Green for winding sections
-        sweeper: '#3b82f6',   // Blue for notable sweepers
-        straight: '#6b7280',  // Gray for straight stretches
-        highlight: '#f59e0b'  // Amber for highlights
+        danger: '#ef4444',    // Red for danger
+        significant: '#f59e0b', // Amber for significant
+        sweeper: '#3b82f6',   // Blue for sweepers
+        wake_up: '#10b981',   // Green for wake-up
+        section: '#8b5cf6',   // Purple for sections
+        sequence: '#ec4899'   // Pink for sequences
       }
-      const bgColor = colors[callout.type] || colors.section
+      const bgColor = colors[callout.type] || colors.sweeper
       
-      // Display text (already curated by LLM)
-      const displayText = callout.shortText || callout.text || 'Section'
+      // Short label: just direction + angle or type indicator
+      const shortLabel = getShortLabel(callout)
       
       el.innerHTML = `
-        <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:5px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
-          ${callout.llmCurated ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
-          <span style="font-size:11px;font-weight:600;color:${bgColor};white-space:nowrap;">${displayText}</span>
+        <div style="
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          background:${bgColor};
+          width:28px;
+          height:28px;
+          border-radius:50%;
+          border:2px solid white;
+          box-shadow:0 2px 8px rgba(0,0,0,0.4);
+          cursor:pointer;
+          transition:transform 0.15s;
+        " 
+        onmouseover="this.style.transform='scale(1.2)'" 
+        onmouseout="this.style.transform='scale(1)'"
+        title="${callout.text}">
+          <span style="font-size:10px;font-weight:700;color:white;">${shortLabel}</span>
         </div>
       `
       
@@ -1483,25 +1521,29 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills */}
-            <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto mt-1">
+            {/* Callout pills - compact version */}
+            <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
                 const colors = {
-                  advance_warning: '#f59e0b',
-                  bend_callout: '#3b82f6',
-                  section_intro: '#10b981',
-                  section_end: '#6b7280',
-                  wake_up: '#ef4444',
-                  highlight: '#8b5cf6',
-                  info: '#6b7280'
-                }
-                const priorityBorder = {
-                  critical: 'border-red-500',
-                  high: 'border-amber-500',
-                  medium: 'border-white/20',
-                  low: 'border-white/10'
+                  danger: '#ef4444',
+                  significant: '#f59e0b',
+                  sweeper: '#3b82f6',
+                  wake_up: '#10b981',
+                  section: '#8b5cf6',
+                  sequence: '#ec4899'
                 }
                 const color = colors[callout.type] || '#6b7280'
+                
+                // Extract short version: direction + angle
+                const text = callout.text || ''
+                const dirMatch = text.match(/\b(left|right)\b/i)
+                const angleMatch = text.match(/(\d+)/)
+                const shortText = dirMatch && angleMatch 
+                  ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
+                  : callout.type === 'wake_up' 
+                    ? '⚡' 
+                    : text.substring(0, 8)
+                
                 return (
                   <button
                     key={callout.id || i}
@@ -1511,11 +1553,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className={`px-2 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:scale-105 border ${priorityBorder[callout.priority] || 'border-white/10'}`}
-                    style={{ background: `${color}15`, color: color }}
-                    title={`${callout.type} @ mile ${callout.triggerMile?.toFixed(1)}`}
+                    className="px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap transition-all hover:scale-110 border border-white/20"
+                    style={{ background: color, color: 'white' }}
+                    title={`${callout.text} @ mile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
-                    {callout.shortText || callout.text}
+                    {shortText}
                   </button>
                 )
               })}
