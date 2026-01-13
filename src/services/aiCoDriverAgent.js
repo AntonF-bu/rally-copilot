@@ -81,7 +81,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'generate_callouts',
-      description: 'Generate the complete callout sequence. Call AFTER analyze_and_plan.',
+      description: 'Generate 8-15 callouts MAX. More than 15 = failure. Be selective!',
       parameters: {
         type: 'object',
         properties: {
@@ -91,17 +91,18 @@ const TOOLS = [
               type: 'object',
               properties: {
                 triggerMile: { type: 'number', description: 'Mile to trigger callout' },
-                text: { type: 'string', description: 'What to say (natural language)' },
+                text: { type: 'string', description: 'What to say (natural language, 2-4 seconds to speak)' },
                 type: { 
                   type: 'string', 
-                  enum: ['advance_warning', 'bend_callout', 'section_intro', 'section_end', 'wake_up', 'highlight', 'all_clear'],
+                  enum: ['wake_up', 'section_intro', 'section_end', 'highlight', 'advance_warning'],
                   description: 'Callout type'
                 },
-                priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
-                forBends: { type: 'array', items: { type: 'string' }, description: 'Related bend IDs' }
+                priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] }
               },
               required: ['triggerMile', 'text', 'type', 'priority']
-            }
+            },
+            maxItems: 15,
+            description: 'MAXIMUM 15 callouts. Target 8-12 for a typical route.'
           }
         },
         required: ['callouts']
@@ -170,16 +171,24 @@ function executeTool(toolName, args, routeContext, agentState) {
     }
     
     case 'generate_callouts': {
-      const callouts = (args.callouts || []).map((c, i) => ({
+      let callouts = (args.callouts || []).map((c, i) => ({
         id: `callout-${i + 1}`,
         triggerMile: c.triggerMile,
         triggerDistance: c.triggerMile * 1609.34,
         text: c.text,
         shortText: c.text.length > 35 ? c.text.substring(0, 32) + '...' : c.text,
         type: c.type,
-        priority: c.priority,
-        forBends: c.forBends || []
+        priority: c.priority
       }))
+      
+      // Enforce limit - take only highest priority if too many
+      if (callouts.length > 15) {
+        console.warn(`⚠️ Agent generated ${callouts.length} callouts, limiting to 15`)
+        const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
+        callouts = callouts
+          .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+          .slice(0, 15)
+      }
       
       agentState.callouts = callouts
       agentState.reasoning.push(`Generated ${callouts.length} callouts`)
@@ -197,43 +206,56 @@ function executeTool(toolName, args, routeContext, agentState) {
 }
 
 // ================================
-// SYSTEM PROMPT - Concise
+// SYSTEM PROMPT - AGGRESSIVE FILTERING
 // ================================
 
 function getAgentSystemPrompt() {
-  return `You are an expert rally co-driver AI analyzing a route for a night highway driver.
+  return `You are an expert rally co-driver AI. Your job is to create a MINIMAL but EFFECTIVE callout sequence.
 
-SCENARIO: Driver going fast at night, can't look at phone. Audio only. Every surprise curve = dangerous.
+CRITICAL: LESS IS MORE
+- Target: 8-15 callouts for a typical 85-mile route
+- You got 44 raw bends. Most are NOT worth calling out.
+- A good co-driver is SELECTIVE, not comprehensive
+
+WHAT TO CALL OUT:
+1. DANGER ZONES: Where difficulty spikes unexpectedly (after long straight)
+2. NOTABLE SWEEPERS: Only 15°+ that are genuinely fun or tricky
+3. SECTION TRANSITIONS: "Curves ahead" before a winding stretch, "Clear" after
+4. WAKE-UP CALLS: After 5+ miles of straight, warn before curves return
+
+WHAT TO SKIP:
+- Gentle curves under 12° (driver won't notice)
+- Isolated minor bends (not worth interrupting silence)
+- Curves in already-active sections (one "section" callout covers them)
+- Anything the driver will naturally handle
+
+EXAMPLE - 85 mile highway route:
+Mile 0-3: Urban exit (skip - driver is alert)
+Mile 3: "Clear highway ahead" (one callout)
+Mile 3-45: Long straight (SILENCE - don't narrate nothing)
+Mile 44: "Heads up, curves in one mile" (wake-up call)
+Mile 45-48: Technical section (covered by intro callout)
+Mile 48: "Clear ahead" (section end)
+Mile 48-70: Rolling gentle curves (maybe 1-2 callouts for notable sweepers)
+Mile 70: "Technical finish ahead" (final section warning)
+TOTAL: ~8 callouts for 85 miles
 
 YOUR TASK (3 tool calls):
-1. analyze_and_plan - Audit data, understand route character, identify dangers/highlights
-2. generate_callouts - Create the timed callout sequence
-3. finalize - Complete with confidence score
-
-CALLOUT RULES:
-- Advance warning 0.5-1mi before significant bends
-- Group nearby bends: "sweeping rights next mile" not "right, right, right"
-- Wake-up call after long straights before difficulty spikes
-- Natural spoken language, 2-4 seconds each
-- Don't over-call - silence is fine on straight sections
-- DO call out every bend that could surprise a fast driver
+1. analyze_and_plan - Understand route, identify the FEW key moments
+2. generate_callouts - Create 8-15 callouts MAX, not 40+
+3. finalize - Complete
 
 CALLOUT TYPES:
-- advance_warning: Early alert for significant bend
+- wake_up: Alert after long straight (IMPORTANT)
 - section_intro: "Winding section next 2 miles"
-- section_end: "Clear ahead" after technical part
-- wake_up: Alert after long straight
-- bend_callout: At the bend itself
-- highlight: Fun/notable moment
-- all_clear: Reassurance
+- section_end: "Clear ahead"
+- highlight: Notable sweeper worth calling (15°+)
+- advance_warning: For genuine danger spots only
 
-PRIORITY:
-- critical: Must not miss (danger, sharp unexpected)
-- high: Important (notable bends)
-- medium: Good to know
-- low: Optional/conversational
+REMEMBER: Silence is golden. A callout every mile is ANNOYING.
+Good co-drivers speak when it MATTERS, not constantly.
 
-Be efficient. 3 tool calls. Go.`
+Be ruthless. 8-15 callouts max. Go.`
 }
 
 // ================================
