@@ -1235,7 +1235,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           <div className="mb-3 p-3 bg-purple-900/30 rounded-lg border border-purple-500/50 animate-pulse">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
-              <span className="text-sm text-purple-300 font-medium">🤖 AI analyzing zones...</span>
+              <span className="text-sm text-purple-300 font-medium">AI analyzing zones...</span>
             </div>
             <div className="text-[10px] text-purple-400/60 mt-1">Checking for misclassified sections</div>
           </div>
