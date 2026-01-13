@@ -224,7 +224,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setRouteZones(analysis.segments)
       setIsLoadingCharacter(false)
       
-      // Step 2: LLM enhancement (if API key available)
+      // Track the zones we'll use (may be enhanced by LLM)
+      let activeZones = analysis.segments
+      
+      // Step 2: LLM Zone enhancement (if API key available)
       if (hasLLMApiKey() && analysis.segments?.length > 0) {
         setIsLoadingAI(true)
         console.log('🤖 Running LLM zone validation during preview...')
@@ -235,59 +238,88 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             getLLMApiKey()
           )
           
-          console.log('🤖 LLM Response:', JSON.stringify(llmResponse, null, 2))
-          
           setLlmResult(llmResponse)
           
           const { enhanced, changes } = llmResponse
           
           if (enhanced?.length > 0 && changes?.length > 0) {
-            console.log(`🤖 LLM made ${changes.length} change(s) during preview:`)
+            console.log(`🤖 LLM Zone: ${changes.length} change(s)`)
             changes.forEach(c => console.log(`   - ${c}`))
             setLlmEnhanced(true)
             setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
             setRouteZones(enhanced)
-            
-            // Update highway bends with enhanced zones - STORED IN GLOBAL STORE
-            const bends = analyzeHighwayBends(coordinates, enhanced)
-            setHighwayBends(bends)
-            console.log(`🛣️ Preview: Found ${bends.length} highway bends (after LLM)`)
+            activeZones = enhanced
           } else {
-            console.log('🤖 LLM found no changes needed')
-            if (!highwayAnalyzedRef.current && analysis.segments?.length) {
-              highwayAnalyzedRef.current = true
-              const bends = analyzeHighwayBends(coordinates, analysis.segments)
-              setHighwayBends(bends)
-              console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
-            }
+            console.log('🤖 LLM Zone: no changes needed')
           }
         } catch (llmErr) {
-          console.warn('⚠️ LLM preview validation failed:', llmErr)
-          if (!highwayAnalyzedRef.current && analysis.segments?.length) {
-            highwayAnalyzedRef.current = true
-            const bends = analyzeHighwayBends(coordinates, analysis.segments)
-            setHighwayBends(bends)
-          }
-        } finally {
-          setIsLoadingAI(false)
-        }
-      } else {
-        // No API key - just run highway bend analysis
-        if (!highwayAnalyzedRef.current && analysis.segments?.length) {
-          highwayAnalyzedRef.current = true
-          const bends = analyzeHighwayBends(coordinates, analysis.segments)
-          setHighwayBends(bends)
-          console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
-          
-          if (bends.length > 0) {
-            const sSweeps = bends.filter(b => b.isSSweep)
-            const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
-            console.log(`   - S-sweeps: ${sSweeps.length}`)
-            console.log(`   - Sweepers: ${sweepers.length}`)
-            console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
-          }
+          console.warn('⚠️ LLM zone validation failed:', llmErr)
         }
       }
+      
+      // Step 3: Analyze highway bends (always runs)
+      if (!highwayAnalyzedRef.current && activeZones?.length) {
+        highwayAnalyzedRef.current = true
+        let bends = analyzeHighwayBends(coordinates, activeZones)
+        console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
+        
+        if (bends.length > 0) {
+          const sSweeps = bends.filter(b => b.isSSweep)
+          const sections = bends.filter(b => b.isSection)
+          const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep && !b.isSection)
+          console.log(`   - Active sections: ${sections.length}`)
+          console.log(`   - S-sweeps: ${sSweeps.length}`)
+          console.log(`   - Sweepers: ${sweepers.length}`)
+          
+          // Step 4: LLM Curve Enhancement (enhance active sections with AI)
+          if (hasLLMApiKey() && shouldEnhanceCurves({ curves, highwayBends: bends })) {
+            console.log('🤖 Running LLM curve enhancement during preview...')
+            try {
+              const curveResult = await enhanceCurvesWithLLM({
+                curves: curves || [],
+                highwayBends: bends,
+                zones: activeZones,
+                routeData
+              }, getLLMApiKey())
+              
+              setCurveEnhancementResult(curveResult)
+              
+              if (curveResult.changes?.length > 0) {
+                console.log(`🤖 Curve Enhancement: ${curveResult.changes.length} changes`)
+                curveResult.changes.forEach(c => console.log(`   - ${c}`))
+                setCurveEnhanced(true)
+                
+                // Use enhanced curves
+                if (curveResult.curves?.length > 0) {
+                  useStore.getState().setRouteData({
+                    ...routeData,
+                    curves: curveResult.curves
+                  })
+                }
+                
+                // Use enhanced highway bends (with AI callouts!)
+                if (curveResult.highwayBends?.length > 0) {
+                  bends = curveResult.highwayBends
+                }
+                
+                // Store callout variants
+                if (curveResult.calloutVariants && Object.keys(curveResult.calloutVariants).length > 0) {
+                  useStore.getState().setCalloutVariants(curveResult.calloutVariants)
+                }
+              } else {
+                console.log('🤖 Curve Enhancement: no changes needed')
+              }
+            } catch (curveErr) {
+              console.warn('⚠️ LLM curve enhancement failed:', curveErr)
+            }
+          }
+        }
+        
+        // Store final bends (possibly AI-enhanced)
+        setHighwayBends(bends)
+      }
+      
+      setIsLoadingAI(false)
       
     } catch (err) {
       console.error('Route character analysis error:', err)
@@ -558,9 +590,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     try {
       // ========================================
-      // PHASE 1: LLM Zone Validation
+      // PHASE 1: LLM Zone Validation (re-run for freshness)
       // ========================================
-      if (hasLLMApiKey() && routeCharacter.segments?.length > 0) {
+      if (hasLLMApiKey() && routeCharacter.segments?.length > 0 && !llmEnhanced) {
         setCopilotProgress(5)
         setCopilotStatus('🤖 AI analyzing route zones...')
         console.log('🤖 Starting LLM zone validation...')
@@ -585,7 +617,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
             setRouteZones(enhanced)
             
-            // Re-analyze highway bends with enhanced zones - STORED IN GLOBAL STORE
+            // Re-analyze highway bends with enhanced zones
             const bends = analyzeHighwayBends(routeData.coordinates, enhanced)
             setHighwayBends(bends)
             console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
@@ -604,20 +636,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       } else {
         if (!hasLLMApiKey()) {
           console.log('ℹ️ No OpenAI API key - skipping LLM zone validation')
+        } else if (llmEnhanced) {
+          console.log('ℹ️ LLM already enhanced zones during preview')
         }
         setCopilotProgress(20)
       }
       
       // ========================================
-      // PHASE 1.5: POST-PROCESSING
-      // Trust LLM decisions - don't override them
+      // PHASE 2: Curve Enhancement (skip if already done in preview)
       // ========================================
-      console.log(`🔧 Post-LLM: Trusting zone decisions as-is`)
-      
-      // ========================================
-      // PHASE 2: LLM Curve Enhancement
-      // ========================================
-      if (hasLLMApiKey() && shouldEnhanceCurves({ curves: routeData?.curves, highwayBends })) {
+      if (hasLLMApiKey() && !curveEnhanced && shouldEnhanceCurves({ curves: routeData?.curves, highwayBends })) {
         setCopilotProgress(25)
         setCopilotStatus('🤖 AI enhancing curves...')
         console.log('🤖 Starting LLM curve enhancement...')
@@ -632,14 +660,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           
           setCurveEnhancementResult(curveResult)
           
-          // Apply enhanced curves if there were changes
           if (curveResult.changes?.length > 0) {
             console.log(`🤖 Curve enhancement made ${curveResult.changes.length} changes`)
             curveResult.changes.forEach(c => console.log(`   - ${c}`))
             
             setCurveEnhanced(true)
             
-            // Update curves in route data
             if (curveResult.curves) {
               useStore.getState().setRouteData({
                 ...routeData,
@@ -647,12 +673,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               })
             }
             
-            // Update highway bends
             if (curveResult.highwayBends) {
               setHighwayBends(curveResult.highwayBends)
             }
             
-            // Store callout variants for navigation to use
             if (curveResult.calloutVariants && Object.keys(curveResult.calloutVariants).length > 0) {
               useStore.getState().setCalloutVariants(curveResult.calloutVariants)
             }
@@ -661,15 +685,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           }
         } catch (curveErr) {
           console.warn('⚠️ LLM curve enhancement failed:', curveErr)
-          // Continue without enhancement - graceful fallback
         }
         
         setCopilotProgress(35)
       } else {
-        if (!hasLLMApiKey()) {
-          console.log('ℹ️ No API key - skipping curve enhancement')
-        } else {
-          console.log('ℹ️ Route does not need curve enhancement')
+        if (curveEnhanced) {
+          console.log('ℹ️ Curves already enhanced during preview')
         }
         setCopilotProgress(35)
       }
@@ -952,14 +973,26 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // ACTIVE SECTION marker
+      // ACTIVE SECTION marker - show AI callout if available
       if (bend.isSection) {
-        const bgColor = '#f59e0b'
+        const bgColor = bend.llmEnhanced ? '#10b981' : '#f59e0b' // Green if AI-enhanced
+        
+        // Use AI callout or fallback to basic
+        const displayText = bend.calloutDetailed || bend.calloutShort || `${bend.bendCount} bends`
+        
+        // Truncate for display (max ~40 chars for marker)
+        const truncatedText = displayText.length > 45 
+          ? displayText.substring(0, 42) + '...' 
+          : displayText
+        
         el.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:6px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;">
-            <span style="font-size:10px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
-            <span style="font-size:12px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
-            <span style="font-size:9px;color:${bgColor}90;">${bend.length}m</span>
+          <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:6px 10px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 12px ${bgColor}50;max-width:200px;">
+            <span style="font-size:10px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;display:flex;align-items:center;gap:4px;">
+              ${bend.llmEnhanced ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>' : ''}
+              ACTIVE
+            </span>
+            <span style="font-size:11px;font-weight:500;color:${bgColor};text-align:center;line-height:1.3;margin-top:2px;">${truncatedText}</span>
+            <span style="font-size:9px;color:${bgColor}70;margin-top:2px;">${bend.length}m</span>
           </div>
         `
       }
@@ -1289,7 +1322,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   color: useEnhancedZones ? '#fff' : '#fff5' 
                 }}
               >
-                <span>AI</span>
+                <span>AI Zones</span>
                 <span className="opacity-70">({llmResult.changes?.length})</span>
               </button>
             </div>
@@ -1303,21 +1336,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               className="text-[9px] text-purple-400/60 hover:text-purple-400 transition-colors"
               title={llmResult.changes?.join('\n')}
             >
-              view changes
+              view
             </button>
           </div>
         )}
 
-        {/* AI CURVE ENHANCEMENT STATUS - NEW! */}
+        {/* AI CURVE ENHANCEMENT STATUS */}
         {curveEnhanced && curveEnhancementResult?.changes?.length > 0 && (
           <div className="mb-2 flex items-center gap-2">
-            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                 <polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
               <span className="text-[10px] text-emerald-400 font-medium">
-                AI enhanced {curveEnhancementResult.changes.length} curve(s)
+                AI Curves
+              </span>
+              <span className="text-[10px] text-emerald-400/70">
+                ({curveEnhancementResult.changes.length})
               </span>
             </div>
             <button 
@@ -1327,7 +1363,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               }}
               className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors"
             >
-              view details
+              view
             </button>
           </div>
         )}
