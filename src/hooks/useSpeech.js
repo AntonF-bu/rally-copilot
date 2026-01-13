@@ -353,3 +353,24 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
 }
 
 export default useSpeech
+
+// Generate callout text for a curve
+export function generateCallout(curve, mode = 'cruise', units = 'mph') {
+  if (!curve) return ''
+  
+  const direction = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  const severity = curve.severity || 3
+  
+  if (curve.isChicane) {
+    const startDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+    return `Chicane ${startDir}, ${curve.severitySequence || severity}`
+  }
+  
+  if (curve.isSCurve) {
+    const startDir = curve.startDirection === 'LEFT' ? 'left' : 'right'
+    return `S curve ${startDir}, ${curve.severitySequence || severity}`
+  }
+  
+  // Simple callout
+  return `${direction} ${severity}`
+}
