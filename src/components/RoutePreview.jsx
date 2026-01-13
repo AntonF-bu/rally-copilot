@@ -1076,38 +1076,38 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Muted colors - darker, more subtle
+      // Soft watercolor palette - muted, desaturated tones
       const colors = {
-        danger: '#dc2626',    // Darker red
-        significant: '#d97706', // Darker amber
-        sweeper: '#2563eb',   // Darker blue
-        wake_up: '#059669',   // Darker green
-        section: '#7c3aed',   // Darker purple
-        sequence: '#db2777'   // Darker pink
+        danger: { bg: 'rgba(180,100,100,0.25)', border: 'rgba(180,100,100,0.5)', text: '#c8a0a0' },
+        significant: { bg: 'rgba(180,150,100,0.25)', border: 'rgba(180,150,100,0.5)', text: '#c8bba0' },
+        sweeper: { bg: 'rgba(100,130,180,0.25)', border: 'rgba(100,130,180,0.5)', text: '#a0b0c8' },
+        wake_up: { bg: 'rgba(100,160,130,0.25)', border: 'rgba(100,160,130,0.5)', text: '#a0c8b8' },
+        section: { bg: 'rgba(140,120,170,0.25)', border: 'rgba(140,120,170,0.5)', text: '#b8a8c8' },
+        sequence: { bg: 'rgba(160,120,140,0.25)', border: 'rgba(160,120,140,0.5)', text: '#c8a8b8' }
       }
-      const color = colors[callout.type] || colors.sweeper
+      const c = colors[callout.type] || colors.sweeper
       
-      // Short label: just direction + angle or type indicator
+      // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Dark glass style - subtle and clean
+      // Soft watercolor glass style
       el.innerHTML = `
         <div style="
           display:flex;
           align-items:center;
           justify-content:center;
-          background:rgba(0,0,0,0.75);
-          padding:3px 6px;
+          background:${c.bg};
+          padding:3px 7px;
           border-radius:4px;
-          border:1.5px solid ${color}90;
-          box-shadow:0 2px 6px rgba(0,0,0,0.4);
+          border:1px solid ${c.border};
+          backdrop-filter:blur(8px);
           cursor:pointer;
-          transition:all 0.15s;
+          transition:all 0.2s ease;
         " 
-        onmouseover="this.style.borderColor='${color}';this.style.background='rgba(0,0,0,0.9)'" 
-        onmouseout="this.style.borderColor='${color}90';this.style.background='rgba(0,0,0,0.75)'"
+        onmouseover="this.style.background='${c.bg.replace('0.25', '0.4')}'" 
+        onmouseout="this.style.background='${c.bg}'"
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:9px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
+          <span style="font-size:9px;font-weight:500;color:${c.text};white-space:nowrap;letter-spacing:0.3px;">${shortLabel}</span>
         </div>
       `
       
@@ -1518,21 +1518,21 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - dark muted style */}
+            {/* Callout pills - soft watercolor style */}
             <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
-                // Muted colors matching map markers
+                // Soft watercolor palette
                 const colors = {
-                  danger: '#dc2626',
-                  significant: '#d97706',
-                  sweeper: '#2563eb',
-                  wake_up: '#059669',
-                  section: '#7c3aed',
-                  sequence: '#db2777'
+                  danger: { bg: 'rgba(180,100,100,0.2)', border: 'rgba(180,100,100,0.4)', text: '#c8a0a0' },
+                  significant: { bg: 'rgba(180,150,100,0.2)', border: 'rgba(180,150,100,0.4)', text: '#c8bba0' },
+                  sweeper: { bg: 'rgba(100,130,180,0.2)', border: 'rgba(100,130,180,0.4)', text: '#a0b0c8' },
+                  wake_up: { bg: 'rgba(100,160,130,0.2)', border: 'rgba(100,160,130,0.4)', text: '#a0c8b8' },
+                  section: { bg: 'rgba(140,120,170,0.2)', border: 'rgba(140,120,170,0.4)', text: '#b8a8c8' },
+                  sequence: { bg: 'rgba(160,120,140,0.2)', border: 'rgba(160,120,140,0.4)', text: '#c8a8b8' }
                 }
-                const color = colors[callout.type] || '#6b7280'
+                const c = colors[callout.type] || colors.sweeper
                 
-                // Extract short version: direction + angle
+                // Extract short version
                 const text = callout.text || ''
                 const dirMatch = text.match(/\b(left|right)\b/i)
                 const angleMatch = text.match(/(\d+)/)
@@ -1553,11 +1553,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-semibold whitespace-nowrap transition-all hover:opacity-80"
+                    className="px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:opacity-70"
                     style={{ 
-                      background: 'rgba(0,0,0,0.6)', 
-                      color: color,
-                      border: `1px solid ${color}70`
+                      background: c.bg, 
+                      color: c.text,
+                      border: `1px solid ${c.border}`
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
