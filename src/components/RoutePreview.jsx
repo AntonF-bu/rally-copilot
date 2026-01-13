@@ -73,6 +73,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   // Route character state
   const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null, censusTracts: [] })
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
+  const [isLoadingAI, setIsLoadingAI] = useState(false)  // NEW: Separate AI loading state
   
   // NEW: LLM enhancement state with toggle
   const [llmEnhanced, setLlmEnhanced] = useState(false)
@@ -202,9 +203,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const analysis = await analyzeRouteCharacter(coordinates, curves || [])
       setRouteCharacter(analysis)
       setRouteZones(analysis.segments)
+      setIsLoadingCharacter(false)  // Rule-based done
       
       // Step 2: LLM enhancement (if API key available)
       if (hasLLMApiKey() && analysis.segments?.length > 0) {
+        setIsLoadingAI(true)  // Show AI loading
         console.log('🤖 Running LLM zone validation during preview...')
         try {
           const llmResponse = await validateZonesWithLLM(
@@ -213,12 +216,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             getLLMApiKey()
           )
           
+          console.log('🤖 LLM Response:', JSON.stringify(llmResponse, null, 2))
+          
           setLlmResult(llmResponse)
           
           const { enhanced, changes } = llmResponse
           
           if (enhanced?.length > 0 && changes?.length > 0) {
-            console.log(`🤖 LLM made ${changes.length} change(s) during preview`)
+            console.log(`🤖 LLM made ${changes.length} change(s) during preview:`)
+            changes.forEach(c => console.log(`   - ${c}`))
             setLlmEnhanced(true)
             setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
             setRouteZones(enhanced)
@@ -228,6 +234,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             setHighwayBends(bends)
             console.log(`🛣️ Preview: Found ${bends.length} highway bends (after LLM)`)
           } else {
+            console.log('🤖 LLM found no changes needed')
             // No changes, but still run highway analysis with original
             if (!highwayAnalyzedRef.current && analysis.segments?.length) {
               highwayAnalyzedRef.current = true
@@ -244,6 +251,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             const bends = analyzeHighwayBends(coordinates, analysis.segments)
             setHighwayBends(bends)
           }
+        } finally {
+          setIsLoadingAI(false)  // AI done
         }
       } else {
         // No API key - just run highway bend analysis
@@ -265,8 +274,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       
     } catch (err) {
       console.error('Route character analysis error:', err)
-    } finally {
       setIsLoadingCharacter(false)
+      setIsLoadingAI(false)
     }
   }, [setRouteZones, routeData])
 
@@ -1211,32 +1220,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     {highwayBends.length} sweeps
                   </span>
                 )}
-                {/* NEW: LLM Zone Toggle */}
-                {llmEnhanced && llmResult && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        const newUseEnhanced = !useEnhancedZones
-                        setUseEnhancedZones(newUseEnhanced)
-                        const zones = newUseEnhanced ? llmResult.enhanced : llmResult.original
-                        setRouteCharacter(prev => ({ ...prev, segments: zones }))
-                        setRouteZones(zones)
-                        // Re-analyze highway bends
-                        const bends = analyzeHighwayBends(routeData.coordinates, zones)
-                        setHighwayBends(bends)
-                      }}
-                      className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-all"
-                      style={{ 
-                        background: useEnhancedZones ? '#8b5cf620' : '#64748b20', 
-                        color: useEnhancedZones ? '#8b5cf6' : '#64748b', 
-                        border: `1px solid ${useEnhancedZones ? '#8b5cf640' : '#64748b40'}` 
-                      }}
-                      title={`Click to switch to ${useEnhancedZones ? 'original' : 'AI enhanced'} zones\n${llmResult.changes?.length || 0} changes made`}
-                    >
-                      🤖 {useEnhancedZones ? 'AI' : 'Original'} ({llmResult.changes?.length || 0})
-                    </button>
-                  </div>
-                )}
                 {routeCharacter.summary.funPercentage > 0 && (
                   <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
                     {routeCharacter.summary.funPercentage}% fun
@@ -1244,6 +1227,75 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* AI LOADING INDICATOR - Prominent */}
+        {isLoadingAI && (
+          <div className="mb-3 p-3 bg-purple-900/30 rounded-lg border border-purple-500/50 animate-pulse">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-sm text-purple-300 font-medium">🤖 AI analyzing zones...</span>
+            </div>
+            <div className="text-[10px] text-purple-400/60 mt-1">Checking for misclassified sections</div>
+          </div>
+        )}
+
+        {/* AI ZONE TOGGLE - Prominent comparison toggle */}
+        {!isLoadingAI && llmEnhanced && llmResult && llmResult.changes?.length > 0 && (
+          <div className="mb-3 p-2 bg-black/60 rounded-lg border border-purple-500/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-purple-400 font-medium">🤖 AI Zone Analysis</span>
+              <span className="text-[9px] text-white/40">{llmResult.changes?.length} improvements found</span>
+            </div>
+            
+            {/* Toggle buttons */}
+            <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
+              <button 
+                onClick={() => {
+                  setUseEnhancedZones(false)
+                  const zones = llmResult.original
+                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
+                  setRouteZones(zones)
+                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
+                  setHighwayBends(bends)
+                }}
+                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                style={{ 
+                  background: !useEnhancedZones ? '#64748b' : 'transparent', 
+                  color: !useEnhancedZones ? '#fff' : '#fff6' 
+                }}
+              >
+                Original
+              </button>
+              <button 
+                onClick={() => {
+                  setUseEnhancedZones(true)
+                  const zones = llmResult.enhanced
+                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
+                  setRouteZones(zones)
+                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
+                  setHighwayBends(bends)
+                }}
+                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                style={{ 
+                  background: useEnhancedZones ? '#8b5cf6' : 'transparent', 
+                  color: useEnhancedZones ? '#fff' : '#fff6' 
+                }}
+              >
+                🤖 AI Enhanced
+              </button>
+            </div>
+            
+            {/* Show changes summary */}
+            <div className="mt-2 text-[9px] text-white/50 max-h-16 overflow-y-auto">
+              {llmResult.changes?.slice(0, 3).map((change, i) => (
+                <div key={i} className="truncate">• {change}</div>
+              ))}
+              {llmResult.changes?.length > 3 && (
+                <div className="text-white/30">+{llmResult.changes.length - 3} more changes</div>
+              )}
+            </div>
           </div>
         )}
 
