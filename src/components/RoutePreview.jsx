@@ -198,23 +198,68 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setIsLoadingCharacter(true)
     
     try {
+      // Step 1: Rule-based analysis
       const analysis = await analyzeRouteCharacter(coordinates, curves || [])
       setRouteCharacter(analysis)
       setRouteZones(analysis.segments)
       
-      // Run independent highway bend analysis
-      if (!highwayAnalyzedRef.current && analysis.segments?.length) {
-        highwayAnalyzedRef.current = true
-        const bends = analyzeHighwayBends(coordinates, analysis.segments)
-        setHighwayBends(bends)
-        console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
-        
-        if (bends.length > 0) {
-          const sSweeps = bends.filter(b => b.isSSweep)
-          const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
-          console.log(`   - S-sweeps: ${sSweeps.length}`)
-          console.log(`   - Sweepers: ${sweepers.length}`)
-          console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
+      // Step 2: LLM enhancement (if API key available)
+      if (hasLLMApiKey() && analysis.segments?.length > 0) {
+        console.log('🤖 Running LLM zone validation during preview...')
+        try {
+          const llmResponse = await validateZonesWithLLM(
+            analysis.segments,
+            routeData,
+            getLLMApiKey()
+          )
+          
+          setLlmResult(llmResponse)
+          
+          const { enhanced, changes } = llmResponse
+          
+          if (enhanced?.length > 0 && changes?.length > 0) {
+            console.log(`🤖 LLM made ${changes.length} change(s) during preview`)
+            setLlmEnhanced(true)
+            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+            setRouteZones(enhanced)
+            
+            // Update highway bends with enhanced zones
+            const bends = analyzeHighwayBends(coordinates, enhanced)
+            setHighwayBends(bends)
+            console.log(`🛣️ Preview: Found ${bends.length} highway bends (after LLM)`)
+          } else {
+            // No changes, but still run highway analysis with original
+            if (!highwayAnalyzedRef.current && analysis.segments?.length) {
+              highwayAnalyzedRef.current = true
+              const bends = analyzeHighwayBends(coordinates, analysis.segments)
+              setHighwayBends(bends)
+              console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
+            }
+          }
+        } catch (llmErr) {
+          console.warn('⚠️ LLM preview validation failed:', llmErr)
+          // Fall back to highway analysis with rule-based zones
+          if (!highwayAnalyzedRef.current && analysis.segments?.length) {
+            highwayAnalyzedRef.current = true
+            const bends = analyzeHighwayBends(coordinates, analysis.segments)
+            setHighwayBends(bends)
+          }
+        }
+      } else {
+        // No API key - just run highway bend analysis
+        if (!highwayAnalyzedRef.current && analysis.segments?.length) {
+          highwayAnalyzedRef.current = true
+          const bends = analyzeHighwayBends(coordinates, analysis.segments)
+          setHighwayBends(bends)
+          console.log(`🛣️ Preview: Found ${bends.length} highway bends`)
+          
+          if (bends.length > 0) {
+            const sSweeps = bends.filter(b => b.isSSweep)
+            const sweepers = bends.filter(b => b.isSweeper && !b.isSSweep)
+            console.log(`   - S-sweeps: ${sSweeps.length}`)
+            console.log(`   - Sweepers: ${sweepers.length}`)
+            console.log(`   - Other bends: ${bends.length - sSweeps.length - sweepers.length}`)
+          }
         }
       }
       
@@ -223,7 +268,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     } finally {
       setIsLoadingCharacter(false)
     }
-  }, [setRouteZones])
+  }, [setRouteZones, routeData])
 
   useEffect(() => {
     if (routeData?.coordinates?.length > 0 && !characterFetchedRef.current) {
