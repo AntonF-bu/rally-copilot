@@ -4,9 +4,8 @@ import useStore from ‘../store’
 import { getCurveColor } from ‘../data/routes’
 
 // ================================
-// Map Component - v18
-// REWRITTEN: Match RoutePreview exactly
-// Uses sleeves, severity gradients, zone-filtered markers
+// Map Component - v19
+// Clean navigation map with severity gradients
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ‘’
@@ -146,7 +145,6 @@ return segments.filter(s => s.coords.length > 1)
 
 // ================================
 // ADD ROUTE TO MAP
-// Includes sleeves + severity line
 // ================================
 const addRouteToMap = useCallback(() => {
 if (!map.current || !routeData?.coordinates?.length) return false
