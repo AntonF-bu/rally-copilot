@@ -892,17 +892,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
   // Helper: Check if a distance is within a transit zone
-  const isInTransitZone = useCallback((distance) => {
-    if (!routeCharacter.segments?.length) return false
-    return routeCharacter.segments.some(seg => 
+  const isInTransitZone = useCallback((distance, segments) => {
+    if (!segments?.length) return false
+    return segments.some(seg => 
       seg.character === 'transit' && 
       distance >= seg.startDistance && 
       distance <= seg.endDistance
     )
-  }, [routeCharacter.segments])
+  }, [])
 
   // Add curve markers - SKIP curves in transit zones
-  const addMarkers = useCallback((map, curves, coords) => {
+  const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
     
@@ -910,7 +910,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       if (!curve.position) return
       
       // Skip curves in transit/highway zones
-      if (isInTransitZone(curve.distanceFromStart)) {
+      if (isInTransitZone(curve.distanceFromStart, segments)) {
         return
       }
       
@@ -999,7 +999,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     
     addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
-    addMarkers(mapRef.current, data.curves, data.coordinates)
+    addMarkers(mapRef.current, data.curves, data.coordinates, charSegs)  // Pass segments!
     addHighwayBendMarkers(mapRef.current, highwayBends)
   }, [routeData, routeCharacter.segments, addRoute, addMarkers, addHighwayBendMarkers, highwayBends])
 
@@ -1024,7 +1024,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current.on('load', () => {
       setMapLoaded(true)
       addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments, routeData.curves)
-      addMarkers(mapRef.current, routeData.curves, routeData.coordinates)
+      addMarkers(mapRef.current, routeData.curves, routeData.coordinates, routeCharacter.segments)  // Pass segments!
       const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
       mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
     })
