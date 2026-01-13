@@ -1088,29 +1088,30 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         section: '#8b5cf6',   // Purple for sections
         sequence: '#ec4899'   // Pink for sequences
       }
-      const bgColor = colors[callout.type] || colors.sweeper
+      const color = colors[callout.type] || colors.sweeper
       
       // Short label: just direction + angle or type indicator
       const shortLabel = getShortLabel(callout)
       
+      // Outline style matching the bottom pills aesthetic
       el.innerHTML = `
         <div style="
           display:flex;
           align-items:center;
           justify-content:center;
-          background:${bgColor};
-          width:28px;
-          height:28px;
-          border-radius:50%;
-          border:2px solid white;
-          box-shadow:0 2px 8px rgba(0,0,0,0.4);
+          background:${color}30;
+          padding:4px 8px;
+          border-radius:6px;
+          border:1.5px solid ${color};
+          box-shadow:0 2px 8px rgba(0,0,0,0.5);
           cursor:pointer;
-          transition:transform 0.15s;
+          transition:all 0.15s;
+          backdrop-filter:blur(4px);
         " 
-        onmouseover="this.style.transform='scale(1.2)'" 
-        onmouseout="this.style.transform='scale(1)'"
-        title="${callout.text}">
-          <span style="font-size:10px;font-weight:700;color:white;">${shortLabel}</span>
+        onmouseover="this.style.transform='scale(1.1)';this.style.background='${color}50'" 
+        onmouseout="this.style.transform='scale(1)';this.style.background='${color}30'"
+        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
+          <span style="font-size:10px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
         </div>
       `
       
