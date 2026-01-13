@@ -128,7 +128,10 @@ export default function App() {
 
   // Calculate user's distance along route from position
   useEffect(() => {
-    if (!isRunning || !position || !routeData?.coordinates) return
+    if (!isRunning || !position || !routeData?.coordinates) {
+      console.log(`📍 Distance calc skipped: isRunning=${isRunning}, position=${!!position}, coords=${!!routeData?.coordinates}`)
+      return
+    }
     
     // In demo mode, use simulationProgress
     if (isDemoMode) {
@@ -153,15 +156,18 @@ export default function App() {
     }
     
     // Calculate actual distance along route to closest point
-    // by summing segment lengths instead of assuming uniform distribution
     let distanceAlong = 0
     for (let i = 0; i < closestIdx && i < coords.length - 1; i++) {
       const dx = coords[i + 1][0] - coords[i][0]
       const dy = coords[i + 1][1] - coords[i][1]
-      // Convert degrees to meters (approximate at this latitude)
       const dxMeters = dx * 111320 * Math.cos(coords[i][1] * Math.PI / 180)
       const dyMeters = dy * 110540
       distanceAlong += Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters)
+    }
+    
+    // Debug log every few seconds
+    if (Math.random() < 0.1) {
+      console.log(`📍 Distance calc: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m, minDist=${minDist.toFixed(6)}`)
     }
     
     setUserDistanceAlongRoute(distanceAlong)
@@ -175,6 +181,13 @@ export default function App() {
     // Sort zones by startDistance
     const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
     
+    // DEBUG: Log sorted zones on first run
+    if (userDistanceAlongRoute < 10) {
+      console.log('🎯 App.jsx sorted zones:', 
+        sortedZones.map(z => `${z.character}(${Math.round(z.startDistance)}-${Math.round(z.endDistance)}m)`).join(' → ')
+      )
+    }
+    
     // Find zone containing current distance
     let zone = sortedZones.find(z => 
       userDistanceAlongRoute >= z.startDistance && userDistanceAlongRoute <= z.endDistance
@@ -183,6 +196,7 @@ export default function App() {
     // If no zone found (gap or distance=0), find the first zone that covers the start
     if (!zone && userDistanceAlongRoute < 100) {
       zone = sortedZones.find(z => z.startDistance <= 100) || sortedZones[0]
+      console.log(`🎯 Fallback zone for dist=${Math.round(userDistanceAlongRoute)}m: ${zone?.character} (${Math.round(zone?.startDistance || 0)}-${Math.round(zone?.endDistance || 0)}m)`)
     }
     
     if (zone) {
