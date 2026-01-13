@@ -59,6 +59,10 @@ const useStore = create(
       // Highway bends (not persisted - computed in Preview, used in Navigation)
       highwayBends: [],
       
+      // LLM-curated highway callouts (not persisted - computed by curator)
+      // These are the FINAL callouts to show, after LLM merges/filters raw bends
+      curatedHighwayCallouts: [],
+      
       // LLM-generated callout variants (not persisted - computed in Preview)
       // Format: { "curve-id": ["variant1", "variant2", "variant3"] }
       calloutVariants: {},
@@ -187,6 +191,11 @@ const useStore = create(
       setHighwayBends: (bends) => set({ highwayBends: bends }),
       
       clearHighwayBends: () => set({ highwayBends: [] }),
+      
+      // ========== Curated Highway Callouts Actions ==========
+      setCuratedHighwayCallouts: (callouts) => set({ curatedHighwayCallouts: callouts }),
+      
+      clearCuratedHighwayCallouts: () => set({ curatedHighwayCallouts: [] }),
       
       // ========== Callout Variants Actions ==========
       setCalloutVariants: (variants) => set({ calloutVariants: variants }),
