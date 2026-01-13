@@ -110,95 +110,63 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
  * Comprehensive system prompt
  */
 function getSystemPrompt() {
-  return `You are an expert driving route analyst for a rally co-pilot navigation app. Your job is to classify road segments accurately so the app gives appropriate audio callouts.
+  return `You are an expert driving route analyst for a rally co-pilot navigation app. Your job is to CORRECT zone classifications.
 
 ## ZONE TYPES
 
-**HIGHWAY** (internal code: "transit")
+**HIGHWAY** (you must return: "highway")
 - Interstates, turnpikes, major highways (I-95, I-93, Route 128, etc.)
 - High-speed roads with limited access
-- Includes on-ramps and off-ramps that are part of highway system
-- Callout style: Minimal, only significant curves
+- Includes ALL on-ramps and off-ramps
+- ANY section between two highway sections (sandwich rule)
 
-**TECHNICAL** (internal code: "technical")  
+**TECHNICAL** (you must return: "technical")  
 - Winding backroads, mountain roads, scenic routes
-- Roads where driver needs full attention
-- Country roads, forest roads, fun driving roads
-- Callout style: Full pace notes, every curve
+- Country roads, forest roads
+- ONLY use when driver has EXITED the highway system entirely
 
-**URBAN** (internal code: "urban")
+**URBAN** (you must return: "urban")
 - City streets, downtown areas, parking lots
 - Gas stations, shopping centers, residential areas
-- Low speed, frequent stops
-- Callout style: Minimal, only sharp turns
 
-## CLASSIFICATION RULES (in priority order)
+## CRITICAL RULES
 
-1. **Road Name Recognition**
-   - "I-XX", "Interstate XX", "US-XX Highway" → HIGHWAY
-   - "Route XX" with high speed on limited access → HIGHWAY
-   - "Main St", "Oak Ave", local names → URBAN or TECHNICAL based on context
-   - Gas station, parking lot, service road → URBAN
+1. **SANDWICH RULE (MOST IMPORTANT)**
+   If a segment is marked ⚠️ SANDWICHED between HIGHWAY segments:
+   → It is almost CERTAINLY highway
+   → Change it to "highway" unless you have STRONG evidence it's a different road
+   → Highway interchanges have curves but are still highway!
 
-2. **Road Class + Speed**
-   - motorway, trunk → HIGHWAY
-   - motorway_link, trunk_link with speed ≥45 → HIGHWAY
-   - motorway_link, trunk_link with speed <45 → Transitioning, check context
-   - primary with speed ≥55 → likely HIGHWAY
-   - secondary, tertiary, residential → TECHNICAL or URBAN
+2. **Road Names**
+   - "I-XX", "Interstate", "US-XX" → HIGHWAY
+   - "Route XX" at high speed → HIGHWAY
+   - Local street names after exiting → TECHNICAL or URBAN
 
-3. **Context Matters**
-   - Start of route at gas station/parking → URBAN even if near highway
-   - End of route in neighborhood → URBAN or TECHNICAL
-   - Section between two HIGHWAY segments → Usually HIGHWAY (same road)
-   - BUT: If road names change AND speed drops → Could be legitimate exit
+3. **START/END segments**
+   - Start at gas station/parking → likely URBAN
+   - End in neighborhood → likely TECHNICAL or URBAN
+   - But if next/prev segment is HIGHWAY and this is short → might still be HIGHWAY
 
-4. **Sandwich Rule with Override**
-   - Default: Non-highway between two highways → Probably HIGHWAY
-   - Override allowed IF: Road name clearly changes (I-93 → Main St) AND speed drops significantly
-   - You MUST justify any sandwich override with specific evidence
+## YOUR OUTPUT
 
-## YOUR TASK
+For EACH segment, you MUST return:
+- segmentIndex: the segment number
+- newClassification: "highway" OR "technical" OR "urban" (lowercase!)
+- confidence: 0.0-1.0
+- reason: brief explanation
 
-Analyze each segment and decide:
-1. Is the current classification correct?
-2. If not, what should it be and WHY?
-3. Should any segment be SPLIT? (e.g., starts URBAN, becomes HIGHWAY)
+IMPORTANT: If a segment should CHANGE, make sure newClassification is DIFFERENT from currentClassification!
 
-## RESPONSE FORMAT
-
-Return valid JSON only:
+Example - if segment is currently "technical" but should be highway:
 {
-  "decisions": [
-    {
-      "segmentIndex": 0,
-      "currentClassification": "technical",
-      "newClassification": "urban",
-      "confidence": 0.9,
-      "reason": "Segment starts at Shell Gas Station (service road), should be URBAN",
-      "splitAt": null
-    },
-    {
-      "segmentIndex": 1,
-      "currentClassification": "highway",
-      "newClassification": "highway",
-      "confidence": 0.95,
-      "reason": "I-93 motorway, correct classification",
-      "splitAt": null
-    },
-    {
-      "segmentIndex": 2,
-      "currentClassification": "technical",
-      "newClassification": "highway",
-      "confidence": 0.85,
-      "reason": "Sandwiched between highway segments, road is still I-93 ramp area",
-      "splitAt": null
-    }
-  ],
-  "overallAnalysis": "Route is primarily highway (I-93) with urban start at gas station"
+  "segmentIndex": 2,
+  "currentClassification": "technical",
+  "newClassification": "highway",  // THIS MUST BE "highway" TO CHANGE IT!
+  "confidence": 0.9,
+  "reason": "Sandwiched between highway segments, still on I-93"
 }
 
-Be thorough. Analyze EVERY segment. Provide clear reasoning.`
+Return valid JSON only.`
 }
 
 /**
