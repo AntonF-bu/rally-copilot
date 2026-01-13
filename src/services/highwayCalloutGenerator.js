@@ -150,7 +150,7 @@ export function generateCalloutSlots(highwayBends, zones, routeData) {
   // ================================
   const notableSweepers = sortedBends.filter(b => 
     !b.isSection && 
-    (b.angle >= 15 || b.isSweeper) &&
+    b.angle >= 15 && // Must be 15°+ to be notable
     b.angle < 40 // Not too sharp (those are in technical sections)
   )
   
@@ -407,15 +407,30 @@ function interpolatePosition(coordinates, distance, totalDistance) {
  * Format slots for display (without AI polish)
  */
 export function formatSlotsForDisplay(slots) {
-  return slots.map(slot => ({
-    id: `slot-${slot.triggerMile.toFixed(1)}`,
-    position: slot.position,
-    triggerDistance: slot.triggerDistance,
-    triggerMile: slot.triggerMile,
-    text: slot.aiText || slot.templateText,
-    shortText: (slot.aiText || slot.templateText).substring(0, 30),
-    type: slot.type,
-    priority: slot.priority,
-    isRuleBased: true
-  }))
+  return slots.map(slot => {
+    // For sweepers, ensure direction is in the text
+    let text = slot.aiText || slot.templateText
+    if (slot.type === CALLOUT_TYPE.SWEEPER && slot.context?.direction) {
+      const dir = slot.context.direction.toLowerCase()
+      // Verify the text contains the correct direction
+      if (!text.toLowerCase().includes(dir)) {
+        console.warn(`⚠️ Direction mismatch: slot says ${slot.context.direction} but text is "${text}"`)
+        // Force correct direction in template
+        text = `${slot.context.direction === 'LEFT' ? 'Left' : 'Right'} sweeper ahead`
+      }
+    }
+    
+    return {
+      id: `slot-${slot.triggerMile.toFixed(1)}`,
+      position: slot.position,
+      triggerDistance: slot.triggerDistance,
+      triggerMile: slot.triggerMile,
+      text,
+      shortText: text.substring(0, 30),
+      type: slot.type,
+      priority: slot.priority,
+      direction: slot.context?.direction, // Expose direction for debugging
+      isRuleBased: true
+    }
+  })
 }
