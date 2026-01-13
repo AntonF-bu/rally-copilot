@@ -4,8 +4,8 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v19
-// Clean navigation map with severity gradients
+// Map Component - v20
+// Fixed: Active sections now show AI-enhanced callouts
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -228,31 +228,62 @@ export default function Map() {
     console.log(`🗺️ Curve markers: added ${added}, skipped ${skipped} in transit zones`)
   }, [routeData?.curves, routeZones, isInTransitZone])
 
+  // ================================
+  // FIXED: Highway bend markers now use AI-enhanced callouts
+  // ================================
   const addHighwayBendMarkers = useCallback(() => {
     if (!map.current || !mapLoaded) return
 
     highwayMarkers.current.forEach(m => m.remove())
     highwayMarkers.current = []
 
-    console.log(`🗺️ Highway bend markers: ${highwayBends?.length || 0} bends available`)
-
     if (!highwayBends?.length) return
+
+    // Log to verify we're getting enhanced bends from store
+    const enhancedCount = highwayBends.filter(b => b.llmEnhanced).length
+    const sectionCount = highwayBends.filter(b => b.isSection).length
+    console.log(`🗺️ Highway bend markers: ${highwayBends.length} total, ${sectionCount} sections, ${enhancedCount} AI-enhanced`)
 
     highwayBends.forEach((bend) => {
       if (!bend.position) return
 
       const el = document.createElement('div')
 
+      // ACTIVE SECTION - Use AI callout if available
       if (bend.isSection) {
-        const bgColor = '#f59e0b'
-        el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;"><span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span><span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span><span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span></div>`
-      } else if (bend.isSSweep) {
+        const isEnhanced = bend.llmEnhanced
+        const bgColor = isEnhanced ? '#10b981' : '#f59e0b' // Green if AI-enhanced, amber if not
+        
+        // USE THE AI CALLOUT - this is the key fix!
+        const displayText = bend.calloutShort || bend.calloutDetailed || `${bend.bendCount} bends`
+        
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:6px;border:1.5px solid ${bgColor};box-shadow:0 2px 8px ${bgColor}40;">
+            ${isEnhanced ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${bgColor}" stroke-width="3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>` : ''}
+            <span style="font-size:10px;font-weight:600;color:${bgColor};white-space:nowrap;">${displayText}</span>
+          </div>
+        `
+      } 
+      // S-SWEEP marker
+      else if (bend.isSSweep) {
         const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
         const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 8px ${HIGHWAY_BEND_COLOR}30;"><span style="font-size:8px;font-weight:700;color:${HIGHWAY_BEND_COLOR};letter-spacing:0.5px;">S-SWEEP</span><span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${dir1}${bend.firstBend?.angle || ''}° ${dir2}${bend.secondBend?.angle || ''}°</span></div>`
-      } else {
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.85);padding:3px 6px;border-radius:6px;border:1.5px solid ${HIGHWAY_BEND_COLOR};">
+            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">S</span>
+            <span style="font-size:9px;color:${HIGHWAY_BEND_COLOR};">${dir1}${dir2}</span>
+          </div>
+        `
+      } 
+      // Regular sweeper
+      else {
         const dirArrow = bend.direction === 'LEFT' ? '←' : '→'
-        el.innerHTML = `<div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};box-shadow:0 2px 6px ${HIGHWAY_BEND_COLOR}20;"><span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span><span style="font-size:10px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span><span style="font-size:10px;font-weight:600;color:${HIGHWAY_BEND_COLOR};">${bend.angle}°</span></div>`
+        el.innerHTML = `
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(0,0,0,0.8);padding:2px 6px;border-radius:5px;border:1.5px solid ${HIGHWAY_BEND_COLOR};">
+            <span style="font-size:9px;font-weight:700;color:${HIGHWAY_BEND_COLOR};">SW</span>
+            <span style="font-size:9px;color:${HIGHWAY_BEND_COLOR};">${dirArrow}</span>
+          </div>
+        `
       }
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
