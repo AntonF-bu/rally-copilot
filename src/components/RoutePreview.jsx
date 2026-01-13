@@ -1050,38 +1050,37 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Racing rally palette - neon on dark, high contrast HUD style
+      // Clean outline aesthetic - matching S-SWEEP style
       const colors = {
-        danger: { bg: '#1a0505', border: '#ff2d2d', text: '#ff2d2d', glow: 'rgba(255,45,45,0.5)' },
-        significant: { bg: '#1a1205', border: '#ffaa00', text: '#ffaa00', glow: 'rgba(255,170,0,0.5)' },
-        sweeper: { bg: '#051a1a', border: '#00e5ff', text: '#00e5ff', glow: 'rgba(0,229,255,0.5)' },
-        wake_up: { bg: '#051a08', border: '#00ff6a', text: '#00ff6a', glow: 'rgba(0,255,106,0.5)' },
-        section: { bg: '#12051a', border: '#bf5fff', text: '#bf5fff', glow: 'rgba(191,95,255,0.5)' },
-        sequence: { bg: '#1a0512', border: '#ff5f9e', text: '#ff5f9e', glow: 'rgba(255,95,158,0.5)' }
+        danger: '#ef4444',      // Red
+        significant: '#f59e0b', // Amber
+        sweeper: '#3b82f6',     // Blue (like S-SWEEP)
+        wake_up: '#22c55e',     // Green
+        section: '#a855f7',     // Purple
+        sequence: '#ec4899'     // Pink
       }
-      const c = colors[callout.type] || colors.sweeper
+      const color = colors[callout.type] || colors.sweeper
       
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Racing HUD style - dark bg, neon border, glow effect
+      // Clean dark box with colored outline - like S-SWEEP
       el.innerHTML = `
         <div style="
           display:inline-flex;
           align-items:center;
           justify-content:center;
-          background:${c.bg};
-          padding:3px 8px;
-          border-radius:2px;
-          border:1.5px solid ${c.border};
-          box-shadow:0 0 10px ${c.glow}, inset 0 0 6px ${c.glow};
+          background:rgba(0,0,0,0.8);
+          padding:4px 10px;
+          border-radius:6px;
+          border:2px solid ${color};
           cursor:pointer;
-          transition:all 0.12s ease;
+          transition:all 0.15s ease;
         " 
-        onmouseover="this.style.boxShadow='0 0 16px ${c.glow}, inset 0 0 10px ${c.glow}';this.style.transform='scale(1.05)'" 
-        onmouseout="this.style.boxShadow='0 0 10px ${c.glow}, inset 0 0 6px ${c.glow}';this.style.transform='scale(1)'"
+        onmouseover="this.style.background='rgba(0,0,0,0.95)';this.style.transform='scale(1.05)'" 
+        onmouseout="this.style.background='rgba(0,0,0,0.8)';this.style.transform='scale(1)'"
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:11px;font-weight:700;color:${c.text};white-space:nowrap;text-shadow:0 0 8px ${c.glow};letter-spacing:0.5px;">${shortLabel}</span>
+          <span style="font-size:11px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
         </div>
       `
       
@@ -1492,19 +1491,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - racing HUD neon style */}
+            {/* Callout pills - clean outline style */}
             <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
-                // Racing rally palette - neon on dark
+                // Clean outline colors
                 const colors = {
-                  danger: { bg: '#1a0505', border: '#ff2d2d', text: '#ff2d2d', glow: 'rgba(255,45,45,0.4)' },
-                  significant: { bg: '#1a1205', border: '#ffaa00', text: '#ffaa00', glow: 'rgba(255,170,0,0.4)' },
-                  sweeper: { bg: '#051a1a', border: '#00e5ff', text: '#00e5ff', glow: 'rgba(0,229,255,0.4)' },
-                  wake_up: { bg: '#051a08', border: '#00ff6a', text: '#00ff6a', glow: 'rgba(0,255,106,0.4)' },
-                  section: { bg: '#12051a', border: '#bf5fff', text: '#bf5fff', glow: 'rgba(191,95,255,0.4)' },
-                  sequence: { bg: '#1a0512', border: '#ff5f9e', text: '#ff5f9e', glow: 'rgba(255,95,158,0.4)' }
+                  danger: '#ef4444',
+                  significant: '#f59e0b',
+                  sweeper: '#3b82f6',
+                  wake_up: '#22c55e',
+                  section: '#a855f7',
+                  sequence: '#ec4899'
                 }
-                const c = colors[callout.type] || colors.sweeper
+                const color = colors[callout.type] || colors.sweeper
                 
                 // Extract short version
                 const text = callout.text || ''
@@ -1527,14 +1526,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-2 py-0.5 rounded-sm text-[10px] font-bold whitespace-nowrap transition-all hover:scale-105"
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap transition-all hover:scale-105"
                     style={{ 
-                      background: c.bg, 
-                      color: c.text,
-                      border: `1px solid ${c.border}`,
-                      boxShadow: `0 0 8px ${c.glow}`,
-                      textShadow: `0 0 6px ${c.glow}`,
-                      letterSpacing: '0.5px'
+                      background: 'rgba(0,0,0,0.7)', 
+                      color: color,
+                      border: `1.5px solid ${color}`
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
