@@ -12,13 +12,14 @@ import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from
 import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
 import { dumpHighwayData } from '../services/highwayDataDebug'
 import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlowAnalyzer'
+import { curateCalloutsWithLLM } from '../services/llmCalloutCurator'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v24
-// NEW: Road Flow Analyzer (continuous sampling)
+// Route Preview - v25
+// NEW: LLM Callout Curator (AI sees the road)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -291,60 +292,90 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         window.__highwayDebugData = debugData
         
         // NEW: Road Flow Analyzer (continuous sampling)
-        console.log('\n🌊 Running NEW Road Flow Analyzer...')
+        console.log('\n🌊 Running Road Flow Analyzer...')
         const flowResult = analyzeRoadFlow(coordinates, activeZones, routeData.distance)
-        const flowCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
         
-        // Store for comparison
+        // Store flow data for debugging
         window.__roadFlowData = flowResult
-        window.__flowCallouts = flowCallouts
-        console.log('💡 Compare: window.__highwayDebugData (old) vs window.__roadFlowData (new)')
-        console.log('💡 Callouts: window.__flowCallouts')
+        console.log('💡 Access road flow data: window.__roadFlowData')
         
-        // Step 4: Generate callout slots - USE NEW FLOW SYSTEM
-        if (flowCallouts.length > 0) {
+        // Step 4: LLM Callout Curation - AI "sees" the road and decides
+        if (flowResult.events.length > 0 && hasLLMApiKey()) {
           updateStage('aiCurves', 'loading')
-          console.log('📋 Using NEW flow-based callouts...')
+          console.log('🧠 Running LLM Callout Curator...')
           
           try {
-            // Format flow callouts for display
-            const formattedCallouts = flowCallouts.map(c => ({
-              id: c.id,
-              position: c.position,
-              triggerDistance: c.triggerDistance,
-              triggerMile: c.triggerMile,
-              text: c.text,
-              shortText: c.text.substring(0, 35),
-              type: c.type,
-              priority: c.severity,
-              direction: c.direction,
-              totalAngle: c.totalAngle,
-              shape: c.shape,
-              isFlowBased: true
-            }))
+            // LLM sees all the road data and makes intelligent decisions
+            const curationResult = await curateCalloutsWithLLM(
+              flowResult,
+              { totalMiles: routeData.distance / 1609.34 },
+              getLLMApiKey()
+            )
             
-            console.log(`✅ Flow callouts: ${formattedCallouts.length}`)
-            formattedCallouts.forEach(c => {
-              console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" [${c.type}] pos=${c.position}`)
-            })
-            
-            setCuratedCallouts(formattedCallouts)
-            setAgentResult({
-              summary: {
-                summary: `${formattedCallouts.length} callouts (flow-based)`,
-                rhythm: 'Road Flow Analyzer v1.0',
-                difficulty: 'auto'
-              },
-              reasoning: [`Detected ${flowResult.events.length} road events`, `Generated ${formattedCallouts.length} callouts`],
-              confidence: 98
-            })
-            setCurveEnhanced(true)
-            
-            // Store in global store
-            useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+            if (curationResult && curationResult.callouts.length > 0) {
+              console.log(`🧠 LLM Analysis: ${curationResult.analysis}`)
+              
+              // Format LLM callouts for display
+              const formattedCallouts = curationResult.callouts.map(c => ({
+                id: c.id,
+                position: c.position,
+                triggerDistance: c.triggerDistance,
+                triggerMile: c.triggerMile,
+                text: c.text,
+                shortText: c.text.substring(0, 35),
+                type: c.type,
+                priority: c.severity,
+                reason: c.reason,
+                isLLMCurated: true
+              }))
+              
+              console.log(`✅ LLM Curated callouts: ${formattedCallouts.length}`)
+              formattedCallouts.forEach(c => {
+                console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" [${c.type}]`)
+                console.log(`      Reason: ${c.reason}`)
+              })
+              
+              setCuratedCallouts(formattedCallouts)
+              setAgentResult({
+                summary: {
+                  summary: curationResult.analysis,
+                  rhythm: 'LLM Callout Curator v1.0',
+                  difficulty: 'auto'
+                },
+                reasoning: [
+                  `Analyzed ${flowResult.events.length} road events`,
+                  `LLM curated to ${formattedCallouts.length} callouts`
+                ],
+                confidence: 95
+              })
+              setCurveEnhanced(true)
+              
+              // Store in global store
+              useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+              window.__llmCuration = curationResult
+              console.log('💡 Access LLM curation: window.__llmCuration')
+              
+            } else {
+              console.warn('⚠️ LLM curation returned no callouts, falling back to rules')
+              // Fallback to rule-based
+              const fallbackCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
+              const formattedCallouts = fallbackCallouts.map(c => ({
+                id: c.id,
+                position: c.position,
+                triggerDistance: c.triggerDistance,
+                triggerMile: c.triggerMile,
+                text: c.text,
+                shortText: c.text.substring(0, 35),
+                type: c.type,
+                priority: c.severity,
+                isFlowBased: true
+              }))
+              setCuratedCallouts(formattedCallouts)
+              useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+            }
             
           } catch (genErr) {
-            console.warn('⚠️ Flow callout generation failed:', genErr)
+            console.warn('⚠️ LLM curation failed:', genErr)
           }
           updateStage('aiCurves', 'complete')
         }
