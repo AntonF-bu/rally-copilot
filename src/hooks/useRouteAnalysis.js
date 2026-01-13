@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react'
 import useStore from '../store'
+import { getRoute, geocodeAddress } from '../services/routeService'
 
 // ================================
 // Route Analysis Hook - v5
@@ -16,6 +17,8 @@ export function useRouteAnalysis() {
     routeZones,
     setUpcomingCurves,
     setActiveCurve,
+    setDestination,
+    setRouteData,
   } = useStore()
 
   const lastCurveUpdateRef = useRef(0)
@@ -32,6 +35,99 @@ export function useRouteAnalysis() {
       distance <= zone.endDistance
     )
   }, [routeZones])
+
+  // ================================================================
+  // REROUTE - Simplified, just gets new route coordinates
+  // ================================================================
+  const reroute = useCallback(async () => {
+    const currentPosition = useStore.getState().position
+    const dest = useStore.getState().destination
+    
+    if (!currentPosition || !dest) {
+      console.warn('Reroute: Missing position or destination')
+      return false
+    }
+
+    console.log('🔄 Rerouting from current position to:', dest.name)
+
+    try {
+      const route = await getRoute(currentPosition, dest.coordinates)
+      if (!route?.coordinates) {
+        console.error('Reroute: Failed to get route')
+        return false
+      }
+
+      // Keep existing curves - just update coordinates
+      setRouteData(prev => ({
+        ...prev,
+        coordinates: route.coordinates,
+        rerouted: true,
+        reroutedAt: Date.now()
+      }))
+
+      console.log('✅ Reroute complete')
+      return true
+    } catch (error) {
+      console.error('Reroute error:', error)
+      return false
+    }
+  }, [setRouteData])
+
+  // ================================================================
+  // INIT DESTINATION ROUTE - For setting up a new destination
+  // ================================================================
+  const initDestinationRoute = useCallback(async (destinationQuery) => {
+    const currentPosition = useStore.getState().position
+    if (!currentPosition) {
+      console.warn('initDestinationRoute: No current position')
+      return false
+    }
+
+    try {
+      const results = await geocodeAddress(destinationQuery)
+      if (!results || results.length === 0) {
+        console.error('Geocoding failed for:', destinationQuery)
+        return false
+      }
+
+      const destCoords = results[0].coordinates
+      const destName = results[0].name
+
+      setDestination({ coordinates: destCoords, name: destName })
+
+      const route = await getRoute(currentPosition, destCoords)
+      if (!route?.coordinates) return false
+
+      setRouteData({
+        coordinates: route.coordinates,
+        curves: [], // Preview will detect these
+        destination: destName,
+        distance: calculateRouteDistance(route.coordinates),
+        name: `Route to ${destName}`
+      })
+
+      return true
+    } catch (error) {
+      console.error('initDestinationRoute error:', error)
+      return false
+    }
+  }, [setRouteData, setDestination])
+
+  // ================================================================
+  // IMPORT FROM URL - Stub for compatibility
+  // ================================================================
+  const importRouteFromUrl = useCallback(async (url) => {
+    console.log('importRouteFromUrl called - use Preview instead')
+    return false
+  }, [])
+
+  // ================================================================
+  // FETCH ROAD AHEAD - Stub for compatibility
+  // ================================================================
+  const fetchRoadAhead = useCallback(async () => {
+    console.log('fetchRoadAhead called - use Preview instead')
+    return false
+  }, [])
 
   // ================================================================
   // MAIN EFFECT: Update upcoming curves based on GPS position
@@ -152,13 +248,27 @@ export function useRouteAnalysis() {
     }
   }, [isRunning, routeMode, routeData])
 
-  // No exports needed - this hook just maintains upcomingCurves state
-  return {}
+  // Return exported functions for components that need them
+  return {
+    reroute,
+    initDestinationRoute,
+    importRouteFromUrl,
+    fetchRoadAhead
+  }
 }
 
 // ================================
 // HELPER FUNCTIONS
 // ================================
+
+function calculateRouteDistance(coordinates) {
+  if (!coordinates || coordinates.length < 2) return 0
+  let total = 0
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    total += getDistanceBetween(coordinates[i], coordinates[i + 1])
+  }
+  return total
+}
 
 function getDistanceBetween(coord1, coord2) {
   const R = 6371e3
