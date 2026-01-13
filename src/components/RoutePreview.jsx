@@ -8,14 +8,14 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
+import { enhanceCurvesWithLLM, shouldEnhanceCurves } from '../services/llmCurveService'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
-import { enhanceCurvesWithLLM, shouldEnhanceCurves, hasLLMApiKey as hasCurveApiKey } from '../services/llmCurveService'
 
 // ================================
-// Route Preview - v18
-// FIXED: Store highwayBends in global store for Navigation
-// Preview is now single source of truth
+// Route Preview - v19
+// NEW: LLM Curve Enhancement Integration
+// Preview is single source of truth
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -47,6 +47,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
+  
+  // LLM Curve Enhancement state
   const [curveEnhanced, setCurveEnhanced] = useState(false)
   const [curveEnhancementResult, setCurveEnhancementResult] = useState(null)
   
@@ -375,6 +377,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setHighwayBends([])
     setElevationData([])
     setLlmEnhanced(false)
+    setCurveEnhanced(false)
+    setCurveEnhancementResult(null)
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
@@ -608,14 +612,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // PHASE 1.5: POST-PROCESSING
       // Trust LLM decisions - don't override them
       // ========================================
-      // The LLM has already validated zones, no backup conversion needed
-      // Short technical/urban segments at route start/end are often legitimate
       console.log(`🔧 Post-LLM: Trusting zone decisions as-is`)
       
-      setCopilotProgress(20)
-
       // ========================================
-      // PHASE 1.5: LLM Curve Enhancement (NEW!)
+      // PHASE 2: LLM Curve Enhancement
       // ========================================
       if (hasLLMApiKey() && shouldEnhanceCurves({ curves: routeData?.curves, highwayBends })) {
         setCopilotProgress(25)
@@ -675,7 +675,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
-      // PHASE 2: Voice Preloading
+      // PHASE 3: Voice Preloading
       // ========================================
       setCopilotStatus('Loading voice callouts...')
       const { preloadCopilotVoices } = await import('../hooks/useSpeech')
@@ -684,7 +684,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         routeData?.curves || [],
         routeCharacter.segments || [],
         ({ percent }) => {
-          setCopilotProgress(20 + Math.min(percent * 0.79, 79))
+          setCopilotProgress(35 + Math.min(percent * 0.64, 64))
         }
       )
       
@@ -938,6 +938,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(map))
     })
   }, [isInTransitZone])
+
   // Add highway bend markers - WITH ACTIVE SECTION SUPPORT
   const addHighwayBendMarkers = useCallback((map, bends) => {
     highwayMarkersRef.current.forEach(m => m.remove())
@@ -1303,6 +1304,30 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               title={llmResult.changes?.join('\n')}
             >
               view changes
+            </button>
+          </div>
+        )}
+
+        {/* AI CURVE ENHANCEMENT STATUS - NEW! */}
+        {curveEnhanced && curveEnhancementResult?.changes?.length > 0 && (
+          <div className="mb-2 flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              <span className="text-[10px] text-emerald-400 font-medium">
+                AI enhanced {curveEnhancementResult.changes.length} curve(s)
+              </span>
+            </div>
+            <button 
+              onClick={() => {
+                const details = curveEnhancementResult.changes?.join('\n')
+                if (details) alert(details)
+              }}
+              className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors"
+            >
+              view details
             </button>
           </div>
         )}
