@@ -29,12 +29,14 @@ export function useHighwayMode() {
   const {
     routeData,
     routeZones,
-    highwayBends,  // NEW: Read directly from store (set by Preview)
     simulationProgress,
     isRunning,
     speed,
     position
   } = useStore()
+  
+  // Get highwayBends separately with fallback to empty array
+  const highwayBends = useStore((state) => state.highwayBends) || []
 
   const {
     highwayMode,
