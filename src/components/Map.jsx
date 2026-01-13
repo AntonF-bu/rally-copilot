@@ -236,7 +236,7 @@ try {
 }
 ```
 
-}, [routeData, routeZones, buildSleeveSegments, buildSeveritySegments])
+}, [routeData, routeZones, buildSeveritySegments])
 
 // ================================
 // ADD CURVE MARKERS
