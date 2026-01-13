@@ -301,6 +301,12 @@ export default function App() {
       return
     }
 
+    // CRITICAL: If highway mode is active, skip regular curve callouts entirely
+    // Highway bends are handled by the separate highway callout effect
+    if (isHighwayActive) {
+      return
+    }
+
     const curve = upcomingCurves[0]
     if (!curve) return
     
