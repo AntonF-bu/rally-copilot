@@ -221,6 +221,7 @@ export function useSpeech() {
   const initAudio = useCallback(async () => {
     console.log('🔊 Initializing audio for iOS...')
     
+    // Strategy 1: Resume AudioContext
     if (audioContextRef.current) {
       try {
         if (audioContextRef.current.state === 'suspended') {
@@ -239,36 +240,76 @@ export function useSpeech() {
       }
     }
     
-    if (audioRef.current) {
-      const silentMp3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+9DEAAAIAANIAAAAQAAAaQAAAAS7u7vd3d0iIiIiIiJ3d3e7u93dIiIiAA=='
-      
-      audioRef.current.src = silentMp3
-      audioRef.current.volume = 0.01
-      
+    // Strategy 2: Use oscillator to create actual audio (works better on iOS)
+    if (audioContextRef.current) {
       try {
-        await audioRef.current.play()
-        audioRef.current.pause()
-        audioRef.current.currentTime = 0
-        console.log('🔊 Audio element unlocked')
+        const oscillator = audioContextRef.current.createOscillator()
+        const gainNode = audioContextRef.current.createGain()
+        gainNode.gain.value = 0.001 // Nearly silent
+        oscillator.connect(gainNode)
+        gainNode.connect(audioContextRef.current.destination)
+        oscillator.start()
+        oscillator.stop(audioContextRef.current.currentTime + 0.1)
+        console.log('🔊 Oscillator played')
       } catch (e) {
-        console.log('🔊 Audio element unlock failed:', e)
+        console.log('🔊 Oscillator failed:', e)
       }
     }
     
+    // Strategy 3: Unlock speech synthesis
     if (synthRef.current) {
       try {
-        const u = new SpeechSynthesisUtterance('')
-        u.volume = 0
+        const u = new SpeechSynthesisUtterance('.')
+        u.volume = 0.01
+        u.rate = 10 // Super fast
         synthRef.current.speak(u)
-        setTimeout(() => synthRef.current?.cancel(), 50)
+        setTimeout(() => synthRef.current?.cancel(), 100)
         console.log('🔊 Speech synthesis unlocked')
       } catch (e) {
         console.log('🔊 Speech synthesis unlock failed:', e)
       }
     }
     
+    // Strategy 4: Pre-fetch one ElevenLabs audio to warm up the connection
+    const apiKey = import.meta.env.VITE_ELEVENLABS_API_KEY
+    if (apiKey && audioRef.current) {
+      try {
+        console.log('🔊 Pre-fetching ElevenLabs audio...')
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`, {
+          method: 'POST',
+          headers: {
+            'Accept': 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': apiKey
+          },
+          body: JSON.stringify({
+            text: 'Ready',
+            model_id: 'eleven_turbo_v2',
+            voice_settings: { stability: 0.5, similarity_boost: 0.75 }
+          })
+        })
+        
+        if (response.ok) {
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          AUDIO_CACHE.set('ready', url)
+          
+          // Play it quietly to establish audio route
+          audioRef.current.src = url
+          audioRef.current.volume = 0.01
+          await audioRef.current.play()
+          audioRef.current.pause()
+          audioRef.current.currentTime = 0
+          audioRef.current.volume = 1.0
+          console.log('🔊 ElevenLabs audio route established!')
+        }
+      } catch (e) {
+        console.log('🔊 ElevenLabs pre-fetch failed:', e.message)
+      }
+    }
+    
     isAudioUnlocked = true
-    console.log('🔊 iOS Audio fully unlocked!')
+    console.log('🔊 iOS Audio initialization complete!')
     
     return true
   }, [])
