@@ -172,9 +172,18 @@ export default function App() {
   useEffect(() => {
     if (!isRunning || !routeZones?.length) return
     
-    const zone = routeZones.find(z => 
+    // Sort zones by startDistance
+    const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
+    
+    // Find zone containing current distance
+    let zone = sortedZones.find(z => 
       userDistanceAlongRoute >= z.startDistance && userDistanceAlongRoute <= z.endDistance
     )
+    
+    // If no zone found (gap or distance=0), find the first zone that covers the start
+    if (!zone && userDistanceAlongRoute < 100) {
+      zone = sortedZones.find(z => z.startDistance <= 100) || sortedZones[0]
+    }
     
     if (zone) {
       const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.TECHNICAL
