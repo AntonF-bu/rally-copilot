@@ -48,7 +48,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showSleeve, setShowSleeve] = useState(true)
   
   // Highway bends state
-  const [highwayBends, setHighwayBends] = useState([])
+  const [highwayBendsLocal, setHighwayBendsLocal] = useState([])
   const [showHighwayBends, setShowHighwayBends] = useState(true)
   
   // Highway mode from store
