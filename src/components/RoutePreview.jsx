@@ -991,9 +991,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Use zone colors - match the zone tags exactly
-      // Technical: #a855f7 (purple), Transit/Highway: #22d3ee (cyan), Urban: #f472b6 (pink)
-      const color = '#22d3ee' // Highway/transit cyan - all callouts are on highway sections
+      // Match the actual zone tag colors exactly
+      // Technical: cyan (#22d3ee), Highway/Transit: blue (#3b82f6), Urban: pink (#f472b6)
+      const zoneColors = {
+        technical: '#22d3ee',  // Cyan
+        transit: '#3b82f6',    // Blue
+        highway: '#3b82f6',    // Blue
+        urban: '#f472b6'       // Pink
+      }
+      const color = zoneColors[callout.zone] || '#3b82f6'
       
       // Exact zone tag style: bg at 20%, border at 40%, text full color
       el.innerHTML = `
@@ -1404,8 +1410,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 {/* Callout pills - zone tag style */}
                 <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
                   {curatedCallouts.map((callout, i) => {
-                    // Use zone color - highway cyan for all callouts
-                    const color = '#22d3ee'
+                    // Match actual zone tag colors
+                    // Technical: cyan, Highway/Transit: blue, Urban: pink
+                    const zoneColors = {
+                      technical: '#22d3ee',
+                      transit: '#3b82f6',
+                      highway: '#3b82f6',
+                      urban: '#f472b6'
+                    }
+                    const color = zoneColors[callout.zone] || '#3b82f6'
                     
                     // Extract short version
                     const text = callout.text || ''
