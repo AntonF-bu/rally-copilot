@@ -1050,37 +1050,38 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Clean outline aesthetic - matching S-SWEEP style
+      // Soft glowing colors - matching zone tags aesthetic
       const colors = {
-        danger: '#ef4444',      // Red
-        significant: '#f59e0b', // Amber
-        sweeper: '#3b82f6',     // Blue (like S-SWEEP)
-        wake_up: '#22c55e',     // Green
-        section: '#a855f7',     // Purple
-        sequence: '#ec4899'     // Pink
+        danger: { border: '#f472b6', text: '#f9a8d4' },      // Soft pink (like Urban)
+        significant: { border: '#fbbf24', text: '#fcd34d' }, // Soft amber
+        sweeper: { border: '#67e8f9', text: '#a5f3fc' },     // Soft cyan (like Highway)
+        wake_up: { border: '#6ee7b7', text: '#a7f3d0' },     // Soft mint
+        section: { border: '#c4b5fd', text: '#ddd6fe' },     // Soft purple (like Technical)
+        sequence: { border: '#f9a8d4', text: '#fbcfe8' }     // Soft rose
       }
-      const color = colors[callout.type] || colors.sweeper
+      const c = colors[callout.type] || colors.sweeper
       
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Clean dark box with colored outline - like S-SWEEP
+      // Soft glowing style - matching zone tags
       el.innerHTML = `
         <div style="
           display:inline-flex;
           align-items:center;
           justify-content:center;
-          background:rgba(0,0,0,0.8);
+          background:transparent;
           padding:4px 10px;
-          border-radius:6px;
-          border:2px solid ${color};
+          border-radius:9999px;
+          border:1.5px solid ${c.border};
+          box-shadow:0 0 12px ${c.border}40;
           cursor:pointer;
           transition:all 0.15s ease;
         " 
-        onmouseover="this.style.background='rgba(0,0,0,0.95)';this.style.transform='scale(1.05)'" 
-        onmouseout="this.style.background='rgba(0,0,0,0.8)';this.style.transform='scale(1)'"
+        onmouseover="this.style.boxShadow='0 0 16px ${c.border}60';this.style.transform='scale(1.05)'" 
+        onmouseout="this.style.boxShadow='0 0 12px ${c.border}40';this.style.transform='scale(1)'"
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:11px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
+          <span style="font-size:11px;font-weight:500;color:${c.text};white-space:nowrap;">${shortLabel}</span>
         </div>
       `
       
@@ -1491,19 +1492,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - clean outline style */}
+            {/* Callout pills - soft glowing style like zone tags */}
             <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
-                // Clean outline colors
+                // Soft glowing colors - matching zone tags
                 const colors = {
-                  danger: '#ef4444',
-                  significant: '#f59e0b',
-                  sweeper: '#3b82f6',
-                  wake_up: '#22c55e',
-                  section: '#a855f7',
-                  sequence: '#ec4899'
+                  danger: { border: '#f472b6', text: '#f9a8d4' },
+                  significant: { border: '#fbbf24', text: '#fcd34d' },
+                  sweeper: { border: '#67e8f9', text: '#a5f3fc' },
+                  wake_up: { border: '#6ee7b7', text: '#a7f3d0' },
+                  section: { border: '#c4b5fd', text: '#ddd6fe' },
+                  sequence: { border: '#f9a8d4', text: '#fbcfe8' }
                 }
-                const color = colors[callout.type] || colors.sweeper
+                const c = colors[callout.type] || colors.sweeper
                 
                 // Extract short version
                 const text = callout.text || ''
@@ -1526,11 +1527,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap transition-all hover:scale-105"
+                    className="px-2.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap transition-all hover:scale-105"
                     style={{ 
-                      background: 'rgba(0,0,0,0.7)', 
-                      color: color,
-                      border: `1.5px solid ${color}`
+                      background: 'transparent', 
+                      color: c.text,
+                      border: `1.5px solid ${c.border}`,
+                      boxShadow: `0 0 10px ${c.border}40`
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
