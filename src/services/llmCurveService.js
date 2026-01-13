@@ -1,14 +1,17 @@
 // ================================
-// LLM Curve Validation Service
-// Comprehensive curve analysis using GPT-4o-mini
+// LLM Curve & Bend Enhancement Service v1.0
+// Verifies curves, enhances highway bends, generates callout variants
+// 
+// SEPARATE from llmZoneService.js - zones are not touched here
 // ================================
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
 const MODEL = 'gpt-4o-mini'
 
-/**
- * Get API key from environment
- */
+// ================================
+// API KEY HELPERS (shared pattern with llmZoneService)
+// ================================
+
 export function getLLMApiKey() {
   return import.meta.env.VITE_OPENAI_API_KEY || null
 }
@@ -17,21 +20,47 @@ export function hasLLMApiKey() {
   return !!getLLMApiKey()
 }
 
+// ================================
+// MAIN EXPORT: Enhance curves and highway bends
+// ================================
+
 /**
- * Main function: Validate and enhance curves using LLM
+ * Main function: Verify curves and enhance highway bends with LLM
+ * 
+ * @param {Object} params
+ * @param {Array} params.curves - From detectCurves()
+ * @param {Array} params.highwayBends - From analyzeHighwayBends()
+ * @param {Array} params.zones - From zoneService (READ-ONLY, for context)
+ * @param {Object} params.routeData - Route metadata
+ * @param {string} apiKey - OpenAI API key
+ * 
+ * @returns {Object} { curves, highwayBends, calloutVariants, changes }
  */
-export async function validateCurvesWithLLM(curves, zones, routeData, apiKey) {
-  if (!apiKey || !curves?.length) {
-    console.log('⚠️ Skipping LLM curve validation (no API key or no curves)')
-    return curves
+export async function enhanceCurvesWithLLM({ curves, highwayBends, zones, routeData }, apiKey) {
+  if (!apiKey) {
+    console.warn('⚠️ No OpenAI API key - skipping LLM curve enhancement')
+    return { 
+      curves, 
+      highwayBends, 
+      calloutVariants: {},
+      changes: [] 
+    }
   }
 
-  console.log(`🤖 Starting LLM curve validation for ${curves.length} curves...`)
+  // Nothing to enhance
+  if (!curves?.length && !highwayBends?.length) {
+    return { curves: [], highwayBends: [], calloutVariants: {}, changes: [] }
+  }
+
+  console.log('🤖 LLM Curve Enhancement v1.0 - Starting...')
+  console.log(`   Input: ${curves?.length || 0} curves, ${highwayBends?.length || 0} highway bends`)
+  const startTime = Date.now()
 
   try {
     // Build the prompt
-    const prompt = buildCurvePrompt(curves, zones, routeData)
-    
+    const prompt = buildCurvePrompt({ curves, highwayBends, zones, routeData })
+    console.log(`📝 Prompt size: ${prompt.length} chars`)
+
     // Call OpenAI
     const response = await fetch(OPENAI_API_URL, {
       method: 'POST',
@@ -42,198 +71,186 @@ export async function validateCurvesWithLLM(curves, zones, routeData, apiKey) {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: 'system', content: getSystemPrompt() },
+          { role: 'system', content: getCurveSystemPrompt() },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.3,
-        max_tokens: 2000
+        temperature: 0.3,  // Slightly higher than zones for variety in callouts
+        max_tokens: 4000
       })
     })
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error?.message || `API error: ${response.status}`)
+      const error = await response.text()
+      console.error('❌ OpenAI API error:', error)
+      return { curves, highwayBends, calloutVariants: {}, changes: [] }
     }
 
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content
 
     if (!content) {
-      console.warn('⚠️ Empty LLM response for curves')
-      return curves
+      console.warn('⚠️ Empty LLM response')
+      return { curves, highwayBends, calloutVariants: {}, changes: [] }
     }
 
-    // Parse and apply enhancements
-    const enhancements = parseCurveResponse(content)
-    const enhancedCurves = applyCurveEnhancements(curves, enhancements, zones)
+    console.log('📥 LLM Response:', content.slice(0, 800))
 
-    console.log(`✅ LLM curve validation complete:`)
-    console.log(`   - Severity adjustments: ${enhancements.severityAdjustments?.length || 0}`)
-    console.log(`   - Chicanes detected: ${enhancements.chicanes?.length || 0}`)
-    console.log(`   - Curves to remove: ${enhancements.removals?.length || 0}`)
-    console.log(`   - Highway priority curves: ${enhancements.highwayPriority?.length || 0}`)
+    // Parse response
+    const llmResult = parseResponse(content)
 
-    return enhancedCurves
+    // Apply enhancements
+    const enhanced = applyEnhancements({
+      originalCurves: curves,
+      originalBends: highwayBends,
+      llmResult
+    })
+
+    const elapsed = Date.now() - startTime
+    console.log(`✅ LLM Curve Enhancement complete in ${elapsed}ms`)
+    console.log(`   Changes: ${enhanced.changes.length}`)
+    enhanced.changes.forEach(c => console.log(`   - ${c}`))
+
+    return enhanced
 
   } catch (err) {
-    console.error('❌ LLM curve validation error:', err)
-    return curves
+    console.error('❌ LLM curve enhancement error:', err)
+    return { curves, highwayBends, calloutVariants: {}, changes: [] }
   }
 }
 
-/**
- * System prompt for curve analysis
- */
-function getSystemPrompt() {
-  return `You are an expert rally co-driver and road analyst. Your job is to validate and enhance curve data for a driving navigation app that provides audio pace notes.
+// ================================
+// SYSTEM PROMPT
+// ================================
 
-YOUR TASKS:
-1. SEVERITY ADJUSTMENTS - Curves may be mis-rated. Consider:
-   - A 15° curve at highway speed (65mph) is MORE dangerous than at 35mph
-   - Severity 1-2 are gentle, 3-4 are moderate, 5-6 are sharp/hairpin
-   - Highway curves should generally be severity 1-3 (sweepers)
-   - Technical road curves can be 1-6 depending on angle
+function getCurveSystemPrompt() {
+  return `You are a professional rally co-driver analyzing route data. Your job:
 
-2. CHICANE DETECTION - Identify quick left-right or right-left sequences:
-   - Two curves within 100m that alternate direction = chicane
-   - Mark the entry curve as chicane start
+1. VERIFY CURVES: Check if detected curves are real or false positives
+2. ENHANCE ACTIVE SECTIONS: Transform generic "Active section, X bends" into rich, useful callouts
+3. GENERATE CALLOUT VARIANTS: Create 2-3 alternative phrasings for variety
 
-3. FALSE POSITIVE REMOVAL - Some "curves" are noise:
-   - Curves under 5° are usually GPS noise - recommend removal
-   - Very short curves (<20m) in urban areas are often intersections, not real curves
-   - Duplicate curves at same location
+PERSONALITY: Professional, data-backed, intelligent. Occasional dry wit, never annoying.
+Example good callout: "Sweeping section ahead - moderate right entry, flows through alternating bends, tightens on exit. Hold 65."
+Example bad callout: "Wow, exciting curves coming up! Get ready for fun!" (too cheesy)
 
-4. HIGHWAY PRIORITY - On highway zones, identify which curves are IMPORTANT:
-   - Not every gentle sweep needs a callout
-   - Prioritize curves 10°+ on highways
-   - Mark curves that would surprise a driver
+CURVE VERIFICATION RULES:
+- Parking lot turns, driveways = FALSE POSITIVE (remove)
+- Highway on/off ramps in urban zones = often false positive
+- Severity should match road type (highway curves rarely above 3)
+- Very short curves (<30m) in urban = usually intersection, not real curve
 
-5. MISSING CURVE WARNINGS - Identify suspicious gaps:
-   - Technical roads with 2+ km gaps between curves
-   - Areas where road geometry suggests a curve should exist
+ACTIVE SECTION ENHANCEMENT:
+- Describe the CHARACTER of the section (flowing, technical, alternating)
+- Note the ENTRY (direction, speed target)
+- Describe the MIDDLE (what to expect)
+- Note the EXIT (tightening, opening, direction)
+- Keep it under 25 words - must be speakable
 
-SEVERITY GUIDE:
-- 1: Barely noticeable, flat out
-- 2: Gentle curve, slight lift
-- 3: Moderate curve, brake lightly  
-- 4: Significant curve, brake and gear down
-- 5: Sharp curve, significant braking
-- 6: Hairpin/very sharp, major braking
-
-Respond ONLY with valid JSON. No explanation text outside JSON.`
-}
-
-/**
- * Build the curve analysis prompt
- */
-function buildCurvePrompt(curves, zones, routeData) {
-  // Summarize zones
-  const zoneSummary = zones?.length > 0 
-    ? zones.map(z => `${z.character}: ${((z.endDistance - z.startDistance)/1609.34).toFixed(1)}mi`).join(', ')
-    : 'Unknown'
-
-  // Get zone for each curve
-  const getZoneForCurve = (curve) => {
-    if (!zones?.length) return 'unknown'
-    const zone = zones.find(z => 
-      curve.distanceFromStart >= z.startDistance && 
-      curve.distanceFromStart <= z.endDistance
-    )
-    return zone?.character || 'unknown'
-  }
-
-  // Build curve list (limit to prevent token overflow)
-  const maxCurves = 100
-  const curvesToAnalyze = curves.length > maxCurves 
-    ? curves.filter((_, i) => i % Math.ceil(curves.length / maxCurves) === 0)
-    : curves
-
-  const curveList = curvesToAnalyze.map((curve, i) => {
-    const prevCurve = curvesToAnalyze[i - 1]
-    const nextCurve = curvesToAnalyze[i + 1]
-    const distToPrev = prevCurve ? curve.distanceFromStart - prevCurve.distanceFromStart : null
-    const distToNext = nextCurve ? nextCurve.distanceFromStart - curve.distanceFromStart : null
-    
-    return {
-      id: curve.id,
-      index: i,
-      distanceKm: (curve.distanceFromStart / 1000).toFixed(2),
-      direction: curve.direction,
-      angle: Math.round(curve.angle || 0),
-      severity: curve.severity,
-      length: Math.round(curve.length || 0),
-      zone: getZoneForCurve(curve),
-      distToPrevM: distToPrev ? Math.round(distToPrev) : null,
-      distToNextM: distToNext ? Math.round(distToNext) : null,
-      prevDirection: prevCurve?.direction || null,
-      nextDirection: nextCurve?.direction || null
-    }
-  })
-
-  // Calculate stats
-  const avgAngle = curves.reduce((sum, c) => sum + (c.angle || 0), 0) / curves.length
-  const highwayCurves = curvesToAnalyze.filter(c => getZoneForCurve(c) === 'transit').length
-  const technicalCurves = curvesToAnalyze.filter(c => getZoneForCurve(c) === 'technical').length
-
-  return `ROUTE OVERVIEW:
-- Total distance: ${((routeData?.distance || 0) / 1609.34).toFixed(1)} miles
-- Total curves: ${curves.length}
-- Average curve angle: ${avgAngle.toFixed(1)}°
-- Zone breakdown: ${zoneSummary}
-- Highway curves: ${highwayCurves}, Technical curves: ${technicalCurves}
-
-CURVES TO ANALYZE (${curvesToAnalyze.length} of ${curves.length}):
-${JSON.stringify(curveList, null, 2)}
-
-Analyze these curves and return a JSON object with your recommendations:
-
+RESPOND WITH JSON ONLY:
 {
-  "severityAdjustments": [
-    { "id": "curve-id", "currentSeverity": 2, "newSeverity": 4, "reason": "15° at highway speed" }
+  "curveChanges": [
+    {"id": "curve-id", "action": "remove|adjust", "newSeverity": 3, "reason": "short"}
   ],
-  "chicanes": [
-    { "startId": "curve-id-1", "endId": "curve-id-2", "type": "left-right" }
+  "bendEnhancements": [
+    {"id": "bend-id", "callout": "Enhanced callout text here", "shortCallout": "Short version"}
   ],
-  "removals": [
-    { "id": "curve-id", "reason": "Only 3° angle, GPS noise" }
-  ],
-  "highwayPriority": [
-    { "id": "curve-id", "reason": "Significant 18° sweep, worth calling out" }
-  ],
-  "warnings": [
-    "Suspicious 3km gap between curves 12 and 13 on technical road"
-  ]
+  "calloutVariants": {
+    "curve-id": ["Left 4 tightens", "Tightening left, severity 4", "Hard left ahead, tightens"]
+  }
 }
 
-Rules:
-- Only include curves that need changes (don't list every curve)
-- Be conservative with removals (only obvious false positives)
-- Chicanes must be <150m apart with alternating directions
-- Highway priority = curves worth announcing (usually 10°+)
-- Severity adjustments should consider zone (highway vs technical)`
+ONLY include items that need changes. Empty arrays if nothing to change.`
+}
+
+// ================================
+// PROMPT BUILDER
+// ================================
+
+function buildCurvePrompt({ curves, highwayBends, zones, routeData }) {
+  const totalMiles = ((routeData?.distance || 0) / 1609.34).toFixed(1)
+  
+  // Build zone context (read-only, helps LLM understand road types)
+  const zoneContext = zones?.map((z, i) => {
+    const lenMi = ((z.endDistance - z.startDistance) / 1609.34).toFixed(1)
+    return `  Zone ${i}: ${z.character} (${lenMi}mi)`
+  }).join('\n') || '  No zone data'
+
+  // Build curve list
+  const curveList = curves?.map((c, i) => {
+    const distMi = ((c.distanceFromStart || 0) / 1609.34).toFixed(2)
+    const zone = findZoneAtDistance(zones, c.distanceFromStart)
+    const len = c.length || 'unknown'
+    
+    let flags = []
+    if (c.isChicane) flags.push('CHICANE')
+    if (c.modifier) flags.push(c.modifier)
+    if (len !== 'unknown' && len < 30) flags.push('SHORT')
+    
+    return `  ${c.id || `c${i}`}: ${c.direction} sev${c.severity} @${distMi}mi len=${len}m zone=${zone} ${flags.join(' ')}`
+  }).join('\n') || '  No curves'
+
+  // Build highway bend list (focus on active sections)
+  const bendList = highwayBends?.map((b, i) => {
+    const distMi = ((b.distanceFromStart || 0) / 1609.34).toFixed(2)
+    
+    if (b.isSection) {
+      // Active section - needs enhancement
+      const bendDetails = b.bends?.map(inner => 
+        `${inner.direction}${inner.angle}°`
+      ).join(',') || 'no details'
+      
+      return `  ${b.id}: [SECTION] ${b.bendCount} bends @${distMi}mi len=${b.length}m | bends: ${bendDetails} | current: "${b.calloutBasic}"`
+    } else if (b.isSSweep) {
+      return `  ${b.id}: S-SWEEP ${b.firstBend?.direction}${b.firstBend?.angle}°→${b.secondBend?.direction}${b.secondBend?.angle}° @${distMi}mi`
+    } else {
+      return `  ${b.id}: ${b.direction} ${b.angle}° @${distMi}mi len=${b.length}m ${b.isSweeper ? 'SWEEPER' : ''}`
+    }
+  }).join('\n') || '  No highway bends'
+
+  return `ROUTE: ${totalMiles} miles total
+
+ZONES (for context, DO NOT modify):
+${zoneContext}
+
+CURVES TO VERIFY (${curves?.length || 0}):
+${curveList}
+
+HIGHWAY BENDS TO ENHANCE (${highwayBends?.length || 0}):
+${bendList}
+
+INSTRUCTIONS:
+1. Flag any curves that look like false positives (parking lots, driveways, very short urban)
+2. For [SECTION] bends, write a better callout that describes the feel and flow
+3. Generate 2-3 callout variants for curves severity 3+
+
+Return JSON with curveChanges, bendEnhancements, calloutVariants.
+Only include items that need changes.`
 }
 
 /**
- * Parse LLM response into structured enhancements
+ * Find which zone a distance falls into
  */
-function parseCurveResponse(content) {
-  const defaults = {
-    severityAdjustments: [],
-    chicanes: [],
-    removals: [],
-    highwayPriority: [],
-    warnings: []
-  }
+function findZoneAtDistance(zones, distance) {
+  if (!zones?.length || distance == null) return 'unknown'
+  const zone = zones.find(z => distance >= z.startDistance && distance <= z.endDistance)
+  return zone?.character || 'unknown'
+}
 
+// ================================
+// RESPONSE PARSER
+// ================================
+
+function parseResponse(content) {
   try {
-    // Extract JSON from response (handle markdown code blocks)
     let jsonStr = content
+
+    // Handle markdown code blocks
     const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
       jsonStr = jsonMatch[1]
     }
-    
-    // Try to find JSON object
+
+    // Find JSON object
     const objectMatch = jsonStr.match(/\{[\s\S]*\}/)
     if (objectMatch) {
       jsonStr = objectMatch[0]
@@ -241,150 +258,178 @@ function parseCurveResponse(content) {
 
     const parsed = JSON.parse(jsonStr)
     
+    console.log(`📋 Parsed LLM response:`)
+    console.log(`   - Curve changes: ${parsed.curveChanges?.length || 0}`)
+    console.log(`   - Bend enhancements: ${parsed.bendEnhancements?.length || 0}`)
+    console.log(`   - Callout variants: ${Object.keys(parsed.calloutVariants || {}).length} curves`)
+
     return {
-      severityAdjustments: Array.isArray(parsed.severityAdjustments) ? parsed.severityAdjustments : [],
-      chicanes: Array.isArray(parsed.chicanes) ? parsed.chicanes : [],
-      removals: Array.isArray(parsed.removals) ? parsed.removals : [],
-      highwayPriority: Array.isArray(parsed.highwayPriority) ? parsed.highwayPriority : [],
-      warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
+      curveChanges: parsed.curveChanges || [],
+      bendEnhancements: parsed.bendEnhancements || [],
+      calloutVariants: parsed.calloutVariants || {}
     }
 
   } catch (err) {
-    console.warn('⚠️ Failed to parse LLM curve response:', err.message)
-    return defaults
+    console.error('Failed to parse LLM curve response:', err)
+    console.error('Raw content:', content?.slice(0, 500))
+    return { curveChanges: [], bendEnhancements: [], calloutVariants: {} }
+  }
+}
+
+// ================================
+// APPLY ENHANCEMENTS
+// ================================
+
+function applyEnhancements({ originalCurves, originalBends, llmResult }) {
+  const changes = []
+  const { curveChanges, bendEnhancements, calloutVariants } = llmResult
+
+  // --- Process curve changes ---
+  const curveChangeMap = new Map()
+  curveChanges.forEach(change => {
+    if (change.id) curveChangeMap.set(change.id, change)
+  })
+
+  const enhancedCurves = originalCurves?.filter((curve, i) => {
+    const curveId = curve.id || `c${i}`
+    const change = curveChangeMap.get(curveId)
+
+    if (!change) return true // Keep unchanged
+
+    if (change.action === 'remove') {
+      changes.push(`🗑️ Removed curve ${curveId}: ${change.reason || 'false positive'}`)
+      return false // Filter out
+    }
+
+    return true // Keep (adjustments applied below)
+  }).map((curve, i) => {
+    const curveId = curve.id || `c${i}`
+    const change = curveChangeMap.get(curveId)
+
+    if (change?.action === 'adjust' && change.newSeverity) {
+      changes.push(`📝 Curve ${curveId}: severity ${curve.severity} → ${change.newSeverity} (${change.reason})`)
+      return {
+        ...curve,
+        severity: change.newSeverity,
+        originalSeverity: curve.severity,
+        llmAdjusted: true,
+        llmReason: change.reason
+      }
+    }
+
+    return curve
+  }) || []
+
+  // --- Process bend enhancements ---
+  const bendEnhanceMap = new Map()
+  bendEnhancements.forEach(enh => {
+    if (enh.id) bendEnhanceMap.set(enh.id, enh)
+  })
+
+  const enhancedBends = originalBends?.map(bend => {
+    const enhancement = bendEnhanceMap.get(bend.id)
+
+    if (!enhancement) return bend
+
+    if (bend.isSection && enhancement.callout) {
+      changes.push(`✨ Enhanced section ${bend.id}: "${enhancement.callout.slice(0, 50)}..."`)
+      return {
+        ...bend,
+        calloutDetailed: enhancement.callout,
+        calloutShort: enhancement.shortCallout || bend.calloutBasic,
+        llmEnhanced: true
+      }
+    }
+
+    return bend
+  }) || []
+
+  // --- Build callout variants map ---
+  // Add original callout as first variant, then LLM variants
+  const finalCalloutVariants = {}
+  
+  enhancedCurves.forEach((curve, i) => {
+    const curveId = curve.id || `c${i}`
+    const llmVariants = calloutVariants[curveId] || []
+    
+    // Generate base callout
+    const baseCallout = generateBaseCallout(curve)
+    
+    if (llmVariants.length > 0) {
+      // LLM provided variants
+      finalCalloutVariants[curveId] = [baseCallout, ...llmVariants]
+      changes.push(`🎙️ Generated ${llmVariants.length} callout variants for ${curveId}`)
+    } else if (curve.severity >= 3) {
+      // No LLM variants but it's a notable curve - keep base
+      finalCalloutVariants[curveId] = [baseCallout]
+    }
+  })
+
+  return {
+    curves: enhancedCurves,
+    highwayBends: enhancedBends,
+    calloutVariants: finalCalloutVariants,
+    changes
   }
 }
 
 /**
- * Apply LLM enhancements to curve data
+ * Generate base callout text for a curve (fallback/default)
  */
-function applyCurveEnhancements(curves, enhancements, zones) {
-  // Create lookup maps
-  const severityMap = new Map()
-  enhancements.severityAdjustments?.forEach(adj => {
-    severityMap.set(adj.id, adj)
-  })
-
-  const removalSet = new Set()
-  enhancements.removals?.forEach(rem => {
-    removalSet.add(rem.id)
-  })
-
-  const chicaneMap = new Map()
-  enhancements.chicanes?.forEach(ch => {
-    chicaneMap.set(ch.startId, { ...ch, isChicaneStart: true })
-    chicaneMap.set(ch.endId, { ...ch, isChicaneEnd: true })
-  })
-
-  const prioritySet = new Set()
-  enhancements.highwayPriority?.forEach(p => {
-    prioritySet.set(p.id)
-  })
-
-  // Apply enhancements
-  const enhancedCurves = curves
-    .filter(curve => !removalSet.has(curve.id)) // Remove false positives
-    .map(curve => {
-      const enhanced = { ...curve }
-
-      // Apply severity adjustment
-      const sevAdj = severityMap.get(curve.id)
-      if (sevAdj) {
-        enhanced.severity = sevAdj.newSeverity
-        enhanced.severityAdjusted = true
-        enhanced.severityReason = sevAdj.reason
-        console.log(`  📊 Severity: ${curve.id} ${sevAdj.currentSeverity} → ${sevAdj.newSeverity}`)
-      }
-
-      // Apply chicane marking
-      const chicane = chicaneMap.get(curve.id)
-      if (chicane) {
-        if (chicane.isChicaneStart) {
-          enhanced.isChicaneStart = true
-          enhanced.chicaneType = chicane.type
-          enhanced.chicanePairId = chicane.endId
-          console.log(`  🔀 Chicane start: ${curve.id} (${chicane.type})`)
-        }
-        if (chicane.isChicaneEnd) {
-          enhanced.isChicaneEnd = true
-          enhanced.chicanePairId = chicane.startId
-        }
-      }
-
-      // Apply highway priority
-      if (prioritySet.has(curve.id)) {
-        enhanced.highwayPriority = true
-        console.log(`  ⭐ Highway priority: ${curve.id}`)
-      }
-
-      // Mark as LLM-enhanced
-      if (sevAdj || chicane || prioritySet.has(curve.id)) {
-        enhanced.llmEnhanced = true
-      }
-
-      return enhanced
-    })
-
-  // Log removals
-  if (enhancements.removals?.length > 0) {
-    console.log(`  🗑️ Removed ${enhancements.removals.length} false positive curves`)
+function generateBaseCallout(curve) {
+  if (curve.isChicane) {
+    const firstDir = curve.startDirection === 'LEFT' ? 'Left' : 'Right'
+    const type = curve.chicaneType === 'CHICANE' ? 'Chicane' : 'S curve'
+    return `${type} ${firstDir} ${curve.severitySequence || ''}`
   }
 
-  // Log warnings
-  enhancements.warnings?.forEach(warning => {
-    console.log(`  ⚠️ LLM Warning: ${warning}`)
-  })
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  let text = `${dir} ${curve.severity}`
 
-  return enhancedCurves
+  if (curve.modifier) {
+    const mods = {
+      'TIGHTENS': 'tightens',
+      'OPENS': 'opens',
+      'LONG': 'long',
+      'HAIRPIN': 'hairpin'
+    }
+    text += ` ${mods[curve.modifier] || curve.modifier.toLowerCase()}`
+  }
+
+  return text
 }
+
+// ================================
+// UTILITY: Check if enhancement is needed
+// ================================
 
 /**
- * Generate enhanced callout for chicane
+ * Quick check if LLM enhancement would be useful for this route
+ * Helps avoid unnecessary API calls for simple routes
  */
-export function generateChicaneCallout(curve, nextCurve) {
-  if (!curve.isChicaneStart || !nextCurve) return null
+export function shouldEnhanceCurves({ curves, highwayBends }) {
+  // Has active sections that need rich descriptions
+  const hasActiveSections = highwayBends?.some(b => b.isSection) || false
+  
+  // Has notable curves that would benefit from variants
+  const hasNotableCurves = curves?.filter(c => c.severity >= 3).length > 2
+  
+  // Has potential false positives (short urban curves)
+  const hasSuspiciousCurves = curves?.some(c => 
+    (c.length && c.length < 30) || 
+    (c.severity === 1 && !c.isSweeper)
+  ) || false
 
-  const type = curve.chicaneType || `${curve.direction}-${nextCurve.direction}`
-  const distance = Math.round((nextCurve.distanceFromStart - curve.distanceFromStart))
-
-  // Examples: "Chicane left-right" or "Quick left-right"
-  if (distance < 50) {
-    return `Quick ${type}`
-  } else {
-    return `Chicane ${type}, ${distance} meters`
-  }
+  return hasActiveSections || hasNotableCurves || hasSuspiciousCurves
 }
 
-/**
- * Check if curve should be announced based on zone and priority
- */
-export function shouldAnnounceCurve(curve, zone) {
-  // Always announce chicane starts
-  if (curve.isChicaneStart) return true
-
-  // In highway zones, only announce priority curves or severity 3+
-  if (zone === 'transit') {
-    return curve.highwayPriority || curve.severity >= 3
-  }
-
-  // In technical zones, announce everything
-  if (zone === 'technical') {
-    return curve.severity >= 1
-  }
-
-  // In urban zones, only severity 4+
-  if (zone === 'urban') {
-    return curve.severity >= 4
-  }
-
-  // Default: announce severity 2+
-  return curve.severity >= 2
-}
+// ================================
+// DEFAULT EXPORT
+// ================================
 
 export default {
-  validateCurvesWithLLM,
-  generateChicaneCallout,
-  shouldAnnounceCurve,
+  enhanceCurvesWithLLM,
+  shouldEnhanceCurves,
   getLLMApiKey,
   hasLLMApiKey
 }
