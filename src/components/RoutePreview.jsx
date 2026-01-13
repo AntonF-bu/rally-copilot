@@ -8,7 +8,7 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
-import { validateCurvesWithLLM } from '../services/llmCurveService'
+// import { validateCurvesWithLLM } from '../services/llmCurveService'  // Disabled for now
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 
@@ -622,9 +622,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
-      // PHASE 1.75: LLM Curve Validation
-      // Comprehensive curve analysis and enhancement
+      // PHASE 1.75: LLM Curve Validation (DISABLED - needs rewrite)
+      // TODO: Implement compact format like zone LLM
       // ========================================
+      // Curve LLM temporarily disabled - focus on zone AI first
+      /*
       if (hasLLMApiKey() && routeData?.curves?.length > 0) {
         setCopilotProgress(15)
         setCopilotStatus('🤖 AI analyzing curves...')
@@ -656,6 +658,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           console.warn('⚠️ LLM curve validation failed:', curveError)
         }
       }
+      */
       
       setCopilotProgress(20)
       
