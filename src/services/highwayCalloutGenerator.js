@@ -1,8 +1,11 @@
 // ================================
-// Highway Callout Generator v1.0
+// Highway Callout Generator v2.0
 // 
-// Rule-based system that determines WHAT and WHERE
-// AI only polishes the text (optional)
+// FIXED:
+// - Includes sections in notable bend detection
+// - Absolute danger rule for 30°+ bends
+// - Checks first bend
+// - No more rhythm filler
 // ================================
 
 // Callout types
@@ -11,51 +14,40 @@ export const CALLOUT_TYPE = {
   SECTION_START: 'section_start', // Entering winding/technical section
   SECTION_END: 'section_end',     // Leaving technical section
   SWEEPER: 'sweeper',           // Notable curve 15°+
-  DANGER: 'danger',             // Unexpected difficulty spike
-  RHYTHM: 'rhythm'              // General character info
+  DANGER: 'danger',             // High angle or difficulty spike
+  OPENING: 'opening'            // After technical, road opens up
 }
 
-// Default templates (used if AI polish fails)
+// Default templates (used if AI polish fails or disabled)
 const TEMPLATES = {
   [CALLOUT_TYPE.WAKE_UP]: [
     "Heads up, curves ahead",
-    "Road comes alive ahead",
-    "Curves returning after straight",
-    "Stay alert, bends coming up"
+    "Stay alert, bends coming",
+    "Curves returning"
   ],
   [CALLOUT_TYPE.SECTION_START]: [
-    "Winding section ahead",
-    "Technical stretch coming up",
-    "Active section ahead, stay sharp",
-    "Curves for the next few miles"
+    "Technical section ahead",
+    "Winding stretch coming",
+    "Active section ahead"
   ],
   [CALLOUT_TYPE.SECTION_END]: [
     "Clear ahead",
     "Straightens out",
-    "Opening up now",
-    "Relax, straight stretch ahead"
+    "Opening up"
   ],
   [CALLOUT_TYPE.SWEEPER]: {
-    LEFT: [
-      "Sweeping left ahead",
-      "Nice left sweeper coming",
-      "Left bend ahead"
-    ],
-    RIGHT: [
-      "Sweeping right ahead", 
-      "Nice right sweeper coming",
-      "Right bend ahead"
-    ]
+    LEFT: ["Left sweeper ahead", "Sweeping left", "Left bend ahead"],
+    RIGHT: ["Right sweeper ahead", "Sweeping right", "Right bend ahead"]
   },
   [CALLOUT_TYPE.DANGER]: [
-    "Caution, tightens here",
-    "Watch it, sharper than it looks",
-    "Heads up, tricky section"
+    "Caution, tight ahead",
+    "Sharp curves, stay focused",
+    "Watch it, technical"
   ],
-  [CALLOUT_TYPE.RHYTHM]: [
-    "Rolling curves ahead",
-    "Gentle bends for a bit",
-    "Easy curves, enjoy"
+  [CALLOUT_TYPE.OPENING]: [
+    "Opening up now",
+    "Clear stretch ahead",
+    "Relaxing now"
   ]
 }
 
@@ -68,7 +60,7 @@ export function generateCalloutSlots(highwayBends, zones, routeData) {
   const totalDistance = routeData?.distance || 0
   const totalMiles = totalDistance / 1609.34
   
-  console.log('📋 Generating callout slots...')
+  console.log('📋 Generating callout slots v2.0...')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles`)
   console.log(`   Highway bends: ${highwayBends?.length || 0}`)
   console.log(`   Zones: ${zones?.length || 0}`)
@@ -84,30 +76,190 @@ export function generateCalloutSlots(highwayBends, zones, routeData) {
   )
   
   // ================================
-  // RULE 1: Wake-up calls after long straights
+  // RULE 1: Absolute danger - Any bend 30°+ ALWAYS gets warned
   // ================================
-  const gaps = findGaps(sortedBends, totalDistance)
-  gaps.forEach(gap => {
-    if (gap.length >= 5) { // 5+ mile gap
-      // Place wake-up 0.5 miles before curves return
-      const triggerDistance = Math.max(gap.endDistance - (0.5 * 1609.34), gap.startDistance)
+  sortedBends.forEach(bend => {
+    const angle = bend.angle || 0
+    if (angle >= 30) {
+      const triggerDistance = Math.max((bend.distanceFromStart || 0) - (0.5 * 1609.34), 0)
+      const bendType = bend.isSection ? `${bend.bendCount} curves` : 'sharp bend'
+      
       slots.push({
-        type: CALLOUT_TYPE.WAKE_UP,
+        type: CALLOUT_TYPE.DANGER,
         triggerDistance,
         triggerMile: triggerDistance / 1609.34,
-        priority: gap.length >= 10 ? 'high' : 'medium',
+        priority: 'critical',
         context: {
-          gapLength: gap.length,
-          afterMiles: gap.startMile
+          direction: bend.direction,
+          angle: angle,
+          bendCount: bend.bendCount,
+          isSection: bend.isSection
         },
-        templateText: pickTemplate(CALLOUT_TYPE.WAKE_UP)
+        templateText: `${bend.direction || ''} ${angle}°, ${bendType}`.trim()
       })
-      console.log(`   💤 Wake-up at mile ${(triggerDistance/1609.34).toFixed(1)} (after ${gap.length.toFixed(0)}mi straight)`)
+      console.log(`   🔴 DANGER at mile ${(triggerDistance/1609.34).toFixed(1)}: ${angle}° ${bendType}`)
     }
   })
   
   // ================================
-  // RULE 2: Section transitions (technical zones)
+  // RULE 2: Notable bends/sections 18-29° (includes sections!)
+  // ================================
+  const notableBends = sortedBends.filter(b => {
+    const angle = b.angle || 0
+    return angle >= 18 && angle < 30  // 18-29° range (30+ handled above)
+  })
+  
+  // Max 1 per 5 miles to avoid overload
+  const notableBySegment = {}
+  notableBends.forEach(bend => {
+    const segment = Math.floor((bend.distanceFromStart || 0) / (5 * 1609.34))
+    if (!notableBySegment[segment] || (bend.angle || 0) > (notableBySegment[segment].angle || 0)) {
+      notableBySegment[segment] = bend
+    }
+  })
+  
+  Object.values(notableBySegment).forEach(bend => {
+    const triggerDistance = Math.max((bend.distanceFromStart || 0) - (0.3 * 1609.34), 0)
+    
+    // Skip if too close to a danger callout
+    const tooClose = slots.some(s => 
+      Math.abs(s.triggerDistance - triggerDistance) < (0.8 * 1609.34)
+    )
+    
+    if (!tooClose) {
+      const bendType = bend.isSection ? 'section' : 'sweeper'
+      slots.push({
+        type: CALLOUT_TYPE.SWEEPER,
+        triggerDistance,
+        triggerMile: triggerDistance / 1609.34,
+        priority: 'high',
+        context: {
+          direction: bend.direction,
+          angle: bend.angle,
+          bendCount: bend.bendCount,
+          isSection: bend.isSection
+        },
+        templateText: pickTemplate(CALLOUT_TYPE.SWEEPER, bend.direction)
+      })
+      console.log(`   🌀 ${bendType.toUpperCase()} at mile ${(triggerDistance/1609.34).toFixed(1)}: ${bend.direction} ${bend.angle}°`)
+    }
+  })
+  
+  // ================================
+  // RULE 3: Difficulty spikes (including first bend check)
+  // ================================
+  // Check first bend specially
+  if (sortedBends.length > 0) {
+    const first = sortedBends[0]
+    const firstAngle = first.angle || 0
+    if (firstAngle >= 20 && firstAngle < 30) {  // 30+ already handled
+      const triggerDistance = Math.max((first.distanceFromStart || 0) - (0.5 * 1609.34), 0)
+      const tooClose = slots.some(s => Math.abs(s.triggerDistance - triggerDistance) < (0.5 * 1609.34))
+      
+      if (!tooClose) {
+        slots.push({
+          type: CALLOUT_TYPE.DANGER,
+          triggerDistance,
+          triggerMile: triggerDistance / 1609.34,
+          priority: 'high',
+          context: { direction: first.direction, angle: firstAngle, isFirst: true },
+          templateText: `${first.direction || ''} curves ahead, ${firstAngle}°`.trim()
+        })
+        console.log(`   ⚡ FIRST BEND at mile ${(triggerDistance/1609.34).toFixed(1)}: ${firstAngle}°`)
+      }
+    }
+  }
+  
+  // Check spikes between consecutive bends
+  for (let i = 1; i < sortedBends.length; i++) {
+    const prev = sortedBends[i - 1]
+    const curr = sortedBends[i]
+    const prevAngle = prev.angle || 0
+    const currAngle = curr.angle || 0
+    
+    // Spike: significant jump AND current is notable
+    if (currAngle >= 18 && prevAngle < 12 && currAngle - prevAngle >= 8) {
+      const triggerDistance = Math.max((curr.distanceFromStart || 0) - (0.5 * 1609.34), 0)
+      
+      const tooClose = slots.some(s => 
+        Math.abs(s.triggerDistance - triggerDistance) < (0.8 * 1609.34)
+      )
+      
+      if (!tooClose) {
+        slots.push({
+          type: CALLOUT_TYPE.DANGER,
+          triggerDistance,
+          triggerMile: triggerDistance / 1609.34,
+          priority: currAngle >= 25 ? 'critical' : 'high',
+          context: { prevAngle, currAngle, spike: currAngle - prevAngle },
+          templateText: pickTemplate(CALLOUT_TYPE.DANGER)
+        })
+        console.log(`   ⚡ SPIKE at mile ${(triggerDistance/1609.34).toFixed(1)}: ${prevAngle}° → ${currAngle}°`)
+      }
+    }
+  }
+  
+  // ================================
+  // RULE 4: Wake-up after long straights (8+ miles)
+  // ================================
+  const gaps = findGaps(sortedBends, totalDistance)
+  gaps.forEach(gap => {
+    if (gap.length >= 8) {  // Raised from 5 to 8 miles
+      const triggerDistance = Math.max(gap.endDistance - (0.5 * 1609.34), gap.startDistance)
+      
+      const tooClose = slots.some(s => 
+        Math.abs(s.triggerDistance - triggerDistance) < (1 * 1609.34)
+      )
+      
+      if (!tooClose) {
+        slots.push({
+          type: CALLOUT_TYPE.WAKE_UP,
+          triggerDistance,
+          triggerMile: triggerDistance / 1609.34,
+          priority: gap.length >= 12 ? 'high' : 'medium',
+          context: { gapLength: gap.length },
+          templateText: pickTemplate(CALLOUT_TYPE.WAKE_UP)
+        })
+        console.log(`   💤 WAKE-UP at mile ${(triggerDistance/1609.34).toFixed(1)} (after ${gap.length.toFixed(0)}mi straight)`)
+      }
+    }
+  })
+  
+  // ================================
+  // RULE 5: Opening up after technical sections
+  // ================================
+  // Find where angle drops significantly after technical
+  for (let i = 1; i < sortedBends.length; i++) {
+    const prev = sortedBends[i - 1]
+    const curr = sortedBends[i]
+    const prevAngle = prev.angle || 0
+    const currAngle = curr.angle || 0
+    const gapMiles = ((curr.distanceFromStart || 0) - (prev.distanceFromStart || 0)) / 1609.34
+    
+    // After a 25°+ bend, if next is gentle and >2mi away
+    if (prevAngle >= 25 && currAngle < 12 && gapMiles >= 2) {
+      const triggerDistance = (prev.distanceFromStart || 0) + (0.3 * 1609.34)
+      
+      const tooClose = slots.some(s => 
+        Math.abs(s.triggerDistance - triggerDistance) < (1 * 1609.34)
+      )
+      
+      if (!tooClose) {
+        slots.push({
+          type: CALLOUT_TYPE.OPENING,
+          triggerDistance,
+          triggerMile: triggerDistance / 1609.34,
+          priority: 'low',
+          context: { afterAngle: prevAngle },
+          templateText: pickTemplate(CALLOUT_TYPE.OPENING)
+        })
+        console.log(`   🟢 OPENING at mile ${(triggerDistance/1609.34).toFixed(1)} (after ${prevAngle}° section)`)
+      }
+    }
+  }
+  
+  // ================================
+  // RULE 6: Final technical section (only if TECHNICAL zone)
   // ================================
   const technicalZones = zones.filter(z => z.character === 'technical')
   technicalZones.forEach(zone => {
@@ -115,22 +267,24 @@ export function generateCalloutSlots(highwayBends, zones, routeData) {
     const endMile = zone.endDistance / 1609.34
     const length = endMile - startMile
     
-    // Only mark significant technical sections (0.5+ miles)
-    if (length >= 0.5) {
-      // Section start - warn 0.5 miles before
+    if (length >= 1.0) {  // Only significant technical zones
       const startTrigger = Math.max(zone.startDistance - (0.5 * 1609.34), 0)
-      slots.push({
-        type: CALLOUT_TYPE.SECTION_START,
-        triggerDistance: startTrigger,
-        triggerMile: startTrigger / 1609.34,
-        priority: 'high',
-        context: {
-          sectionLength: length,
-          sectionStart: startMile
-        },
-        templateText: pickTemplate(CALLOUT_TYPE.SECTION_START)
-      })
-      console.log(`   🔶 Section start at mile ${(startTrigger/1609.34).toFixed(1)} (${length.toFixed(1)}mi technical)`)
+      
+      const tooClose = slots.some(s => 
+        Math.abs(s.triggerDistance - startTrigger) < (1 * 1609.34)
+      )
+      
+      if (!tooClose) {
+        slots.push({
+          type: CALLOUT_TYPE.SECTION_START,
+          triggerDistance: startTrigger,
+          triggerMile: startTrigger / 1609.34,
+          priority: 'high',
+          context: { sectionLength: length },
+          templateText: `Technical section, ${length.toFixed(1)} miles`
+        })
+        console.log(`   🔶 SECTION START at mile ${(startTrigger/1609.34).toFixed(1)} (${length.toFixed(1)}mi)`)
+      }
       
       // Section end
       slots.push({
@@ -141,151 +295,18 @@ export function generateCalloutSlots(highwayBends, zones, routeData) {
         context: { afterSection: true },
         templateText: pickTemplate(CALLOUT_TYPE.SECTION_END)
       })
-      console.log(`   🔷 Section end at mile ${endMile.toFixed(1)}`)
+      console.log(`   🔷 SECTION END at mile ${endMile.toFixed(1)}`)
     }
   })
   
   // ================================
-  // RULE 3: Notable sweepers (15°+)
+  // NO MORE RHYTHM CALLOUTS - They were useless filler
   // ================================
-  const notableSweepers = sortedBends.filter(b => 
-    !b.isSection && 
-    b.angle >= 15 && // Must be 15°+ to be notable
-    b.angle < 40 // Not too sharp (those are in technical sections)
-  )
   
-  // Don't over-call sweepers - max 1 per 5 miles, pick the best
-  const sweepersBySegment = {}
-  notableSweepers.forEach(s => {
-    const segment = Math.floor((s.distanceFromStart || 0) / (5 * 1609.34)) // 5-mile segments
-    if (!sweepersBySegment[segment] || s.angle > sweepersBySegment[segment].angle) {
-      sweepersBySegment[segment] = s
-    }
-  })
-  
-  Object.values(sweepersBySegment).forEach(sweeper => {
-    const mile = (sweeper.distanceFromStart || 0) / 1609.34
-    // Warn 0.3 miles before
-    const triggerDistance = Math.max(sweeper.distanceFromStart - (0.3 * 1609.34), 0)
-    
-    // Skip if too close to a section start/end
-    const tooCloseToSection = slots.some(s => 
-      (s.type === CALLOUT_TYPE.SECTION_START || s.type === CALLOUT_TYPE.SECTION_END) &&
-      Math.abs(s.triggerDistance - triggerDistance) < 1609.34 // Within 1 mile
-    )
-    
-    if (!tooCloseToSection) {
-      slots.push({
-        type: CALLOUT_TYPE.SWEEPER,
-        triggerDistance,
-        triggerMile: triggerDistance / 1609.34,
-        priority: sweeper.angle >= 20 ? 'high' : 'medium',
-        context: {
-          direction: sweeper.direction,
-          angle: sweeper.angle,
-          bendId: sweeper.id
-        },
-        templateText: pickTemplate(CALLOUT_TYPE.SWEEPER, sweeper.direction)
-      })
-      console.log(`   🌀 Sweeper at mile ${(triggerDistance/1609.34).toFixed(1)} (${sweeper.direction} ${sweeper.angle}°)`)
-    }
-  })
-  
-  // ================================
-  // RULE 4: Danger zones (difficulty spikes)
-  // ================================
-  // Find places where angle suddenly increases after gentle section
-  for (let i = 1; i < sortedBends.length; i++) {
-    const prev = sortedBends[i - 1]
-    const curr = sortedBends[i]
-    const prevAngle = prev.angle || (prev.isSection ? 15 : 0)
-    const currAngle = curr.angle || (curr.isSection ? 20 : 0)
-    
-    // Significant jump in difficulty
-    if (currAngle >= 20 && prevAngle < 12 && currAngle - prevAngle >= 10) {
-      const triggerDistance = Math.max(curr.distanceFromStart - (0.5 * 1609.34), 0)
-      
-      // Skip if already covered by another callout nearby
-      const alreadyCovered = slots.some(s => 
-        Math.abs(s.triggerDistance - triggerDistance) < (0.5 * 1609.34)
-      )
-      
-      if (!alreadyCovered) {
-        slots.push({
-          type: CALLOUT_TYPE.DANGER,
-          triggerDistance,
-          triggerMile: triggerDistance / 1609.34,
-          priority: 'critical',
-          context: {
-            prevAngle,
-            currAngle,
-            spike: currAngle - prevAngle
-          },
-          templateText: pickTemplate(CALLOUT_TYPE.DANGER)
-        })
-        console.log(`   ⚠️ Danger zone at mile ${(triggerDistance/1609.34).toFixed(1)} (${prevAngle}° → ${currAngle}°)`)
-      }
-    }
-  }
-  
-  // ================================
-  // RULE 5: Ensure spatial coverage
-  // ================================
-  // If we have big gaps in callouts (10+ miles), add rhythm callouts
-  const sortedSlots = [...slots].sort((a, b) => a.triggerDistance - b.triggerDistance)
-  const coverageGaps = []
-  
-  let lastCalloutMile = 0
-  sortedSlots.forEach(slot => {
-    const gapMiles = slot.triggerMile - lastCalloutMile
-    if (gapMiles > 10) {
-      coverageGaps.push({
-        startMile: lastCalloutMile,
-        endMile: slot.triggerMile,
-        midMile: lastCalloutMile + gapMiles / 2
-      })
-    }
-    lastCalloutMile = slot.triggerMile
-  })
-  
-  // Check gap to end of route
-  if (totalMiles - lastCalloutMile > 10) {
-    coverageGaps.push({
-      startMile: lastCalloutMile,
-      endMile: totalMiles,
-      midMile: lastCalloutMile + (totalMiles - lastCalloutMile) / 2
-    })
-  }
-  
-  // Add rhythm callouts in coverage gaps (only if there are bends there)
-  coverageGaps.forEach(gap => {
-    const bendsInGap = sortedBends.filter(b => {
-      const mile = (b.distanceFromStart || 0) / 1609.34
-      return mile >= gap.startMile && mile <= gap.endMile
-    })
-    
-    if (bendsInGap.length > 0) {
-      const triggerDistance = gap.midMile * 1609.34
-      slots.push({
-        type: CALLOUT_TYPE.RHYTHM,
-        triggerDistance,
-        triggerMile: gap.midMile,
-        priority: 'low',
-        context: {
-          bendCount: bendsInGap.length
-        },
-        templateText: pickTemplate(CALLOUT_TYPE.RHYTHM)
-      })
-      console.log(`   🎵 Rhythm at mile ${gap.midMile.toFixed(1)} (coverage fill)`)
-    }
-  })
-  
-  // ================================
   // Sort and dedupe
-  // ================================
   const finalSlots = dedupeSlots(slots)
   
-  console.log(`📋 Generated ${finalSlots.length} callout slots`)
+  console.log(`📋 Generated ${finalSlots.length} callout slots (no filler)`)
   
   return finalSlots
 }
@@ -302,7 +323,7 @@ function findGaps(sortedBends, totalDistance) {
     const gapMeters = distance - lastDistance
     const gapMiles = gapMeters / 1609.34
     
-    if (gapMiles >= 3) { // Minimum 3 miles to be notable
+    if (gapMiles >= 5) {
       gaps.push({
         startDistance: lastDistance,
         endDistance: distance,
@@ -314,19 +335,7 @@ function findGaps(sortedBends, totalDistance) {
     lastDistance = distance
   })
   
-  // Check gap from last bend to end of route
-  const finalGap = (totalDistance - lastDistance) / 1609.34
-  if (finalGap >= 3) {
-    gaps.push({
-      startDistance: lastDistance,
-      endDistance: totalDistance,
-      startMile: lastDistance / 1609.34,
-      endMile: totalDistance / 1609.34,
-      length: finalGap
-    })
-  }
-  
-  return gaps.sort((a, b) => b.length - a.length) // Longest first
+  return gaps.sort((a, b) => b.length - a.length)
 }
 
 /**
@@ -349,18 +358,17 @@ function pickTemplate(type, direction = null) {
  * Remove duplicate/overlapping callouts
  */
 function dedupeSlots(slots) {
-  // Sort by distance, then by priority
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
   const sorted = [...slots].sort((a, b) => {
     const distDiff = a.triggerDistance - b.triggerDistance
-    if (Math.abs(distDiff) < 100) { // Within 100m, sort by priority
+    if (Math.abs(distDiff) < 100) {
       return priorityOrder[a.priority] - priorityOrder[b.priority]
     }
     return distDiff
   })
   
-  // Remove callouts too close together (within 0.5 miles)
-  const minGap = 0.5 * 1609.34
+  // Remove callouts too close together (within 0.7 miles)
+  const minGap = 0.7 * 1609.34
   const deduped = []
   
   sorted.forEach(slot => {
@@ -404,19 +412,17 @@ function interpolatePosition(coordinates, distance, totalDistance) {
 }
 
 /**
- * Format slots for display (without AI polish)
+ * Format slots for display
  */
 export function formatSlotsForDisplay(slots) {
   return slots.map(slot => {
-    // For sweepers, ensure direction is in the text
-    let text = slot.aiText || slot.templateText
-    if (slot.type === CALLOUT_TYPE.SWEEPER && slot.context?.direction) {
-      const dir = slot.context.direction.toLowerCase()
-      // Verify the text contains the correct direction
-      if (!text.toLowerCase().includes(dir)) {
-        console.warn(`⚠️ Direction mismatch: slot says ${slot.context.direction} but text is "${text}"`)
-        // Force correct direction in template
-        text = `${slot.context.direction === 'LEFT' ? 'Left' : 'Right'} sweeper ahead`
+    let text = slot.templateText
+    
+    // For danger/sweeper with direction, ensure it's in the text
+    if (slot.context?.direction && !text.toLowerCase().includes(slot.context.direction.toLowerCase())) {
+      const dir = slot.context.direction === 'LEFT' ? 'Left' : 'Right'
+      if (slot.type === CALLOUT_TYPE.SWEEPER) {
+        text = `${dir} ${text.toLowerCase()}`
       }
     }
     
@@ -426,10 +432,10 @@ export function formatSlotsForDisplay(slots) {
       triggerDistance: slot.triggerDistance,
       triggerMile: slot.triggerMile,
       text,
-      shortText: text.substring(0, 30),
+      shortText: text.substring(0, 35),
       type: slot.type,
       priority: slot.priority,
-      direction: slot.context?.direction, // Expose direction for debugging
+      context: slot.context,
       isRuleBased: true
     }
   })
