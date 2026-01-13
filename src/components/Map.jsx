@@ -49,9 +49,12 @@ export default function Map() {
   const routeData = useStore(state => state.routeData)
   const routeZones = useStore(state => state.routeZones)
   const simulationProgress = useStore(state => state.simulationProgress)
+  
+  // Get highwayBends directly from store (set by Preview)
+  const highwayBends = useStore(state => state.highwayBends) || []
 
-  // NEW: Get highway bends from hook
-  const { highwayBends, isHighwayActive } = useHighwayMode()
+  // Get isHighwayActive from hook
+  const { isHighwayActive } = useHighwayMode()
 
   // Calculate current zone character for zoom adjustment
   const currentZoneCharacter = (() => {
@@ -506,20 +509,24 @@ export default function Map() {
     highwayMarkers.current.forEach(m => m.remove())
     highwayMarkers.current = []
 
+    console.log(`🗺️ Highway bend markers: ${highwayBends?.length || 0} bends available`)
+    
     if (!highwayBends?.length) return
 
     highwayBends.forEach((bend) => {
-      if (!bend.position) return
+      if (!bend.position) {
+        console.log(`🗺️ Skipping bend without position:`, bend.id)
+        return
+      }
       
       const el = document.createElement('div')
       
       if (bend.isSection) {
-        // SECTION marker - consolidated cluster
-        const bgColor = bend.character === 'technical' ? '#f59e0b' : 
-                       bend.character === 'challenging' ? '#ef4444' : HIGHWAY_BEND_COLOR
+        // SECTION marker - consolidated cluster - always "ACTIVE"
+        const bgColor = '#f59e0b'  // Amber/orange for active sections
         el.innerHTML = `
           <div style="display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,0.9);padding:4px 8px;border-radius:8px;border:2px solid ${bgColor};box-shadow:0 2px 10px ${bgColor}40;">
-            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">${bend.character}</span>
+            <span style="font-size:9px;font-weight:700;color:${bgColor};letter-spacing:0.5px;text-transform:uppercase;">ACTIVE</span>
             <span style="font-size:11px;font-weight:600;color:${bgColor};">${bend.bendCount} bends</span>
             <span style="font-size:9px;color:${bgColor}80;">${bend.length}m</span>
           </div>
@@ -553,6 +560,8 @@ export default function Map() {
       
       highwayMarkers.current.push(marker)
     })
+    
+    console.log(`🗺️ Highway bend markers: added ${highwayMarkers.current.length} markers`)
   }, [highwayBends, mapLoaded])
 
   return (
