@@ -264,7 +264,7 @@ function parseCurationResponse(content, flowData) {
     
     // Validate and enhance callouts with positions from flow data
     const callouts = (parsed.callouts || []).map(callout => {
-      // Find nearest event to get accurate position
+      // Find nearest event to get accurate position and zone
       const nearestEvent = flowData.events.reduce((nearest, event) => {
         const dist = Math.abs(event.apexMile - callout.mile)
         const nearestDist = nearest ? Math.abs(nearest.apexMile - callout.mile) : Infinity
@@ -280,6 +280,7 @@ function parseCurationResponse(content, flowData) {
         text: callout.text,
         reason: callout.reason,
         position: nearestEvent?.position || null,
+        zone: nearestEvent?.zoneType || 'transit', // Get zone from nearest event
         severity: callout.type === 'danger' ? 'critical' : 
                   callout.type === 'wake_up' ? 'medium' : 'high'
       }
