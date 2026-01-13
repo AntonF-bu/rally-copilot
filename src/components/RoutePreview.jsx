@@ -998,28 +998,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
   // Helper: Check if a distance is within a transit zone
-  const isInHighwayZone = useCallback((distance, segments) => {
+  const isInCuratedZone = useCallback((distance, segments) => {
     if (!segments?.length) return false
-    // Return true for transit, technical, or highway zones - curated callouts handle these
+    // Return true for ALL zones - curated callouts handle everything now
+    // Old markers are no longer used
     return segments.some(seg => 
-      (seg.character === 'transit' || seg.character === 'technical' || seg.character === 'highway') && 
       distance >= seg.startDistance && 
       distance <= seg.endDistance
     )
   }, [])
 
-  // Add curve markers - SKIP curves in highway/transit/technical zones (curated callouts handle those)
+  // Add curve markers - DISABLED: curated callouts handle all zones now
   const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
     
-    curves?.forEach(curve => {
-      if (!curve.position) return
-      
-      // Skip curves in highway/transit/technical zones - curated callouts handle these
-      if (isInHighwayZone(curve.distanceFromStart, segments)) {
-        return
-      }
+    // Skip ALL markers - curated callouts handle everything
+    // Old marker system is deprecated
+    return
       
       const color = getCurveColor(curve.severity)
       const el = document.createElement('div')
@@ -1080,39 +1076,38 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Color based on type
+      // Muted colors - darker, more subtle
       const colors = {
-        danger: '#ef4444',    // Red for danger
-        significant: '#f59e0b', // Amber for significant
-        sweeper: '#3b82f6',   // Blue for sweepers
-        wake_up: '#10b981',   // Green for wake-up
-        section: '#8b5cf6',   // Purple for sections
-        sequence: '#ec4899'   // Pink for sequences
+        danger: '#dc2626',    // Darker red
+        significant: '#d97706', // Darker amber
+        sweeper: '#2563eb',   // Darker blue
+        wake_up: '#059669',   // Darker green
+        section: '#7c3aed',   // Darker purple
+        sequence: '#db2777'   // Darker pink
       }
       const color = colors[callout.type] || colors.sweeper
       
       // Short label: just direction + angle or type indicator
       const shortLabel = getShortLabel(callout)
       
-      // Outline style matching the bottom pills aesthetic
+      // Dark glass style - subtle and clean
       el.innerHTML = `
         <div style="
           display:flex;
           align-items:center;
           justify-content:center;
-          background:${color}30;
-          padding:4px 8px;
-          border-radius:6px;
-          border:1.5px solid ${color};
-          box-shadow:0 2px 8px rgba(0,0,0,0.5);
+          background:rgba(0,0,0,0.75);
+          padding:3px 6px;
+          border-radius:4px;
+          border:1.5px solid ${color}90;
+          box-shadow:0 2px 6px rgba(0,0,0,0.4);
           cursor:pointer;
           transition:all 0.15s;
-          backdrop-filter:blur(4px);
         " 
-        onmouseover="this.style.transform='scale(1.1)';this.style.background='${color}50'" 
-        onmouseout="this.style.transform='scale(1)';this.style.background='${color}30'"
+        onmouseover="this.style.borderColor='${color}';this.style.background='rgba(0,0,0,0.9)'" 
+        onmouseout="this.style.borderColor='${color}90';this.style.background='rgba(0,0,0,0.75)'"
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:10px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
+          <span style="font-size:9px;font-weight:600;color:${color};white-space:nowrap;">${shortLabel}</span>
         </div>
       `
       
@@ -1523,16 +1518,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - outline style to match existing UI */}
+            {/* Callout pills - dark muted style */}
             <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
+                // Muted colors matching map markers
                 const colors = {
-                  danger: '#ef4444',
-                  significant: '#f59e0b',
-                  sweeper: '#3b82f6',
-                  wake_up: '#10b981',
-                  section: '#8b5cf6',
-                  sequence: '#ec4899'
+                  danger: '#dc2626',
+                  significant: '#d97706',
+                  sweeper: '#2563eb',
+                  wake_up: '#059669',
+                  section: '#7c3aed',
+                  sequence: '#db2777'
                 }
                 const color = colors[callout.type] || '#6b7280'
                 
@@ -1557,11 +1553,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-semibold whitespace-nowrap transition-all hover:scale-105"
+                    className="px-1.5 py-0.5 rounded text-[9px] font-semibold whitespace-nowrap transition-all hover:opacity-80"
                     style={{ 
-                      background: `${color}20`, 
+                      background: 'rgba(0,0,0,0.6)', 
                       color: color,
-                      border: `1px solid ${color}50`
+                      border: `1px solid ${color}70`
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
