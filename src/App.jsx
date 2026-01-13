@@ -165,10 +165,8 @@ export default function App() {
       distanceAlong += Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters)
     }
     
-    // Debug log every few seconds
-    if (Math.random() < 0.1) {
-      console.log(`📍 Distance calc: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m, minDist=${minDist.toFixed(6)}`)
-    }
+    // Debug log ALWAYS for troubleshooting
+    console.log(`📍 App.jsx Distance: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m, position=[${position[0].toFixed(5)}, ${position[1].toFixed(5)}]`)
     
     setUserDistanceAlongRoute(distanceAlong)
     
