@@ -152,9 +152,18 @@ export default function App() {
       }
     }
     
-    // Estimate distance along route
-    const totalDist = routeData.distance || 15000
-    const distanceAlong = (closestIdx / coords.length) * totalDist
+    // Calculate actual distance along route to closest point
+    // by summing segment lengths instead of assuming uniform distribution
+    let distanceAlong = 0
+    for (let i = 0; i < closestIdx && i < coords.length - 1; i++) {
+      const dx = coords[i + 1][0] - coords[i][0]
+      const dy = coords[i + 1][1] - coords[i][1]
+      // Convert degrees to meters (approximate at this latitude)
+      const dxMeters = dx * 111320 * Math.cos(coords[i][1] * Math.PI / 180)
+      const dyMeters = dy * 110540
+      distanceAlong += Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters)
+    }
+    
     setUserDistanceAlongRoute(distanceAlong)
     
   }, [isRunning, position, routeData, isDemoMode])
