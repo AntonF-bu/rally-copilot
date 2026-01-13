@@ -279,24 +279,32 @@ export function getZoneAtPosition(position, cachedTracts, roadInfo = null) {
 
 /**
  * Determine route character based on density and road type
- * UPDATED: No more SPIRITED - suburban maps to TECHNICAL
+ * UPDATED: Smarter highway detection
  */
 function determineCharacter(densityCategory, roadInfo) {
-  const isHighway = roadInfo && 
-    (['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadInfo.roadClass) ||
-     roadInfo.speedLimit >= 55)
+  // Smarter highway detection
+  const isDefinitelyHighway = roadInfo && 
+    ['motorway', 'trunk'].includes(roadInfo.roadClass)
+  
+  const isHighwayLink = roadInfo && 
+    ['motorway_link', 'trunk_link'].includes(roadInfo.roadClass) &&
+    roadInfo.speedLimit >= 45
+  
+  const isPrimaryHighSpeed = roadInfo &&
+    roadInfo.roadClass === 'primary' && 
+    roadInfo.speedLimit >= 55
 
-  // Highways are TRANSIT even in urban areas
-  if (isHighway) {
+  // Highways are TRANSIT
+  if (isDefinitelyHighway || isHighwayLink || isPrimaryHighSpeed) {
     return ROUTE_CHARACTER.TRANSIT
   }
 
-  // Map density to character - UPDATED: suburban now maps to TECHNICAL
+  // Map density to character
   switch (densityCategory) {
     case 'urban':
       return ROUTE_CHARACTER.URBAN
     case 'suburban':
-      return ROUTE_CHARACTER.TECHNICAL  // Was SPIRITED, now TECHNICAL
+      return ROUTE_CHARACTER.TECHNICAL
     case 'rural':
     default:
       return ROUTE_CHARACTER.TECHNICAL
@@ -305,7 +313,7 @@ function determineCharacter(densityCategory, roadInfo) {
 
 /**
  * Fallback classification when no census data available
- * UPDATED: No more SPIRITED
+ * UPDATED: Smarter highway detection
  */
 function classifyByRoadInfo(roadInfo) {
   if (!roadInfo) {
@@ -317,15 +325,18 @@ function classifyByRoadInfo(roadInfo) {
     }
   }
 
-  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadInfo.roadClass)
+  // Smarter highway detection
+  const isDefinitelyHighway = ['motorway', 'trunk'].includes(roadInfo.roadClass)
+  const isHighwayLink = ['motorway_link', 'trunk_link'].includes(roadInfo.roadClass) && 
+    roadInfo.speedLimit >= 45
+  const isPrimaryHighSpeed = roadInfo.roadClass === 'primary' && roadInfo.speedLimit >= 55
   
   let character
-  if (isHighway || roadInfo.speedLimit >= 55) {
+  if (isDefinitelyHighway || isHighwayLink || isPrimaryHighSpeed) {
     character = ROUTE_CHARACTER.TRANSIT
-  } else if (roadInfo.speedLimit <= 25) {
+  } else if (roadInfo.speedLimit <= 30) {
     character = ROUTE_CHARACTER.URBAN
   } else {
-    // Everything else is TECHNICAL (was SPIRITED for speed >= 45)
     character = ROUTE_CHARACTER.TECHNICAL
   }
 
@@ -408,45 +419,56 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
 /**
  * Final classification considering census density + road characteristics + curves
  * UPDATED: No more SPIRITED
- * FIXED: Highway classification takes priority over curve density
+ * FIXED: Smarter highway detection - not just speed/road class alone
  */
 function finalClassifyPoint(point) {
   const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity, curveMaxSeverity } = point
   
-  // FIRST: Check if this is a highway based on road class or speed
-  // This takes PRIORITY - highways have curves too (interchanges, ramps)
-  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
+  // HIGHWAY detection - be more careful:
+  // - motorway = definitely highway
+  // - trunk = major road, usually highway-like
+  // - motorway_link/trunk_link = ramps, could go either way
+  // - speedLimit alone is NOT enough (rural roads can be 55mph)
   
-  if (isHighway || speedLimit >= 55) {
-    // This IS a highway - don't let curves override this
-    // Highway interchanges have sharp curves but are still highways!
+  const isDefinitelyHighway = ['motorway', 'trunk'].includes(roadClass)
+  const isHighwayLink = ['motorway_link', 'trunk_link'].includes(roadClass)
+  
+  // Definite highways are always TRANSIT
+  if (isDefinitelyHighway) {
     return ROUTE_CHARACTER.TRANSIT
   }
   
-  // NOT a highway - now consider curves and density
+  // Highway links (ramps) - classify as TRANSIT only if speed is high
+  // Ramps at the end of a journey might have lower speeds
+  if (isHighwayLink && speedLimit >= 45) {
+    return ROUTE_CHARACTER.TRANSIT
+  }
   
-  // Sharp curves on non-highways
-  if (curveMaxSeverity >= 4) {
-    if (densityCategory === 'urban') {
-      return ROUTE_CHARACTER.URBAN
-    }
-    return ROUTE_CHARACTER.TECHNICAL
+  // High speed roads that are primary class = likely highway
+  if (roadClass === 'primary' && speedLimit >= 55) {
+    return ROUTE_CHARACTER.TRANSIT
   }
-
-  // TECHNICAL: Rural/low-density areas = the fun twisty roads
-  if (densityCategory === 'rural') {
-    return ROUTE_CHARACTER.TECHNICAL
-  }
-
-  // Suburban maps to TECHNICAL
-  if (densityCategory === 'suburban') {
-    return ROUTE_CHARACTER.TECHNICAL
-  }
-
-  // Urban density = URBAN
+  
+  // NOT a highway from here - use density and road characteristics
+  
+  // Urban areas
   if (densityCategory === 'urban') {
     return ROUTE_CHARACTER.URBAN
   }
+  
+  // Suburban areas with low speeds = likely urban-ish
+  if (densityCategory === 'suburban' && speedLimit <= 35) {
+    return ROUTE_CHARACTER.URBAN
+  }
+  
+  // Rural or suburban with higher speeds = TECHNICAL (fun roads)
+  if (densityCategory === 'rural' || densityCategory === 'suburban') {
+    return ROUTE_CHARACTER.TECHNICAL
+  }
+
+  // Fallback to TECHNICAL
+  return point.character || ROUTE_CHARACTER.TECHNICAL
+}
 
   // Fallback to TECHNICAL
   return point.character || ROUTE_CHARACTER.TECHNICAL
