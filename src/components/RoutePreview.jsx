@@ -11,13 +11,14 @@ import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/ll
 import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from '../services/highwayCalloutGenerator'
 import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
 import { dumpHighwayData } from '../services/highwayDataDebug'
+import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlowAnalyzer'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v23
-// NEW: Debug data dump for AI training
+// Route Preview - v24
+// NEW: Road Flow Analyzer (continuous sampling)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -284,44 +285,45 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         setHighwayBends(rawBends)
         updateStage('highway', 'complete')
         
-        // DEBUG: Dump all highway data for analysis
-        console.log('🔍 Dumping highway data for analysis...')
+        // DEBUG: Dump all highway data for analysis (OLD SYSTEM)
+        console.log('🔍 Dumping highway data for analysis (OLD)...')
         const debugData = dumpHighwayData(rawBends, activeZones, routeData)
-        
-        // Store debug data globally for easy access in console
         window.__highwayDebugData = debugData
-        console.log('💡 Access full data with: window.__highwayDebugData')
         
-        // Step 4: Generate callout slots (rule-based, instant)
-        if (rawBends.length > 0) {
+        // NEW: Road Flow Analyzer (continuous sampling)
+        console.log('\n🌊 Running NEW Road Flow Analyzer...')
+        const flowResult = analyzeRoadFlow(coordinates, activeZones, routeData.distance)
+        const flowCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
+        
+        // Store for comparison
+        window.__roadFlowData = flowResult
+        window.__flowCallouts = flowCallouts
+        console.log('💡 Compare: window.__highwayDebugData (old) vs window.__roadFlowData (new)')
+        console.log('💡 Callouts: window.__flowCallouts')
+        
+        // Step 4: Generate callout slots - USE NEW FLOW SYSTEM
+        if (flowCallouts.length > 0) {
           updateStage('aiCurves', 'loading')
-          console.log('📋 Generating callout slots (rule-based)...')
+          console.log('📋 Using NEW flow-based callouts...')
           
           try {
-            // RULES: Generate slots with positions
-            const slots = generateCalloutSlots(rawBends, activeZones, routeData)
-            const slotsWithPositions = addPositionsToSlots(slots, coordinates, routeData.distance)
+            // Format flow callouts for display
+            const formattedCallouts = flowCallouts.map(c => ({
+              id: c.id,
+              position: c.position,
+              triggerDistance: c.triggerDistance,
+              triggerMile: c.triggerMile,
+              text: c.text,
+              shortText: c.text.substring(0, 35),
+              type: c.type,
+              priority: c.severity,
+              direction: c.direction,
+              totalAngle: c.totalAngle,
+              shape: c.shape,
+              isFlowBased: true
+            }))
             
-            console.log(`📋 Generated ${slotsWithPositions.length} slots`)
-            slotsWithPositions.forEach(s => {
-              console.log(`   📍 Mile ${s.triggerMile.toFixed(1)}: ${s.type} - "${s.templateText}"`)
-            })
-            
-            // AI POLISH: DISABLED - templates are more accurate than AI-generated text
-            // The AI was changing directions and adding filler that didn't match the data
-            let finalSlots = slotsWithPositions
-            // if (hasLLMApiKey()) {
-            //   console.log('✨ Attempting AI polish...')
-            //   finalSlots = await polishCalloutsWithAI(slotsWithPositions, {
-            //     routeData,
-            //     zones: activeZones
-            //   }, getLLMApiKey())
-            // }
-            
-            // Format for display
-            const formattedCallouts = formatSlotsForDisplay(finalSlots)
-            
-            console.log(`✅ Final callouts: ${formattedCallouts.length}`)
+            console.log(`✅ Flow callouts: ${formattedCallouts.length}`)
             formattedCallouts.forEach(c => {
               console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" [${c.type}] pos=${c.position}`)
             })
@@ -329,11 +331,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             setCuratedCallouts(formattedCallouts)
             setAgentResult({
               summary: {
-                summary: `${formattedCallouts.length} callouts generated`,
-                rhythm: 'Rule-based v2.0 (no AI polish)',
+                summary: `${formattedCallouts.length} callouts (flow-based)`,
+                rhythm: 'Road Flow Analyzer v1.0',
                 difficulty: 'auto'
               },
-              reasoning: [`Generated ${slots.length} slots from rules v2.0`],
+              reasoning: [`Detected ${flowResult.events.length} road events`, `Generated ${formattedCallouts.length} callouts`],
               confidence: 98
             })
             setCurveEnhanced(true)
@@ -342,7 +344,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
             
           } catch (genErr) {
-            console.warn('⚠️ Callout generation failed:', genErr)
+            console.warn('⚠️ Flow callout generation failed:', genErr)
           }
           updateStage('aiCurves', 'complete')
         }
