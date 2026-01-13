@@ -16,30 +16,31 @@ export const SAMPLE_INTERVALS = {
 }
 
 // Thresholds for what counts as a "turn" by zone
+// These are DETECTION thresholds - LLM decides what to actually call out
 export const TURN_THRESHOLDS = {
   highway: {
-    minAngle: 15,        // Ignore turns under 15°
-    sweeper: 20,         // 20°+ = notable sweeper
-    significant: 35,     // 35°+ = significant curve
-    danger: 50           // 50°+ = serious, warn early
+    minAngle: 12,        // Lowered - catch more, let LLM filter
+    sweeper: 18,         // 18°+ = notable sweeper
+    significant: 30,     // 30°+ = significant curve
+    danger: 45           // 45°+ = serious, warn early
   },
   transit: {
-    minAngle: 15,
-    sweeper: 20,
-    significant: 35,
-    danger: 50
+    minAngle: 12,        // Same as highway - catch gentle curves too
+    sweeper: 18,
+    significant: 30,
+    danger: 45
   },
   urban: {
-    minAngle: 25,        // Urban has lots of turns, higher threshold
-    sweeper: 40,
-    significant: 60,
-    danger: 80
+    minAngle: 40,        // Urban still high - lots of turns expected
+    sweeper: 50,
+    significant: 70,
+    danger: 90
   },
   technical: {
-    minAngle: 10,        // Technical - call more stuff
-    sweeper: 15,
-    significant: 25,
-    danger: 40
+    minAngle: 8,         // Technical - catch everything
+    sweeper: 12,
+    significant: 20,
+    danger: 35
   }
 }
 
