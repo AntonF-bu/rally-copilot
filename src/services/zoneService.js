@@ -608,17 +608,31 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
 
   const segments = []
   let currentSegment = null
+  let segmentPoints = []  // Track all points in current segment
 
   classifiedPoints.forEach((point, i) => {
     if (!currentSegment || currentSegment.character !== point.character) {
       if (currentSegment) {
+        // Finalize previous segment with collected data
         currentSegment.endIndex = point.index
         currentSegment.endDistance = point.distance
         currentSegment.coordinates = fullCoordinates.slice(
           currentSegment.startIndex, 
           Math.min(point.index + 1, fullCoordinates.length)
         )
+        
+        // Collect all road names and classes from segment points
+        const roadNames = segmentPoints.map(p => p.roadName).filter(Boolean)
+        const roadClasses = segmentPoints.map(p => p.roadClass).filter(Boolean)
+        const speedLimits = segmentPoints.map(p => p.speedLimit).filter(Boolean)
+        
+        currentSegment.details.roadNames = [...new Set(roadNames)]
+        currentSegment.details.roadClasses = [...new Set(roadClasses)]
+        currentSegment.details.minSpeedLimit = speedLimits.length > 0 ? Math.min(...speedLimits) : null
+        currentSegment.details.maxSpeedLimit = speedLimits.length > 0 ? Math.max(...speedLimits) : null
+        
         segments.push(currentSegment)
+        segmentPoints = []  // Reset for next segment
       }
       
       currentSegment = {
@@ -631,16 +645,22 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
           avgSpeedLimit: point.speedLimit,
           density: point.density,
           densityCategory: point.densityCategory,
-          avgCurveDensity: point.curveDensity
+          avgCurveDensity: point.curveDensity,
+          roadNames: [],
+          roadClasses: []
         }
       }
+      segmentPoints = [point]
     } else {
+      // Add point to current segment
+      segmentPoints.push(point)
+      
       // Update running averages
-      const count = i - classifiedPoints.findIndex(p => p.index === currentSegment.startIndex) + 1
+      const count = segmentPoints.length
       currentSegment.details.avgSpeedLimit = 
-        (currentSegment.details.avgSpeedLimit * (count - 1) + point.speedLimit) / count
+        segmentPoints.reduce((sum, p) => sum + (p.speedLimit || 0), 0) / count
       currentSegment.details.avgCurveDensity = 
-        (currentSegment.details.avgCurveDensity * (count - 1) + point.curveDensity) / count
+        segmentPoints.reduce((sum, p) => sum + (p.curveDensity || 0), 0) / count
     }
   })
 
@@ -652,6 +672,18 @@ function segmentByCharacter(classifiedPoints, fullCoordinates) {
       currentSegment.startIndex,
       fullCoordinates.length
     )
+    
+    // Collect road data for final segment
+    segmentPoints.push(lastPoint)
+    const roadNames = segmentPoints.map(p => p.roadName).filter(Boolean)
+    const roadClasses = segmentPoints.map(p => p.roadClass).filter(Boolean)
+    const speedLimits = segmentPoints.map(p => p.speedLimit).filter(Boolean)
+    
+    currentSegment.details.roadNames = [...new Set(roadNames)]
+    currentSegment.details.roadClasses = [...new Set(roadClasses)]
+    currentSegment.details.minSpeedLimit = speedLimits.length > 0 ? Math.min(...speedLimits) : null
+    currentSegment.details.maxSpeedLimit = speedLimits.length > 0 ? Math.max(...speedLimits) : null
+    
     segments.push(currentSegment)
   }
 
@@ -672,10 +704,26 @@ function mergeShortSegments(segments, minLengthMeters) {
       prev.endIndex = seg.endIndex
       prev.endDistance = seg.endDistance
       prev.coordinates = [...prev.coordinates, ...seg.coordinates.slice(1)]
+      
+      // Merge road names and classes
+      if (seg.details?.roadNames) {
+        prev.details.roadNames = [...new Set([...(prev.details.roadNames || []), ...seg.details.roadNames])]
+      }
+      if (seg.details?.roadClasses) {
+        prev.details.roadClasses = [...new Set([...(prev.details.roadClasses || []), ...seg.details.roadClasses])]
+      }
     } else if (segLength < minLengthMeters && i < segments.length - 1) {
       segments[i + 1].startIndex = seg.startIndex
       segments[i + 1].startDistance = seg.startDistance
       segments[i + 1].coordinates = [...seg.coordinates, ...segments[i + 1].coordinates.slice(1)]
+      
+      // Merge road names and classes forward
+      if (seg.details?.roadNames) {
+        segments[i + 1].details.roadNames = [...new Set([...seg.details.roadNames, ...(segments[i + 1].details.roadNames || [])])]
+      }
+      if (seg.details?.roadClasses) {
+        segments[i + 1].details.roadClasses = [...new Set([...seg.details.roadClasses, ...(segments[i + 1].details.roadClasses || [])])]
+      }
     } else {
       merged.push(seg)
     }
