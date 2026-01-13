@@ -63,6 +63,9 @@ const useStore = create(
       // These are the FINAL callouts to show, after LLM merges/filters raw bends
       curatedHighwayCallouts: [],
       
+      // AI Agent briefing result (full analysis)
+      agentBriefing: null,
+      
       // LLM-generated callout variants (not persisted - computed in Preview)
       // Format: { "curve-id": ["variant1", "variant2", "variant3"] }
       calloutVariants: {},
@@ -196,6 +199,11 @@ const useStore = create(
       setCuratedHighwayCallouts: (callouts) => set({ curatedHighwayCallouts: callouts }),
       
       clearCuratedHighwayCallouts: () => set({ curatedHighwayCallouts: [] }),
+      
+      // ========== AI Agent Briefing Actions ==========
+      setAgentBriefing: (briefing) => set({ agentBriefing: briefing }),
+      
+      clearAgentBriefing: () => set({ agentBriefing: null }),
       
       // ========== Callout Variants Actions ==========
       setCalloutVariants: (variants) => set({ calloutVariants: variants }),
