@@ -296,11 +296,14 @@ function applyDecisions(originalSegments, llmDecisions) {
   const changes = []
   const decisions = llmDecisions?.decisions || []
   
+  console.log(`📋 Applying ${decisions.length} LLM decisions to ${originalSegments.length} segments`)
+  
   // Create map of decisions by index
   const decisionMap = new Map()
   decisions.forEach(d => {
     if (typeof d.segmentIndex === 'number') {
       decisionMap.set(d.segmentIndex, d)
+      console.log(`   Decision for seg ${d.segmentIndex}: current="${d.currentClassification}" → new="${d.newClassification}"`)
     }
   })
   
@@ -313,17 +316,22 @@ function applyDecisions(originalSegments, llmDecisions) {
       return seg
     }
     
-    // Map classification names
+    // Map classification names - handle various formats
     let newChar = seg.character
-    const newClassLower = decision.newClassification?.toLowerCase()
+    const newClassRaw = decision.newClassification || ''
+    const newClassLower = newClassRaw.toLowerCase().trim()
     
-    if (newClassLower === 'highway' || newClassLower === 'transit') {
+    console.log(`   Seg ${i}: current char="${seg.character}", LLM says="${newClassRaw}" (normalized="${newClassLower}")`)
+    
+    if (newClassLower === 'highway' || newClassLower === 'transit' || newClassLower === 'hwy') {
       newChar = 'transit'
-    } else if (newClassLower === 'technical') {
+    } else if (newClassLower === 'technical' || newClassLower === 'tech') {
       newChar = 'technical'
     } else if (newClassLower === 'urban') {
       newChar = 'urban'
     }
+    
+    console.log(`   Seg ${i}: mapped to newChar="${newChar}", will change=${newChar !== seg.character}`)
     
     // Check if this is actually a change
     if (newChar !== seg.character) {
@@ -345,6 +353,8 @@ function applyDecisions(originalSegments, llmDecisions) {
       llmReason: decision.reason
     }
   })
+  
+  console.log(`📋 Applied changes: ${changes.length}`)
   
   return { enhanced, changes }
 }
