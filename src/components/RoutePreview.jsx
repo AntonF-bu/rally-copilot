@@ -998,16 +998,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
 
   // Helper: Check if a distance is within a transit zone
-  const isInTransitZone = useCallback((distance, segments) => {
+  const isInHighwayZone = useCallback((distance, segments) => {
     if (!segments?.length) return false
+    // Return true for transit, technical, or highway zones - curated callouts handle these
     return segments.some(seg => 
-      seg.character === 'transit' && 
+      (seg.character === 'transit' || seg.character === 'technical' || seg.character === 'highway') && 
       distance >= seg.startDistance && 
       distance <= seg.endDistance
     )
   }, [])
 
-  // Add curve markers - SKIP curves in transit zones
+  // Add curve markers - SKIP curves in highway/transit/technical zones (curated callouts handle those)
   const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
@@ -1015,8 +1016,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     curves?.forEach(curve => {
       if (!curve.position) return
       
-      // Skip curves in transit/highway zones
-      if (isInTransitZone(curve.distanceFromStart, segments)) {
+      // Skip curves in highway/transit/technical zones - curated callouts handle these
+      if (isInHighwayZone(curve.distanceFromStart, segments)) {
         return
       }
       
@@ -1032,7 +1033,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       el.onclick = () => handleCurveClick(curve)
       markersRef.current.push(new mapboxgl.Marker({ element: el, anchor: 'bottom' }).setLngLat(curve.position).addTo(map))
     })
-  }, [isInTransitZone])
+  }, [isInHighwayZone])
 
   // Add highway markers - NOW SHOWS CURATED CALLOUTS (not raw bends)
   const addHighwayBendMarkers = useCallback((map, callouts) => {
