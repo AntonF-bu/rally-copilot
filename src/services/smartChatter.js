@@ -603,8 +603,11 @@ export function getSmartChatter(data) {
     speedLimit = 65
   } = data
   
-  // Don't chatter if not moving much
-  if (speed < 20) return null
+  // Don't chatter if not moving much (lowered for testing)
+  if (speed < 5) {
+    console.log('🎤 smartChatter: speed too low', speed)
+    return null
+  }
   
   // Update session data
   updateChatterData({ 
