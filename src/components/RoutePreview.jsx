@@ -10,6 +10,7 @@ import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeServic
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
+import { enhanceCurvesWithLLM, shouldEnhanceCurves, hasLLMApiKey as hasCurveApiKey } from '../services/llmCurveService'
 
 // ================================
 // Route Preview - v18
@@ -46,6 +47,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
+  const [curveEnhanced, setCurveEnhanced] = useState(false)
+  const [curveEnhancementResult, setCurveEnhancementResult] = useState(null)
   
   // Highway bends - LOCAL state for UI
   const [highwayBends, setHighwayBendsLocal] = useState([])
@@ -610,6 +613,66 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       console.log(`🔧 Post-LLM: Trusting zone decisions as-is`)
       
       setCopilotProgress(20)
+
+      // ========================================
+      // PHASE 1.5: LLM Curve Enhancement (NEW!)
+      // ========================================
+      if (hasLLMApiKey() && shouldEnhanceCurves({ curves: routeData?.curves, highwayBends })) {
+        setCopilotProgress(25)
+        setCopilotStatus('🤖 AI enhancing curves...')
+        console.log('🤖 Starting LLM curve enhancement...')
+        
+        try {
+          const curveResult = await enhanceCurvesWithLLM({
+            curves: routeData?.curves || [],
+            highwayBends: highwayBends,
+            zones: routeCharacter.segments,
+            routeData
+          }, getLLMApiKey())
+          
+          setCurveEnhancementResult(curveResult)
+          
+          // Apply enhanced curves if there were changes
+          if (curveResult.changes?.length > 0) {
+            console.log(`🤖 Curve enhancement made ${curveResult.changes.length} changes`)
+            curveResult.changes.forEach(c => console.log(`   - ${c}`))
+            
+            setCurveEnhanced(true)
+            
+            // Update curves in route data
+            if (curveResult.curves) {
+              useStore.getState().setRouteData({
+                ...routeData,
+                curves: curveResult.curves
+              })
+            }
+            
+            // Update highway bends
+            if (curveResult.highwayBends) {
+              setHighwayBends(curveResult.highwayBends)
+            }
+            
+            // Store callout variants for navigation to use
+            if (curveResult.calloutVariants && Object.keys(curveResult.calloutVariants).length > 0) {
+              useStore.getState().setCalloutVariants(curveResult.calloutVariants)
+            }
+          } else {
+            console.log('🤖 Curve enhancement: no changes needed')
+          }
+        } catch (curveErr) {
+          console.warn('⚠️ LLM curve enhancement failed:', curveErr)
+          // Continue without enhancement - graceful fallback
+        }
+        
+        setCopilotProgress(35)
+      } else {
+        if (!hasLLMApiKey()) {
+          console.log('ℹ️ No API key - skipping curve enhancement')
+        } else {
+          console.log('ℹ️ Route does not need curve enhancement')
+        }
+        setCopilotProgress(35)
+      }
       
       // ========================================
       // PHASE 2: Voice Preloading
