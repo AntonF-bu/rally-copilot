@@ -22,14 +22,14 @@ export default function PreviewLoader({
 
   if (!isLoading) return null
 
-  // Stage definitions with icons
+  // Stage definitions (no emojis for clean look)
   const stageConfig = [
-    { key: 'route', label: 'Loading route', icon: '🛣️' },
-    { key: 'curves', label: 'Detecting curves', icon: '↩️' },
-    { key: 'zones', label: 'Analyzing zones', icon: '📍' },
-    { key: 'aiZones', label: 'AI zone validation', icon: '🤖' },
-    { key: 'highway', label: 'Finding sweepers', icon: '🛤️' },
-    { key: 'aiCurves', label: 'AI curve enhancement', icon: '✨' },
+    { key: 'route', label: 'Loading route' },
+    { key: 'curves', label: 'Detecting curves' },
+    { key: 'zones', label: 'Analyzing zones' },
+    { key: 'aiZones', label: 'AI zone validation' },
+    { key: 'highway', label: 'Finding sweepers' },
+    { key: 'aiCurves', label: 'AI curve enhancement' },
   ]
 
   // Find current active stage
@@ -99,9 +99,6 @@ export default function PreviewLoader({
                     <div className="w-3 h-3 rounded-full bg-white/20" />
                   )}
                 </div>
-                
-                {/* Icon */}
-                <span className="text-base">{stage.icon}</span>
                 
                 {/* Label */}
                 <span className={`text-sm flex-1 ${isActive ? 'text-white' : 'text-white/70'}`}>
