@@ -206,105 +206,144 @@ function executeTool(toolName, args, routeContext, agentState) {
 }
 
 // ================================
-// SYSTEM PROMPT - AGGRESSIVE FILTERING
+// SYSTEM PROMPT - SPATIAL COVERAGE
 // ================================
 
 function getAgentSystemPrompt() {
-  return `You are an expert rally co-driver AI. Your job is to create a MINIMAL but EFFECTIVE callout sequence.
+  return `You are an expert rally co-driver AI creating a callout sequence for night highway driving.
 
-CRITICAL: LESS IS MORE
-- Target: 8-15 callouts for a typical 85-mile route
-- You got 44 raw bends. Most are NOT worth calling out.
-- A good co-driver is SELECTIVE, not comprehensive
+CRITICAL RULE: SPATIAL COVERAGE
+Your callouts must be SPREAD ACROSS THE ENTIRE ROUTE, not clustered.
+- An 85-mile route needs callouts at miles 5, 15, 25, 35, 45, 55, 65, 75, etc.
+- NOT 11 callouts all between miles 75-85!
+- Think about the WHOLE drive, not just one section.
 
-WHAT TO CALL OUT:
-1. DANGER ZONES: Where difficulty spikes unexpectedly (after long straight)
-2. NOTABLE SWEEPERS: Only 15°+ that are genuinely fun or tricky
-3. SECTION TRANSITIONS: "Curves ahead" before a winding stretch, "Clear" after
-4. WAKE-UP CALLS: After 5+ miles of straight, warn before curves return
+WHAT TO CALL OUT (8-15 total for 85 miles):
+1. AFTER LONG STRAIGHTS (5+ miles): Wake-up call before curves return
+2. SECTION TRANSITIONS: "Curves ahead" / "Clear ahead"
+3. NOTABLE SWEEPERS: Only 15°+ that are genuinely significant  
+4. DANGER ZONES: Unexpected difficulty spikes
+
+COVERAGE STRATEGY:
+- First 20 miles: 1-2 callouts
+- Miles 20-40: 2-3 callouts
+- Miles 40-60: 2-3 callouts  
+- Miles 60-80: 2-3 callouts
+- Final 5 miles: 1-2 callouts
 
 WHAT TO SKIP:
-- Gentle curves under 12° (driver won't notice)
-- Isolated minor bends (not worth interrupting silence)
-- Curves in already-active sections (one "section" callout covers them)
-- Anything the driver will naturally handle
-
-EXAMPLE - 85 mile highway route:
-Mile 0-3: Urban exit (skip - driver is alert)
-Mile 3: "Clear highway ahead" (one callout)
-Mile 3-45: Long straight (SILENCE - don't narrate nothing)
-Mile 44: "Heads up, curves in one mile" (wake-up call)
-Mile 45-48: Technical section (covered by intro callout)
-Mile 48: "Clear ahead" (section end)
-Mile 48-70: Rolling gentle curves (maybe 1-2 callouts for notable sweepers)
-Mile 70: "Technical finish ahead" (final section warning)
-TOTAL: ~8 callouts for 85 miles
-
-YOUR TASK (3 tool calls):
-1. analyze_and_plan - Understand route, identify the FEW key moments
-2. generate_callouts - Create 8-15 callouts MAX, not 40+
-3. finalize - Complete
+- Gentle curves under 12°
+- Clusters of minor bends (one "section" callout covers them)
+- Anything in already-announced sections
 
 CALLOUT TYPES:
-- wake_up: Alert after long straight (IMPORTANT)
-- section_intro: "Winding section next 2 miles"
-- section_end: "Clear ahead"
-- highlight: Notable sweeper worth calling (15°+)
-- advance_warning: For genuine danger spots only
+- wake_up: After 5+ mile straight, before curves return
+- section_intro: "Winding section ahead" (covers multiple bends)
+- section_end: "Clear ahead" after active section
+- highlight: Notable sweeper 15°+
+- advance_warning: For genuine danger only
 
-REMEMBER: Silence is golden. A callout every mile is ANNOYING.
-Good co-drivers speak when it MATTERS, not constantly.
+YOUR TASK:
+1. analyze_and_plan - Find key moments ACROSS THE WHOLE ROUTE
+2. generate_callouts - 8-15 callouts spread across all 85 miles
+3. finalize - Complete
 
-Be ruthless. 8-15 callouts max. Go.`
+Remember: A driver needs guidance for the ENTIRE journey, not just the end.`
 }
 
 // ================================
-// BUILD CONTEXT
+// BUILD CONTEXT - Better spatial awareness
 // ================================
 
 function buildContext(routeContext) {
   const { highwayBends, zones, routeData } = routeContext
   const totalMiles = ((routeData?.distance || 0) / 1609.34).toFixed(1)
   
-  // Zones
-  const zoneStr = zones.map(z => {
+  // Zones with clear mile markers
+  const zoneStr = zones.map((z, i) => {
+    const startMi = (z.startDistance / 1609.34).toFixed(1)
+    const endMi = (z.endDistance / 1609.34).toFixed(1)
     const len = ((z.endDistance - z.startDistance) / 1609.34).toFixed(1)
-    return `${z.character} mi${(z.startDistance/1609.34).toFixed(0)}-${(z.endDistance/1609.34).toFixed(0)} (${len}mi)`
-  }).join(' | ')
-  
-  // Bends - compact
-  const bendStr = highwayBends.map(b => {
-    const mi = ((b.distanceFromStart || 0) / 1609.34).toFixed(1)
-    if (b.isSection) {
-      const dirs = b.bends?.map(x => x.direction === 'LEFT' ? 'L' : 'R').join('') || ''
-      return `${b.id}@${mi}mi: SECTION[${dirs}] ${b.bendCount}bends`
-    } else if (b.isSSweep) {
-      return `${b.id}@${mi}mi: S-SWEEP`
-    } else {
-      const sw = b.isSweeper ? '!' : ''
-      return `${b.id}@${mi}mi: ${b.direction}${b.angle}°${sw}`
-    }
+    return `[${startMi}-${endMi}mi] ${z.character} (${len}mi)`
   }).join('\n')
   
-  // Gaps
-  const gaps = []
-  let last = 0
+  // Group bends by mile ranges for better spatial understanding
+  const mileRanges = {}
   highwayBends.forEach(b => {
-    const mi = (b.distanceFromStart || 0) / 1609.34
-    if (mi - last > 3) gaps.push(`${last.toFixed(0)}-${mi.toFixed(0)}mi gap`)
-    last = mi
+    const mi = Math.floor((b.distanceFromStart || 0) / 1609.34 / 10) * 10 // Group by 10-mile chunks
+    if (!mileRanges[mi]) mileRanges[mi] = []
+    mileRanges[mi].push(b)
   })
+  
+  const rangeStr = Object.entries(mileRanges)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .map(([startMi, bends]) => {
+      const angles = bends.map(b => b.angle || 0).filter(a => a > 0)
+      const maxAngle = angles.length > 0 ? Math.max(...angles) : 0
+      const sweepers = bends.filter(b => b.isSweeper || b.angle >= 15).length
+      return `Miles ${startMi}-${Number(startMi)+10}: ${bends.length} bends (max ${maxAngle}°, ${sweepers} notable)`
+    }).join('\n')
+  
+  // Find significant gaps (boring stretches)
+  const gaps = []
+  let lastMile = 0
+  const sortedBends = [...highwayBends].sort((a, b) => (a.distanceFromStart || 0) - (b.distanceFromStart || 0))
+  sortedBends.forEach(b => {
+    const mi = (b.distanceFromStart || 0) / 1609.34
+    if (mi - lastMile > 5) {
+      gaps.push({ start: lastMile, end: mi, length: mi - lastMile })
+    }
+    lastMile = mi
+  })
+  // Check gap to end of route
+  const routeEndMile = parseFloat(totalMiles)
+  if (routeEndMile - lastMile > 5) {
+    gaps.push({ start: lastMile, end: routeEndMile, length: routeEndMile - lastMile })
+  }
+  
+  const gapStr = gaps
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 5)
+    .map(g => `Miles ${g.start.toFixed(0)}-${g.end.toFixed(0)}: ${g.length.toFixed(0)}mi STRAIGHT`)
+    .join('\n')
+  
+  // Key bends - show notable ones with positions
+  const keyBends = highwayBends
+    .filter(b => b.isSweeper || b.angle >= 12 || b.isSection)
+    .slice(0, 30) // Limit to avoid token bloat
+    .map(b => {
+      const mi = ((b.distanceFromStart || 0) / 1609.34).toFixed(1)
+      if (b.isSection) {
+        return `@${mi}mi: SECTION ${b.bendCount} bends`
+      }
+      return `@${mi}mi: ${b.direction} ${b.angle}°${b.isSweeper ? ' SWEEPER' : ''}`
+    }).join('\n')
 
-  return `ROUTE: ${totalMiles}mi total, ${highwayBends.length} bends
+  return `ROUTE OVERVIEW
+Total: ${totalMiles} miles
+Highway bends detected: ${highwayBends.length}
 
-ZONES: ${zoneStr}
+ZONE BREAKDOWN (start-end miles):
+${zoneStr}
 
-GAPS: ${gaps.length > 0 ? gaps.join(', ') : 'None >3mi'}
+BEND DISTRIBUTION BY 10-MILE CHUNKS:
+${rangeStr}
 
-BENDS:
-${bendStr}
+LONG STRAIGHT SECTIONS (boring, need wake-up after):
+${gapStr || 'No gaps over 5 miles'}
 
-Analyze and create callout briefing. Use tools: analyze_and_plan → generate_callouts → finalize`
+KEY BENDS (notable curves):
+${keyBends}
+
+---
+INSTRUCTIONS:
+1. Create callouts SPREAD ACROSS the route, not clustered
+2. After each long straight (5+ miles), add a wake-up callout
+3. Before technical sections, add advance warning
+4. Target 8-15 callouts covering the WHOLE route
+5. Don't forget the first 50 miles!
+
+Call: analyze_and_plan → generate_callouts → finalize`
 }
 
 // ================================
