@@ -263,11 +263,36 @@ export function useHighwayMode() {
   // ================================
 
   const getChatter = useCallback(() => {
-    if (!isRunning || !highwayFeatures.chatter) return null
-    if (!inHighwayZone) return null
+    console.log(`🎤 getChatter check:`, {
+      isRunning,
+      chatterEnabled: highwayFeatures?.chatter,
+      inHighwayZone,
+      speed,
+      timeSinceLastChatter: Date.now() - lastChatterTime
+    })
+    
+    if (!isRunning) {
+      console.log('🎤 Chatter blocked: not running')
+      return null
+    }
+    
+    // Check chatter feature - default to true if not set
+    const chatterEnabled = highwayFeatures?.chatter !== false
+    if (!chatterEnabled) {
+      console.log('🎤 Chatter blocked: feature disabled')
+      return null
+    }
+    
+    if (!inHighwayZone) {
+      console.log('🎤 Chatter blocked: not in highway zone')
+      return null
+    }
     
     const now = Date.now()
-    if (now - lastChatterTime < 30000) return null
+    if (now - lastChatterTime < 30000) {
+      console.log(`🎤 Chatter blocked: cooldown (${Math.round((30000 - (now - lastChatterTime)) / 1000)}s left)`)
+      return null
+    }
     
     // Build data object for smart chatter
     const chatterData = {
@@ -282,12 +307,23 @@ export function useHighwayMode() {
       speedLimit: 65
     }
     
+    console.log('🎤 Calling getSmartChatter with:', {
+      speed: chatterData.speed,
+      userDistance: chatterData.userDistance,
+      totalDistance: chatterData.totalDistance,
+      zonesCount: chatterData.zones.length,
+      bendsCount: chatterData.highwayBends.length
+    })
+    
     const chatter = getSmartChatter(chatterData)
+    console.log('🎤 getSmartChatter result:', chatter)
+    
     if (chatter) {
       recordChatterTime()
+      return chatter.text || chatter
     }
-    return chatter
-  }, [isRunning, highwayFeatures.chatter, inHighwayZone, lastChatterTime, recordChatterTime, speed, routeData, highwayBends, routeZones])
+    return null
+  }, [isRunning, highwayFeatures?.chatter, inHighwayZone, lastChatterTime, recordChatterTime, speed, routeData, highwayBends, routeZones])
 
   // ================================
   // RETURN VALUES
