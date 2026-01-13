@@ -180,6 +180,11 @@ export function useRouteAnalysis() {
       ).join(', ')}`)
     }
 
+    // Always log when setting curves
+    if (upcoming.length > 0) {
+      console.log(`🎯 useRouteAnalysis: Setting ${upcoming.length} upcoming curves to store`)
+    }
+    
     setUpcomingCurves(upcoming)
 
     // Set active curve
