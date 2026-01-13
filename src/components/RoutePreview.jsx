@@ -307,33 +307,34 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               console.log(`   📍 Mile ${s.triggerMile.toFixed(1)}: ${s.type} - "${s.templateText}"`)
             })
             
-            // AI POLISH: Optional, single API call
+            // AI POLISH: DISABLED - templates are more accurate than AI-generated text
+            // The AI was changing directions and adding filler that didn't match the data
             let finalSlots = slotsWithPositions
-            if (hasLLMApiKey()) {
-              console.log('✨ Attempting AI polish...')
-              finalSlots = await polishCalloutsWithAI(slotsWithPositions, {
-                routeData,
-                zones: activeZones
-              }, getLLMApiKey())
-            }
+            // if (hasLLMApiKey()) {
+            //   console.log('✨ Attempting AI polish...')
+            //   finalSlots = await polishCalloutsWithAI(slotsWithPositions, {
+            //     routeData,
+            //     zones: activeZones
+            //   }, getLLMApiKey())
+            // }
             
             // Format for display
             const formattedCallouts = formatSlotsForDisplay(finalSlots)
             
             console.log(`✅ Final callouts: ${formattedCallouts.length}`)
             formattedCallouts.forEach(c => {
-              console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" pos=${c.position}`)
+              console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" [${c.type}] pos=${c.position}`)
             })
             
             setCuratedCallouts(formattedCallouts)
             setAgentResult({
               summary: {
                 summary: `${formattedCallouts.length} callouts generated`,
-                rhythm: 'Rule-based with AI polish',
+                rhythm: 'Rule-based v2.0 (no AI polish)',
                 difficulty: 'auto'
               },
-              reasoning: [`Generated ${slots.length} slots from rules`],
-              confidence: 95
+              reasoning: [`Generated ${slots.length} slots from rules v2.0`],
+              confidence: 98
             })
             setCurveEnhanced(true)
             
