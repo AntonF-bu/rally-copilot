@@ -8,15 +8,14 @@ import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
 import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
-import { curateHighwayBends, shouldCurateHighway } from '../services/llmHighwayCurator'
+import { runCoDriverAgent, formatAgentOutput } from '../services/aiCoDriverAgent'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v20
-// NEW: LLM Highway Curator - smart merging/filtering
-// Preview is single source of truth
+// Route Preview - v21
+// NEW: AI Co-Driver Agent - intelligent analysis
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -49,10 +48,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
   
-  // LLM Curve Enhancement state - NOW CURATED CALLOUTS
+  // LLM Curve Enhancement state - NOW AI AGENT
   const [curveEnhanced, setCurveEnhanced] = useState(false)
   const [curatedCallouts, setCuratedCallouts] = useState([])
-  const [curationReasoning, setCurationReasoning] = useState('')
+  const [agentResult, setAgentResult] = useState(null)
+  const [agentProgress, setAgentProgress] = useState(null)
   
   // Highway bends - LOCAL state for UI (raw bends, before curation)
   const [highwayBends, setHighwayBendsLocal] = useState([])
@@ -278,34 +278,50 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         
         const rawBends = analyzeHighwayBends(coordinates, activeZones)
         console.log(`🛣️ Found ${rawBends.length} raw highway bends`)
-        setHighwayBends(rawBends) // Store raw bends for reference
+        setHighwayBendsLocal(rawBends) // Store raw bends for reference
+        setHighwayBends(rawBends) // Also store in global store
         updateStage('highway', 'complete')
         
-        // Step 4: LLM Highway Curation (merge, filter, prioritize)
-        if (hasLLMApiKey() && shouldCurateHighway(rawBends)) {
+        // Step 4: AI Co-Driver Agent (intelligent analysis)
+        if (hasLLMApiKey() && rawBends.length > 0) {
           updateStage('aiCurves', 'loading')
-          console.log('🎯 Running LLM Highway Curator...')
+          console.log('🤖 Running AI Co-Driver Agent...')
           try {
-            const curationResult = await curateHighwayBends({
+            const agentOutput = await runCoDriverAgent({
               highwayBends: rawBends,
               zones: activeZones,
               routeData
-            }, getLLMApiKey())
+            }, getLLMApiKey(), (progress) => {
+              setAgentProgress(progress)
+              console.log(`   Agent iteration ${progress.iteration}...`)
+            })
             
-            if (curationResult.curatedCallouts?.length > 0) {
-              console.log(`🎯 Curator output: ${curationResult.curatedCallouts.length} curated callouts`)
-              console.log(`   Reasoning: ${curationResult.reasoning}`)
+            if (agentOutput.success) {
+              const formatted = formatAgentOutput(agentOutput)
+              console.log(`🤖 Agent complete:`)
+              console.log(`   Callouts: ${formatted.callouts.length}`)
+              console.log(`   Confidence: ${formatted.confidence}%`)
+              console.log(`   Reasoning steps: ${formatted.reasoning?.length || 0}`)
               
-              setCuratedCallouts(curationResult.curatedCallouts)
-              setCurationReasoning(curationResult.reasoning)
+              // Interpolate positions for callouts
+              const calloutsWithPositions = formatted.callouts.map(c => {
+                const position = interpolatePosition(coordinates, c.triggerDistance, routeData.distance)
+                return { ...c, position }
+              })
+              
+              setCuratedCallouts(calloutsWithPositions)
+              setAgentResult(formatted)
               setCurveEnhanced(true)
               
-              // Store curated callouts in global store for navigation
-              useStore.getState().setCuratedHighwayCallouts(curationResult.curatedCallouts)
+              // Store in global store for navigation
+              useStore.getState().setCuratedHighwayCallouts(calloutsWithPositions)
+              useStore.getState().setAgentBriefing(formatted)
+            } else {
+              console.warn('⚠️ Agent did not complete successfully:', agentOutput.error)
             }
             updateStage('aiCurves', 'complete')
-          } catch (curateErr) {
-            console.warn('⚠️ LLM highway curation failed:', curateErr)
+          } catch (agentErr) {
+            console.warn('⚠️ AI Co-Driver Agent failed:', agentErr)
             updateStage('aiCurves', 'complete')
           }
         }
@@ -321,6 +337,22 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       setIsPreviewLoading(false)
     }
   }, [setRouteZones, routeData, setHighwayBends])
+  
+  // Helper: Interpolate position along route from distance
+  const interpolatePosition = useCallback((coordinates, distance, totalDistance) => {
+    if (!coordinates?.length || !totalDistance) return null
+    
+    const ratio = Math.min(Math.max(distance / totalDistance, 0), 1)
+    const index = Math.floor(ratio * (coordinates.length - 1))
+    const nextIndex = Math.min(index + 1, coordinates.length - 1)
+    
+    const segmentRatio = (ratio * (coordinates.length - 1)) - index
+    
+    const lng = coordinates[index][0] + (coordinates[nextIndex][0] - coordinates[index][0]) * segmentRatio
+    const lat = coordinates[index][1] + (coordinates[nextIndex][1] - coordinates[index][1]) * segmentRatio
+    
+    return [lng, lat]
+  }, [])
 
   // CRITICAL: Detect curves if routeData doesn't have them
   useEffect(() => {
@@ -1347,41 +1379,91 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI HIGHWAY CURATION STATUS */}
-        {curveEnhanced && curatedCallouts.length > 0 && (
-          <div className="mb-2 flex flex-col gap-2">
+        {/* AI CO-DRIVER AGENT STATUS */}
+        {curveEnhanced && agentResult && (
+          <div className="mb-3 flex flex-col gap-2 p-3 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 rounded-lg border border-emerald-500/20">
             {/* Header row */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/30">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                  <polyline points="22 4 12 14.01 9 11.01"/>
-                </svg>
-                <span className="text-[10px] text-emerald-400 font-medium">
-                  AI Curated
-                </span>
-                <span className="text-[10px] text-emerald-400/70">
-                  {highwayBends.length} → {curatedCallouts.length}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                  <span className="text-[11px] text-emerald-400 font-semibold">
+                    AI Co-Driver
+                  </span>
+                </div>
+                <span className="text-[10px] text-white/50">
+                  {agentResult.confidence}% confident
                 </span>
               </div>
-              <button 
-                onClick={() => alert(curationReasoning || 'No reasoning available')}
-                className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors"
-              >
-                why?
-              </button>
+              <div className="flex items-center gap-2 text-[9px] text-white/40">
+                <span>{agentResult.stats?.iterations} steps</span>
+                <span>{(agentResult.stats?.elapsed / 1000).toFixed(1)}s</span>
+              </div>
             </div>
             
-            {/* Curated callouts preview */}
-            <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto">
-              {curatedCallouts.slice(0, 8).map((callout, i) => {
+            {/* Route Summary */}
+            {agentResult.summary && (
+              <div className="text-[10px] text-white/70 leading-relaxed">
+                {agentResult.summary.summary}
+              </div>
+            )}
+            
+            {/* Rhythm visualization */}
+            {agentResult.summary?.rhythm && (
+              <div className="text-[9px] text-cyan-400/80 font-mono">
+                {agentResult.summary.rhythm}
+              </div>
+            )}
+            
+            {/* Key moments */}
+            {agentResult.summary?.keyMoments?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {agentResult.summary.keyMoments.map((moment, i) => (
+                  <span key={i} className="px-2 py-0.5 bg-white/5 rounded text-[9px] text-white/60">
+                    {moment}
+                  </span>
+                ))}
+              </div>
+            )}
+            
+            {/* Danger zones warning */}
+            {agentResult.dangerZones?.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[9px] text-amber-400">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <span>{agentResult.dangerZones.length} danger zone{agentResult.dangerZones.length > 1 ? 's' : ''} identified</span>
+              </div>
+            )}
+            
+            {/* Highlights */}
+            {agentResult.highlights?.length > 0 && (
+              <div className="flex items-center gap-1.5 text-[9px] text-emerald-400">
+                <span>✨</span>
+                <span>{agentResult.highlights.length} highlight{agentResult.highlights.length > 1 ? 's' : ''}</span>
+              </div>
+            )}
+            
+            {/* Callout pills */}
+            <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto mt-1">
+              {curatedCallouts.map((callout, i) => {
                 const colors = {
-                  section: '#10b981',
-                  sweeper: '#3b82f6',
-                  straight: '#6b7280',
-                  highlight: '#f59e0b'
+                  advance_warning: '#f59e0b',
+                  bend_callout: '#3b82f6',
+                  section_intro: '#10b981',
+                  section_end: '#6b7280',
+                  wake_up: '#ef4444',
+                  highlight: '#8b5cf6',
+                  info: '#6b7280'
                 }
-                const color = colors[callout.type] || colors.section
+                const priorityBorder = {
+                  critical: 'border-red-500',
+                  high: 'border-amber-500',
+                  medium: 'border-white/20',
+                  low: 'border-white/10'
+                }
+                const color = colors[callout.type] || '#6b7280'
                 return (
                   <button
                     key={callout.id || i}
@@ -1391,23 +1473,36 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-2 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:scale-105"
-                    style={{ 
-                      background: `${color}15`, 
-                      color: color, 
-                      border: `1px solid ${color}40` 
-                    }}
+                    className={`px-2 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:scale-105 border ${priorityBorder[callout.priority] || 'border-white/10'}`}
+                    style={{ background: `${color}15`, color: color }}
+                    title={`${callout.type} @ mile ${callout.triggerMile?.toFixed(1)}`}
                   >
                     {callout.shortText || callout.text}
                   </button>
                 )
               })}
-              {curatedCallouts.length > 8 && (
-                <span className="text-[9px] text-white/40 self-center">
-                  +{curatedCallouts.length - 8} more
-                </span>
-              )}
             </div>
+            
+            {/* View reasoning button */}
+            <button 
+              onClick={() => {
+                const reasoningText = agentResult.reasoning?.join('\n') || 'No reasoning recorded'
+                alert(`AI Reasoning:\n\n${reasoningText}\n\nNotes: ${agentResult.notes || 'None'}`)
+              }}
+              className="self-start text-[9px] text-white/40 hover:text-white/70 transition-colors"
+            >
+              View agent reasoning →
+            </button>
+          </div>
+        )}
+        
+        {/* Agent loading state */}
+        {isLoadingAI && agentProgress && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-cyan-500/10 rounded-lg border border-cyan-500/30">
+            <div className="w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-[10px] text-cyan-300">
+              AI Agent analyzing... (step {agentProgress.iteration})
+            </span>
           </div>
         )}
 
