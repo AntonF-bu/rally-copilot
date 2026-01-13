@@ -171,6 +171,12 @@ function executeTool(toolName, args, routeContext, agentState) {
     }
     
     case 'generate_callouts': {
+      // Log raw input from LLM
+      console.log('📍 Raw callouts from LLM:')
+      ;(args.callouts || []).forEach((c, i) => {
+        console.log(`   ${i+1}. mile=${c.triggerMile} "${c.text?.substring(0,40)}"`)
+      })
+      
       let callouts = (args.callouts || []).map((c, i) => ({
         id: `callout-${i + 1}`,
         triggerMile: c.triggerMile,
