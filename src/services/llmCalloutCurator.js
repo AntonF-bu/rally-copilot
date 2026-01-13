@@ -82,30 +82,33 @@ ROLE: You're the co-driver. The driver can't look at the map. They need AUDIO wa
 PRINCIPLES:
 1. SAFETY FIRST - Always warn about dangerous sections (high angles, sudden difficulty spikes)
 2. CONTEXT MATTERS - A 20° curve after 5+ miles of straight IS surprising and needs a callout
-3. FLOW MATTERS - In winding sections, group curves ("sweepers for the next mile") instead of calling each one
-4. ACCURATE POSITIONS - Use the apex mile from the data, that's where the curve actually is
+3. SEQUENCES - If 2-3 curves are within 500m of each other, call them as a sequence: "Right then left" or "Two rights, then left"
+4. ACCURATE POSITIONS - Use the mile of the FIRST curve in a sequence
 5. SHAPE MATTERS - "tight" needs earlier warning than "sweeper"
 
 WHAT TO CALL OUT:
-- Danger zones (50°+ curves)
-- Any curve 20°+ after 3+ miles of straight road (driver is "asleep")
-- Any curve 30°+ even in flowing sections
-- Wake-up calls after 8+ miles of straight/gentle road  
-- Notable sweepers (25°+) that break the rhythm
+- Danger zones (45°+ curves)
+- Any curve 18°+ after 3+ miles of straight road (driver is "asleep")
+- Any curve 25°+ even in flowing sections
+- Wake-up calls after 6+ miles of straight/gentle road  
+- Notable sweepers that break the rhythm
 - Section changes (easy → technical or vice versa)
-- Sequences worth noting ("three right sweepers coming")
+- SEQUENCES: When 2+ curves are close together (within 500m), combine them into ONE callout
+
+SEQUENCE CALLOUT EXAMPLES:
+- Two curves close together: "Right then left ahead" or "Double right"
+- Three curves: "S-curves ahead" or "Right-left-right sequence"
+- Use the position of the FIRST curve in the sequence
 
 WHAT TO SKIP:
-- Gentle curves under 18° in flowing sections (driver is already engaged)
-- Urban zone events under 60° (driver expects city turns)
-- Individual curves in a winding section - group them instead
-- Redundant callouts less than 0.8 miles apart
+- Gentle curves under 15° in flowing sections
+- Urban zone events under 50° (driver expects city turns)
+- DON'T skip curves just because another curve is nearby - COMBINE them into a sequence instead!
 
-CALLOUT GUIDELINES:
-- For an 80+ mile highway route: aim for 12-20 callouts
-- More callouts in technical/winding sections, fewer in gentle highway
-- After any straight of 3+ miles, the FIRST curve should get a callout regardless of angle
-- Use "wake up" for transitions from boring to interesting
+CALLOUT TEXT FORMAT:
+- Keep it SHORT: "Right 45" or "Hard left" or "Right then left"
+- No need to say "degrees" - just the number
+- For sequences: describe the pattern, not each curve
 
 OUTPUT FORMAT:
 Return a JSON object with:
@@ -115,13 +118,13 @@ Return a JSON object with:
     {
       "mile": 2.5,
       "type": "danger|sweeper|wake_up|section|sequence",
-      "text": "What to say (keep under 5 seconds to speak)",
+      "text": "Short callout text (2-4 words max)",
       "reason": "Why this callout matters"
     }
   ]
 }
 
-Be generous with callouts - it's better to inform the driver than to leave them surprised.`
+Aim for 15-25 callouts for an 80+ mile route. Cover ALL notable curves - better to inform than surprise.`
 }
 
 function buildCurationPrompt(flowData, routeInfo) {
@@ -156,6 +159,29 @@ function buildCurationPrompt(flowData, routeInfo) {
     sections.push(currentSection)
   }
   
+  // Detect sequences (curves within 0.3 miles of each other)
+  const sequences = []
+  let currentSeq = []
+  events.forEach((event, i) => {
+    const prevEvent = events[i - 1]
+    const gap = prevEvent ? event.apexMile - prevEvent.apexMile : 999
+    
+    if (gap <= 0.3) {
+      if (currentSeq.length === 0 && prevEvent) {
+        currentSeq.push(prevEvent)
+      }
+      currentSeq.push(event)
+    } else {
+      if (currentSeq.length >= 2) {
+        sequences.push([...currentSeq])
+      }
+      currentSeq = []
+    }
+  })
+  if (currentSeq.length >= 2) {
+    sequences.push(currentSeq)
+  }
+  
   // Build the prompt
   let prompt = `ROUTE: ${totalMiles.toFixed(1)} miles\n\n`
   
@@ -168,17 +194,28 @@ function buildCurationPrompt(flowData, routeInfo) {
     prompt += `${i + 1}. Miles ${section.startMile.toFixed(1)}-${section.endMile.toFixed(1)} (${length}mi): ${section.character.toUpperCase()} - ${eventCount} events, max ${maxAngle}°\n`
   })
   
+  // Sequences (close curves that should be called together)
+  if (sequences.length > 0) {
+    prompt += `\n⚠️ SEQUENCES (curves within 0.3mi - call these TOGETHER):\n`
+    sequences.forEach((seq, i) => {
+      const dirs = seq.map(e => e.direction[0]).join('-')  // "R-L-R"
+      const angles = seq.map(e => e.totalAngle).join('°, ') + '°'
+      const startMile = seq[0].apexMile.toFixed(1)
+      prompt += `  ${i + 1}. Mile ${startMile}: ${dirs} sequence (${angles})\n`
+    })
+  }
+  
   // Gaps (straight sections)
   prompt += `\nSTRAIGHT SECTIONS (gaps between events):\n`
   let lastMile = 0
   events.forEach(event => {
     const gap = event.apexMile - lastMile
-    if (gap >= 5) {
+    if (gap >= 3) {
       prompt += `  Miles ${lastMile.toFixed(1)}-${event.apexMile.toFixed(1)}: ${gap.toFixed(1)} miles straight\n`
     }
     lastMile = event.apexMile
   })
-  if (totalMiles - lastMile >= 5) {
+  if (totalMiles - lastMile >= 3) {
     prompt += `  Miles ${lastMile.toFixed(1)}-${totalMiles.toFixed(1)}: ${(totalMiles - lastMile).toFixed(1)} miles straight\n`
   }
   
