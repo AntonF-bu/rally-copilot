@@ -74,8 +74,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [routeCharacter, setRouteCharacter] = useState({ segments: [], summary: null, censusTracts: [] })
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
   
-  // NEW: LLM enhancement state
+  // NEW: LLM enhancement state with toggle
   const [llmEnhanced, setLlmEnhanced] = useState(false)
+  const [llmResult, setLlmResult] = useState(null)  // { original, enhanced, changes }
+  const [useEnhancedZones, setUseEnhancedZones] = useState(true)  // Toggle state
   
   const { 
     routeData, mode, setMode, routeMode, setRouteData, 
@@ -476,27 +478,38 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         console.log('🤖 Starting LLM zone validation...')
         
         try {
-          const validatedZones = await validateZonesWithLLM(
+          const llmResponse = await validateZonesWithLLM(
             routeCharacter.segments,
             routeData,
             getLLMApiKey()
           )
           
-          // Apply LLM-corrected zones
-          if (validatedZones?.length > 0) {
-            setRouteCharacter(prev => ({ ...prev, segments: validatedZones }))
-            setRouteZones(validatedZones)
+          // Store full LLM result for toggle
+          setLlmResult(llmResponse)
+          
+          // Check if we got enhanced zones
+          const { enhanced, original, changes } = llmResponse
+          
+          if (enhanced?.length > 0 && changes?.length > 0) {
+            console.log(`🤖 LLM made ${changes.length} change(s):`)
+            changes.forEach(c => console.log(`   - ${c}`))
             
-            // Log any corrections
-            const corrections = validatedZones.filter(z => z.llmOverride)
-            if (corrections.length > 0) {
-              console.log(`🤖 LLM corrected ${corrections.length} zone(s)`)
-              setLlmEnhanced(true)
-              
-              // Re-analyze highway bends with corrected zones
-              const bends = analyzeHighwayBends(routeData.coordinates, validatedZones)
-              setHighwayBends(bends)
-              console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
+            setLlmEnhanced(true)
+            
+            // Apply enhanced zones by default
+            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+            setRouteZones(enhanced)
+            
+            // Re-analyze highway bends with enhanced zones
+            const bends = analyzeHighwayBends(routeData.coordinates, enhanced)
+            setHighwayBends(bends)
+            console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
+          } else {
+            console.log('🤖 LLM confirmed all zones are correct')
+            // Use enhanced (which equals original if no changes)
+            if (enhanced?.length > 0) {
+              setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+              setRouteZones(enhanced)
             }
           }
         } catch (llmError) {
@@ -512,106 +525,45 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
-      // PHASE 1.5: POST-PROCESSING - Highway Continuity Rules
-      // Smart detection to fix misclassified highway segments
+      // PHASE 1.5: POST-PROCESSING BACKUP
+      // Simple fallback if LLM missed anything
       // ========================================
       let currentZones = routeCharacter.segments || []
       if (currentZones.length >= 2) {
-        let fixedCount = 0
-        
-        // Calculate total distance by character
-        const distanceByChar = {}
+        // Calculate highway percentage
+        let totalDist = 0, highwayDist = 0
         currentZones.forEach(seg => {
           const len = (seg.endDistance || 0) - (seg.startDistance || 0)
-          distanceByChar[seg.character] = (distanceByChar[seg.character] || 0) + len
+          totalDist += len
+          if (seg.character === 'transit') highwayDist += len
         })
-        const totalDist = Object.values(distanceByChar).reduce((a, b) => a + b, 0)
-        const highwayPercent = ((distanceByChar['transit'] || 0) / totalDist) * 100
+        const highwayPercent = (highwayDist / totalDist) * 100
         
-        console.log(`🔧 Route composition: Highway ${highwayPercent.toFixed(0)}%, checking for fixes...`)
+        console.log(`🔧 Post-LLM check: Highway ${highwayPercent.toFixed(0)}%`)
         
-        // RULE 1: If route is predominantly highway (>60%), convert short non-highway segments
-        const isHighwayRoute = highwayPercent > 60
-        
-        let fixedZones = currentZones.map((seg, i) => {
-          const segLength = (seg.endDistance || 0) - (seg.startDistance || 0)
-          const segLengthMiles = segLength / 1609.34
-          const prevSeg = currentZones[i - 1]
-          const nextSeg = currentZones[i + 1]
-          
-          // Skip if already highway
-          if (seg.character === 'transit') return seg
-          
-          // RULE 2: Sandwiched between two highway segments → force highway
-          if (prevSeg?.character === 'transit' && nextSeg?.character === 'transit') {
-            console.log(`🔧 Fixing sandwiched segment ${seg.id}: ${seg.character} → transit`)
-            fixedCount++
-            return { ...seg, character: 'transit', sandwichFixed: true }
-          }
-          
-          // RULE 3: Short segment (<3mi) at START of predominantly highway route
-          if (i === 0 && nextSeg?.character === 'transit' && segLengthMiles < 3 && isHighwayRoute) {
-            console.log(`🔧 Fixing short start segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
-            fixedCount++
-            return { ...seg, character: 'transit', startFixed: true }
-          }
-          
-          // RULE 4: Short segment (<3mi) at END of predominantly highway route
-          if (i === currentZones.length - 1 && prevSeg?.character === 'transit' && segLengthMiles < 3 && isHighwayRoute) {
-            console.log(`🔧 Fixing short end segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
-            fixedCount++
-            return { ...seg, character: 'transit', endFixed: true }
-          }
-          
-          // RULE 5: On a highway route, any technical segment <5mi surrounded by highway is suspect
-          if (isHighwayRoute && segLengthMiles < 5) {
-            // Check if there's highway within 2 segments in either direction
-            const nearbyHighway = currentZones.slice(Math.max(0, i-2), i+3).some(
-              (s, idx) => idx !== (i - Math.max(0, i-2)) && s.character === 'transit'
-            )
-            if (nearbyHighway) {
-              console.log(`🔧 Fixing isolated segment ${seg.id}: ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi, nearby highway)`)
-              fixedCount++
-              return { ...seg, character: 'transit', isolatedFixed: true }
-            }
-          }
-          
-          return seg
-        })
-        
-        // RULE 6: Second pass - merge any remaining tiny gaps
-        // If we have [HWY][TECH][HWY] pattern after first pass, the TECH should be gone
-        // But check for [HWY][TECH][TECH][HWY] → both TECH should become HWY
-        if (fixedZones.length >= 4) {
-          fixedZones = fixedZones.map((seg, i) => {
+        // Simple rule: If >60% highway, force remaining short segments to highway
+        if (highwayPercent > 60) {
+          let fixedCount = 0
+          const fixedZones = currentZones.map((seg) => {
             if (seg.character === 'transit') return seg
-            if (i === 0 || i === fixedZones.length - 1) return seg
             
-            // Look for highway within 2 positions on each side
-            const hasHighwayBefore = fixedZones.slice(Math.max(0, i-2), i).some(s => s.character === 'transit')
-            const hasHighwayAfter = fixedZones.slice(i+1, Math.min(fixedZones.length, i+3)).some(s => s.character === 'transit')
+            const segLengthMiles = ((seg.endDistance || 0) - (seg.startDistance || 0)) / 1609.34
             
-            const segLength = (seg.endDistance || 0) - (seg.startDistance || 0)
-            const segLengthMiles = segLength / 1609.34
-            
-            if (hasHighwayBefore && hasHighwayAfter && segLengthMiles < 8 && isHighwayRoute) {
-              console.log(`🔧 Second pass: fixing ${seg.id}: ${seg.character} → transit`)
+            // Short non-highway segments on a highway route are likely errors
+            if (segLengthMiles < 5) {
+              console.log(`🔧 Backup fix: ${seg.id} ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
               fixedCount++
-              return { ...seg, character: 'transit', secondPassFixed: true }
+              return { ...seg, character: 'transit', backupFixed: true }
             }
             return seg
           })
-        }
-        
-        if (fixedCount > 0) {
-          console.log(`🔧 Fixed ${fixedCount} segment(s) for highway continuity`)
-          setRouteCharacter(prev => ({ ...prev, segments: fixedZones }))
-          setRouteZones(fixedZones)
           
-          // Re-analyze highway bends with fixed zones
-          const bends = analyzeHighwayBends(routeData.coordinates, fixedZones)
-          setHighwayBends(bends)
-          console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
+          if (fixedCount > 0) {
+            setRouteCharacter(prev => ({ ...prev, segments: fixedZones }))
+            setRouteZones(fixedZones)
+            const bends = analyzeHighwayBends(routeData.coordinates, fixedZones)
+            setHighwayBends(bends)
+          }
         }
       }
       
@@ -1214,14 +1166,31 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     {highwayBends.length} sweeps
                   </span>
                 )}
-                {/* NEW: LLM Enhanced badge */}
-                {llmEnhanced && (
-                  <span 
-                    className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
-                    style={{ background: '#8b5cf620', color: '#8b5cf6', border: '1px solid #8b5cf640' }}
-                  >
-                    🤖 AI Enhanced
-                  </span>
+                {/* NEW: LLM Zone Toggle */}
+                {llmEnhanced && llmResult && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const newUseEnhanced = !useEnhancedZones
+                        setUseEnhancedZones(newUseEnhanced)
+                        const zones = newUseEnhanced ? llmResult.enhanced : llmResult.original
+                        setRouteCharacter(prev => ({ ...prev, segments: zones }))
+                        setRouteZones(zones)
+                        // Re-analyze highway bends
+                        const bends = analyzeHighwayBends(routeData.coordinates, zones)
+                        setHighwayBends(bends)
+                      }}
+                      className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-all"
+                      style={{ 
+                        background: useEnhancedZones ? '#8b5cf620' : '#64748b20', 
+                        color: useEnhancedZones ? '#8b5cf6' : '#64748b', 
+                        border: `1px solid ${useEnhancedZones ? '#8b5cf640' : '#64748b40'}` 
+                      }}
+                      title={`Click to switch to ${useEnhancedZones ? 'original' : 'AI enhanced'} zones\n${llmResult.changes?.length || 0} changes made`}
+                    >
+                      🤖 {useEnhancedZones ? 'AI' : 'Original'} ({llmResult.changes?.length || 0})
+                    </button>
+                  </div>
                 )}
                 {routeCharacter.summary.funPercentage > 0 && (
                   <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
