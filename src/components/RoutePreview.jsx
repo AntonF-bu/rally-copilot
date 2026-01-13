@@ -57,6 +57,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [curatedCallouts, setCuratedCallouts] = useState([])
   const [agentResult, setAgentResult] = useState(null)
   const [agentProgress, setAgentProgress] = useState(null)
+  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(false)
   
   // Highway bends - LOCAL state for UI (raw bends, before curation)
   const [highwayBends, setHighwayBendsLocal] = useState([])
@@ -990,27 +991,21 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Distinct colors - clearer and more visible
-      const colors = {
-        danger: '#ff6b8a',      // Bright pink-red
-        significant: '#ffb347', // Bright orange
-        sweeper: '#4fc3f7',     // Bright cyan
-        wake_up: '#69f0ae',     // Bright green
-        section: '#b388ff',     // Bright purple
-        sequence: '#f48fb1'     // Bright pink
-      }
-      const color = colors[callout.type] || colors.sweeper
+      // Use zone colors - match the zone tags exactly
+      // Technical: #a855f7 (purple), Transit/Highway: #22d3ee (cyan), Urban: #f472b6 (pink)
+      const color = '#22d3ee' // Highway/transit cyan - all callouts are on highway sections
       
+      // Exact zone tag style: bg at 20%, border at 40%, text full color
       el.innerHTML = `
         <div style="
-          background: rgba(0,0,0,0.85);
-          padding: 4px 8px;
+          background: ${color}20;
+          padding: 2px 8px;
           border-radius: 4px;
-          border: 1.5px solid ${color};
+          border: 1px solid ${color}40;
           cursor: pointer;
         " 
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:11px;font-weight:600;color:${color};">${shortLabel}</span>
+          <span style="font-size:10px;font-weight:500;color:${color};">${shortLabel}</span>
         </div>
       `
       
@@ -1354,11 +1349,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI CO-DRIVER AGENT STATUS */}
+        {/* AI CO-DRIVER AGENT STATUS - Collapsible */}
         {curveEnhanced && agentResult && (
           <div className="mb-3 flex flex-col gap-2 p-3 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 rounded-lg border border-emerald-500/20">
-            {/* Header row */}
-            <div className="flex items-center justify-between">
+            {/* Header row - clickable to collapse */}
+            <button 
+              onClick={() => setAiSectionCollapsed(!aiSectionCollapsed)}
+              className="flex items-center justify-between w-full text-left"
+            >
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
@@ -1370,115 +1368,82 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   {agentResult.confidence}% confident
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[9px] text-white/40">
-                <span>{agentResult.stats?.iterations} steps</span>
-                <span>{(agentResult.stats?.elapsed / 1000).toFixed(1)}s</span>
-              </div>
-            </div>
-            
-            {/* Route Summary */}
-            {agentResult.summary && (
-              <div className="text-[10px] text-white/70 leading-relaxed">
-                {agentResult.summary.summary}
-              </div>
-            )}
-            
-            {/* Rhythm visualization */}
-            {agentResult.summary?.rhythm && (
-              <div className="text-[9px] text-cyan-400/80 font-mono">
-                {agentResult.summary.rhythm}
-              </div>
-            )}
-            
-            {/* Key moments */}
-            {agentResult.summary?.keyMoments?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {agentResult.summary.keyMoments.map((moment, i) => (
-                  <span key={i} className="px-2 py-0.5 bg-white/5 rounded text-[9px] text-white/60">
-                    {moment}
-                  </span>
-                ))}
-              </div>
-            )}
-            
-            {/* Danger zones warning */}
-            {agentResult.dangerZones?.length > 0 && (
-              <div className="flex items-center gap-1.5 text-[9px] text-amber-400">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-white/40">{curatedCallouts.length} callouts</span>
+                <svg 
+                  width="12" 
+                  height="12" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2"
+                  className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}
+                >
+                  <polyline points="6 9 12 15 18 9"/>
                 </svg>
-                <span>{agentResult.dangerZones.length} danger zone{agentResult.dangerZones.length > 1 ? 's' : ''} identified</span>
               </div>
-            )}
-            
-            {/* Highlights */}
-            {agentResult.highlights?.length > 0 && (
-              <div className="flex items-center gap-1.5 text-[9px] text-emerald-400">
-                <span>✨</span>
-                <span>{agentResult.highlights.length} highlight{agentResult.highlights.length > 1 ? 's' : ''}</span>
-              </div>
-            )}
-            
-            {/* Callout pills - distinct colors */}
-            <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto mt-1">
-              {curatedCallouts.map((callout, i) => {
-                // Distinct, visible colors
-                const colors = {
-                  danger: '#ff6b8a',
-                  significant: '#ffb347',
-                  sweeper: '#4fc3f7',
-                  wake_up: '#69f0ae',
-                  section: '#b388ff',
-                  sequence: '#f48fb1'
-                }
-                const color = colors[callout.type] || colors.sweeper
-                
-                // Extract short version
-                const text = callout.text || ''
-                const dirMatch = text.match(/\b(left|right)\b/i)
-                const angleMatch = text.match(/(\d+)/)
-                const shortText = dirMatch && angleMatch 
-                  ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
-                  : callout.type === 'wake_up' 
-                    ? '!' 
-                    : callout.type === 'sequence'
-                      ? text.substring(0, 10)
-                      : text.substring(0, 6)
-                
-                return (
-                  <button
-                    key={callout.id || i}
-                    onClick={() => {
-                      setSelectedCurve({ ...callout, isCuratedCallout: true })
-                      if (mapRef.current && callout.position) {
-                        mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
-                      }
-                    }}
-                    className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
-                    style={{ 
-                      background: 'rgba(0,0,0,0.85)', 
-                      color: color,
-                      border: `1.5px solid ${color}`
-                    }}
-                    title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
-                  >
-                    {shortText}
-                  </button>
-                )
-              })}
-            </div>
-            
-            {/* View reasoning button */}
-            <button 
-              onClick={() => {
-                const reasoningText = agentResult.reasoning?.join('\n') || 'No reasoning recorded'
-                alert(`AI Reasoning:\n\n${reasoningText}\n\nNotes: ${agentResult.notes || 'None'}`)
-              }}
-              className="self-start text-[9px] text-white/40 hover:text-white/70 transition-colors"
-            >
-              View agent reasoning →
             </button>
+            
+            {/* Collapsible content */}
+            {!aiSectionCollapsed && (
+              <>
+                {/* Route Summary */}
+                {agentResult.summary && (
+                  <div className="text-[10px] text-white/70 leading-relaxed">
+                    {agentResult.summary.summary}
+                  </div>
+                )}
+                
+                {/* Rhythm visualization */}
+                {agentResult.summary?.rhythm && (
+                  <div className="text-[9px] text-cyan-400/80 font-mono">
+                    {agentResult.summary.rhythm}
+                  </div>
+                )}
+                
+                {/* Callout pills - zone tag style */}
+                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                  {curatedCallouts.map((callout, i) => {
+                    // Use zone color - highway cyan for all callouts
+                    const color = '#22d3ee'
+                    
+                    // Extract short version
+                    const text = callout.text || ''
+                    const dirMatch = text.match(/\b(left|right)\b/i)
+                    const angleMatch = text.match(/(\d+)/)
+                    const shortText = dirMatch && angleMatch 
+                      ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
+                      : callout.type === 'wake_up' 
+                        ? '!' 
+                        : callout.type === 'sequence'
+                          ? text.substring(0, 10)
+                          : text.substring(0, 6)
+                    
+                    return (
+                      <button
+                        key={callout.id || i}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedCurve({ ...callout, isCuratedCallout: true })
+                          if (mapRef.current && callout.position) {
+                            mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
+                          }
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                        style={{ 
+                          background: `${color}20`, 
+                          color: color,
+                          border: `1px solid ${color}40`
+                        }}
+                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
+                      >
+                        {shortText}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
         
