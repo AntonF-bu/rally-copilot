@@ -101,19 +101,25 @@ function buildPolishPrompt(slots, routeContext) {
     const mile = slot.triggerMile.toFixed(1)
     const type = slot.type.replace('_', ' ')
     let context = ''
+    let mustInclude = ''
     
     if (slot.context) {
       if (slot.context.gapLength) context = `after ${slot.context.gapLength.toFixed(0)}mi straight`
-      if (slot.context.direction) context = `${slot.context.direction} ${slot.context.angle}°`
+      if (slot.context.direction && slot.context.angle) {
+        context = `${slot.context.direction} ${slot.context.angle}°`
+        mustInclude = ` [MUST SAY ${slot.context.direction}]`
+      }
       if (slot.context.sectionLength) context = `${slot.context.sectionLength.toFixed(1)}mi section`
     }
     
-    return `${i}. Mile ${mile} - ${type}${context ? ` (${context})` : ''}`
+    return `${i}. Mile ${mile} - ${type}${context ? ` (${context})` : ''}${mustInclude}`
   }).join('\n')
   
   return `Route: ${totalMiles} miles highway
 
-Polish these ${slots.length} callout slots:
+Polish these ${slots.length} callout slots.
+CRITICAL: For sweeper callouts, you MUST use the direction (LEFT/RIGHT) provided. Do not change directions!
+
 ${slotDescriptions}
 
 Return JSON array with polished text for each.`
