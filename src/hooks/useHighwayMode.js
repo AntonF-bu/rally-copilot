@@ -269,12 +269,25 @@ export function useHighwayMode() {
     const now = Date.now()
     if (now - lastChatterTime < 30000) return null
     
-    const chatter = getSmartChatter()
+    // Build data object for smart chatter
+    const chatterData = {
+      speed: speed || 0,
+      userDistance: calculatedDistanceRef.current || 0,
+      totalDistance: routeData?.distance || 0,
+      expectedDuration: routeData?.duration || 0,
+      highwayBends: highwayBends || [],
+      zones: routeZones || [],
+      curves: routeData?.curves || [],
+      currentZone: inHighwayZone ? 'transit' : 'technical',
+      speedLimit: 65
+    }
+    
+    const chatter = getSmartChatter(chatterData)
     if (chatter) {
       recordChatterTime()
     }
     return chatter
-  }, [isRunning, highwayFeatures.chatter, inHighwayZone, lastChatterTime, recordChatterTime])
+  }, [isRunning, highwayFeatures.chatter, inHighwayZone, lastChatterTime, recordChatterTime, speed, routeData, highwayBends, routeZones])
 
   // ================================
   // RETURN VALUES
@@ -296,7 +309,11 @@ export function useHighwayMode() {
     
     // Functions App.jsx expects
     getNextHighwayCallout: getUpcomingBend,  // Alias
-    getProgressCallout: () => checkProgressMilestone(highwayStats),
+    getProgressCallout: () => checkProgressMilestone(
+      calculatedDistanceRef.current || 0, 
+      routeData?.distance || 0, 
+      announcedMilestones
+    ),
     onBendCompleted: incrementSweepersCleared,
     resetHighwayTrip,
     recordCalloutTime,
