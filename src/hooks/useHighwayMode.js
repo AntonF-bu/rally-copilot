@@ -179,11 +179,19 @@ export function useHighwayMode() {
     if (!isRunning || !routeZones?.length || !routeData?.distance) return
 
     const currentDist = getCurrentDistance()
+    
+    // Sort zones by startDistance
+    const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
 
     // Find current zone
-    const currentZone = routeZones.find(z => 
+    let currentZone = sortedZones.find(z => 
       currentDist >= z.startDistance && currentDist <= z.endDistance
     )
+    
+    // Handle distance=0 or gaps at route start
+    if (!currentZone && currentDist < 100) {
+      currentZone = sortedZones.find(z => z.startDistance <= 100) || sortedZones[0]
+    }
 
     const nowInHighway = currentZone?.character === 'transit'
 
