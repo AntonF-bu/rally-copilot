@@ -84,7 +84,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     routeData, mode, setMode, routeMode, setRouteData, 
     isFavorite, toggleFavorite, settings,
     globalZoneOverrides, routeZoneOverrides, setRouteZones,
-    setHighwayBends: setStoreHighwayBends,  // NEW: Store action for highway bends
+    setHighwayBends: setStoreHighwayBends,  // Store action for highway bends
     editedCurves, customCallouts
   } = useStore()
   const { initAudio, preloadRouteAudio, speak } = useSpeech()
@@ -92,8 +92,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   // Helper to set highway bends BOTH locally and in store
   const setHighwayBends = useCallback((bends) => {
     setHighwayBendsLocal(bends)
-    setStoreHighwayBends(bends)  // Also save to global store!
-    console.log(`🛣️ Preview: Stored ${bends.length} highway bends in global store`)
+    // Safety check - only call store action if it exists
+    if (typeof setStoreHighwayBends === 'function') {
+      setStoreHighwayBends(bends)
+      console.log(`🛣️ Preview: Stored ${bends.length} highway bends in global store`)
+    } else {
+      console.warn('⚠️ setHighwayBends not in store yet - update store.js')
+    }
   }, [setStoreHighwayBends])
 
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
