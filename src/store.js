@@ -50,15 +50,14 @@ const useStore = create(
       // Zone overrides (persisted) - global exceptions like "Storrow Drive = highway"
       globalZoneOverrides: [],
       
-      // Current route zones (not persisted - computed per route by Preview)
+      // Current route zones (not persisted - computed per route)
       routeZones: [],
-      
-      // Highway bends (not persisted - computed per route by Preview)
-      // Navigation reads this instead of re-analyzing
-      highwayBends: [],
       
       // Per-route zone overrides (stored with saved routes)
       routeZoneOverrides: [],
+      
+      // Highway bends (not persisted - computed in Preview, used in Navigation)
+      highwayBends: [],
       
       // Route editor state
       showRouteEditor: false,
@@ -154,9 +153,6 @@ const useStore = create(
       // ========== Zone Actions ==========
       setRouteZones: (zones) => set({ routeZones: zones }),
       
-      // NEW: Set highway bends (called by Preview, read by Navigation)
-      setHighwayBends: (bends) => set({ highwayBends: bends }),
-      
       addGlobalZoneOverride: (override) => {
         const { globalZoneOverrides } = get()
         const filtered = globalZoneOverrides.filter(o => o.id !== override.id)
@@ -181,8 +177,12 @@ const useStore = create(
         set({ routeZoneOverrides: routeZoneOverrides.filter(o => o.zoneId !== zoneId) })
       },
       
-      // NEW: Clear all route-specific data (zones + bends)
-      clearRouteZones: () => set({ routeZones: [], highwayBends: [], routeZoneOverrides: [] }),
+      clearRouteZones: () => set({ routeZones: [], routeZoneOverrides: [] }),
+      
+      // ========== Highway Bends Actions ==========
+      setHighwayBends: (bends) => set({ highwayBends: bends }),
+      
+      clearHighwayBends: () => set({ highwayBends: [] }),
       
       // ========== Route Editor Actions ==========
       setShowRouteEditor: (show) => set({ showRouteEditor: show }),
@@ -377,16 +377,13 @@ const useStore = create(
       setRouteData: (routeData) => set({ routeData }),
       setRouteMode: (routeMode) => set({ routeMode }),
       setDestination: (destination) => set({ destination }),
-      
-      // NEW: Clear all route data including zones and bends
       clearRouteData: () => set({ 
         routeData: null, 
         routeMode: null,
         destination: null,
         upcomingCurves: [],
         activeCurve: null,
-        routeZones: [],
-        highwayBends: []
+        highwayBends: []  // Also clear highway bends when route is cleared
       }),
       
       setActiveCurve: (curve) => set({ activeCurve: curve }),
