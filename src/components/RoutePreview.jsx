@@ -918,84 +918,21 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const addRoute = useCallback((map, coords, characterSegments, curves) => {
     if (!map || !coords?.length) return
     
-    const sleeveSegs = buildSleeveSegments(coords, characterSegments)
-    const routeSegs = buildSeveritySegments(coords, curves)
+    // Build segments using ZONE colors (not severity)
+    const zoneSegs = buildSleeveSegments(coords, characterSegments)
     
-    // Add SLEEVE fill layers
-    sleeveSegs.forEach((seg, i) => {
-      const src = `sleeve-src-${i}`, sleeve = `sleeve-${i}`
-      if (!map.getSource(src)) {
-        map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
-        if (showSleeve) {
-          map.addLayer({ 
-            id: sleeve, 
-            type: 'line', 
-            source: src, 
-            layout: { 'line-join': 'round', 'line-cap': 'round' }, 
-            paint: { 
-              'line-color': seg.color, 
-              'line-width': 40, 
-              'line-opacity': 0.25
-            } 
-          })
-        }
-      }
-    })
-    
-    // Add sleeve borders
-    if (showSleeve) {
-      sleeveSegs.forEach((seg, i) => {
-        const borderSrc = `sleeve-border-src-${i}`
-        const borderTop = `sleeve-border-top-${i}`
-        const borderBottom = `sleeve-border-bottom-${i}`
-        
-        if (!map.getSource(borderSrc)) {
-          map.addSource(borderSrc, { 
-            type: 'geojson', 
-            data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } 
-          })
-          
-          map.addLayer({ 
-            id: borderTop, 
-            type: 'line', 
-            source: borderSrc, 
-            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
-            paint: { 
-              'line-color': seg.color,
-              'line-width': 1.5,
-              'line-opacity': 0.5,
-              'line-dasharray': [4, 6],
-              'line-offset': 20
-            } 
-          })
-          
-          map.addLayer({ 
-            id: borderBottom, 
-            type: 'line', 
-            source: borderSrc, 
-            layout: { 'line-join': 'round', 'line-cap': 'butt' }, 
-            paint: { 
-              'line-color': seg.color,
-              'line-width': 1.5,
-              'line-opacity': 0.5,
-              'line-dasharray': [4, 6],
-              'line-offset': -20
-            } 
-          })
-        }
-      })
-    }
-    
-    // Add ROUTE LINE layers
-    routeSegs.forEach((seg, i) => {
+    // Add simple route line colored by zone
+    zoneSegs.forEach((seg, i) => {
       const src = `route-src-${i}`, glow = `glow-${i}`, line = `line-${i}`
       if (!map.getSource(src)) {
         map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
-        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.5 } })
-        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 5 } })
+        // Subtle glow
+        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 } })
+        // Main line
+        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 4 } })
       }
     })
-  }, [buildSleeveSegments, buildSeveritySegments, showSleeve])
+  }, [buildSleeveSegments])
 
   // Helper: Check if a distance is within a transit zone
   // Add curve markers - DISABLED: curated callouts handle all zones now
@@ -1053,28 +990,27 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // EXACT match to zone labels (Technical/Highway/Urban style)
-      // Dark background, colored border, colored text
+      // Distinct colors - clearer and more visible
       const colors = {
-        danger: '#e879a0',      // Pink like Urban label
-        significant: '#d4a855',
-        sweeper: '#50b8c8',     // Cyan like Highway label  
-        wake_up: '#50c890',
-        section: '#a080d0',     // Purple like Technical label
-        sequence: '#c080a0'
+        danger: '#ff6b8a',      // Bright pink-red
+        significant: '#ffb347', // Bright orange
+        sweeper: '#4fc3f7',     // Bright cyan
+        wake_up: '#69f0ae',     // Bright green
+        section: '#b388ff',     // Bright purple
+        sequence: '#f48fb1'     // Bright pink
       }
       const color = colors[callout.type] || colors.sweeper
       
       el.innerHTML = `
         <div style="
-          background: rgba(15,20,30,0.9);
-          padding: 3px 8px;
+          background: rgba(0,0,0,0.85);
+          padding: 4px 8px;
           border-radius: 4px;
-          border: 1px solid ${color};
+          border: 1.5px solid ${color};
           cursor: pointer;
         " 
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:10px;font-weight:500;color:${color};">${shortLabel}</span>
+          <span style="font-size:11px;font-weight:600;color:${color};">${shortLabel}</span>
         </div>
       `
       
@@ -1099,12 +1035,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
     
+    // Clean up old layers
     for (let i = 0; i < 100; i++) {
-      ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-', 'glow-', 'line-'].forEach(p => { 
+      ['glow-', 'line-'].forEach(p => { 
         if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
       })
-      if (mapRef.current.getSource('sleeve-src-' + i)) mapRef.current.removeSource('sleeve-src-' + i)
-      if (mapRef.current.getSource('sleeve-border-src-' + i)) mapRef.current.removeSource('sleeve-border-src-' + i)
       if (mapRef.current.getSource('route-src-' + i)) mapRef.current.removeSource('route-src-' + i)
     }
     
@@ -1485,17 +1420,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - exact zone label style */}
+            {/* Callout pills - distinct colors */}
             <div className="flex flex-wrap gap-1.5 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
-                // Match zone label colors exactly
+                // Distinct, visible colors
                 const colors = {
-                  danger: '#e879a0',      // Pink like Urban
-                  significant: '#d4a855',
-                  sweeper: '#50b8c8',     // Cyan like Highway
-                  wake_up: '#50c890',
-                  section: '#a080d0',     // Purple like Technical
-                  sequence: '#c080a0'
+                  danger: '#ff6b8a',
+                  significant: '#ffb347',
+                  sweeper: '#4fc3f7',
+                  wake_up: '#69f0ae',
+                  section: '#b388ff',
+                  sequence: '#f48fb1'
                 }
                 const color = colors[callout.type] || colors.sweeper
                 
@@ -1520,11 +1455,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                    className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
                     style={{ 
-                      background: 'rgba(15,20,30,0.9)', 
+                      background: 'rgba(0,0,0,0.85)', 
                       color: color,
-                      border: `1px solid ${color}`
+                      border: `1.5px solid ${color}`
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
