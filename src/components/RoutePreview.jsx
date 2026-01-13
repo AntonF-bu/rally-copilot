@@ -1211,32 +1211,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     {highwayBends.length} sweeps
                   </span>
                 )}
-                {/* NEW: LLM Zone Toggle */}
-                {llmEnhanced && llmResult && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => {
-                        const newUseEnhanced = !useEnhancedZones
-                        setUseEnhancedZones(newUseEnhanced)
-                        const zones = newUseEnhanced ? llmResult.enhanced : llmResult.original
-                        setRouteCharacter(prev => ({ ...prev, segments: zones }))
-                        setRouteZones(zones)
-                        // Re-analyze highway bends
-                        const bends = analyzeHighwayBends(routeData.coordinates, zones)
-                        setHighwayBends(bends)
-                      }}
-                      className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap transition-all"
-                      style={{ 
-                        background: useEnhancedZones ? '#8b5cf620' : '#64748b20', 
-                        color: useEnhancedZones ? '#8b5cf6' : '#64748b', 
-                        border: `1px solid ${useEnhancedZones ? '#8b5cf640' : '#64748b40'}` 
-                      }}
-                      title={`Click to switch to ${useEnhancedZones ? 'original' : 'AI enhanced'} zones\n${llmResult.changes?.length || 0} changes made`}
-                    >
-                      🤖 {useEnhancedZones ? 'AI' : 'Original'} ({llmResult.changes?.length || 0})
-                    </button>
-                  </div>
-                )}
                 {routeCharacter.summary.funPercentage > 0 && (
                   <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
                     {routeCharacter.summary.funPercentage}% fun
@@ -1244,6 +1218,64 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* AI ZONE TOGGLE - Prominent comparison toggle */}
+        {llmEnhanced && llmResult && llmResult.changes?.length > 0 && (
+          <div className="mb-3 p-2 bg-black/60 rounded-lg border border-purple-500/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] text-purple-400 font-medium">🤖 AI Zone Analysis</span>
+              <span className="text-[9px] text-white/40">{llmResult.changes?.length} improvements found</span>
+            </div>
+            
+            {/* Toggle buttons */}
+            <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
+              <button 
+                onClick={() => {
+                  setUseEnhancedZones(false)
+                  const zones = llmResult.original
+                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
+                  setRouteZones(zones)
+                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
+                  setHighwayBends(bends)
+                }}
+                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                style={{ 
+                  background: !useEnhancedZones ? '#64748b' : 'transparent', 
+                  color: !useEnhancedZones ? '#fff' : '#fff6' 
+                }}
+              >
+                Original
+              </button>
+              <button 
+                onClick={() => {
+                  setUseEnhancedZones(true)
+                  const zones = llmResult.enhanced
+                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
+                  setRouteZones(zones)
+                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
+                  setHighwayBends(bends)
+                }}
+                className="flex-1 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all"
+                style={{ 
+                  background: useEnhancedZones ? '#8b5cf6' : 'transparent', 
+                  color: useEnhancedZones ? '#fff' : '#fff6' 
+                }}
+              >
+                🤖 AI Enhanced
+              </button>
+            </div>
+            
+            {/* Show changes summary */}
+            <div className="mt-2 text-[9px] text-white/50 max-h-16 overflow-y-auto">
+              {llmResult.changes?.slice(0, 3).map((change, i) => (
+                <div key={i} className="truncate">• {change}</div>
+              ))}
+              {llmResult.changes?.length > 3 && (
+                <div className="text-white/30">+{llmResult.changes.length - 3} more changes</div>
+              )}
+            </div>
           </div>
         )}
 
