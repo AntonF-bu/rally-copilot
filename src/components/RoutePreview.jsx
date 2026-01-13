@@ -587,43 +587,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       }
       
       // ========================================
-      // PHASE 1.5: POST-PROCESSING BACKUP
+      // PHASE 1.5: POST-PROCESSING
+      // Trust LLM decisions - don't override them
       // ========================================
-      let currentZones = routeCharacter.segments || []
-      if (currentZones.length >= 2) {
-        let totalDist = 0, highwayDist = 0
-        currentZones.forEach(seg => {
-          const len = (seg.endDistance || 0) - (seg.startDistance || 0)
-          totalDist += len
-          if (seg.character === 'transit') highwayDist += len
-        })
-        const highwayPercent = (highwayDist / totalDist) * 100
-        
-        console.log(`🔧 Post-LLM check: Highway ${highwayPercent.toFixed(0)}%`)
-        
-        if (highwayPercent > 60) {
-          let fixedCount = 0
-          const fixedZones = currentZones.map((seg) => {
-            if (seg.character === 'transit') return seg
-            
-            const segLengthMiles = ((seg.endDistance || 0) - (seg.startDistance || 0)) / 1609.34
-            
-            if (segLengthMiles < 5) {
-              console.log(`🔧 Backup fix: ${seg.id} ${seg.character} → transit (${segLengthMiles.toFixed(1)}mi)`)
-              fixedCount++
-              return { ...seg, character: 'transit', backupFixed: true }
-            }
-            return seg
-          })
-          
-          if (fixedCount > 0) {
-            setRouteCharacter(prev => ({ ...prev, segments: fixedZones }))
-            setRouteZones(fixedZones)
-            const bends = analyzeHighwayBends(routeData.coordinates, fixedZones)
-            setHighwayBends(bends)
-          }
-        }
-      }
+      // The LLM has already validated zones, no backup conversion needed
+      // Short technical/urban segments at route start/end are often legitimate
+      console.log(`🔧 Post-LLM: Trusting zone decisions as-is`)
       
       setCopilotProgress(20)
       
