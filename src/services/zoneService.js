@@ -387,74 +387,14 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
   // Segment into contiguous character zones
   let segments = segmentByCharacter(classifiedPoints, coordinates)
   
-  // POST-PROCESSING: Check each segment for sharp curves
-  // If a TRANSIT (highway) segment contains ANY severity 4+ curve, reclassify it
-  segments = segments.map(seg => {
-    if (seg.character !== ROUTE_CHARACTER.TRANSIT) return seg
-    
-    // Find all curves within this segment
-    const segmentCurves = curves.filter(c => {
-      const curveDist = c.distanceFromStart || 0
-      return curveDist >= seg.startDistance && curveDist <= seg.endDistance
-    })
-    
-    console.log(`  📍 Checking TRANSIT segment ${seg.id} (${seg.startDistance.toFixed(0)}m - ${seg.endDistance.toFixed(0)}m): found ${segmentCurves.length} curves`)
-    
-    // Log first curve to see structure
-    if (segmentCurves.length > 0) {
-      console.log('    Sample curve structure:', JSON.stringify(segmentCurves[0], null, 2).slice(0, 500))
-    }
-    
-    // Check for sharp curves - check ALL possible severity indicators
-    const hasSharpCurve = segmentCurves.some(c => {
-      // Get max severity from any possible property
-      let maxSeverity = c.severity || 0
-      
-      // Check severitySequence (e.g., "3-6-5")
-      if (c.severitySequence) {
-        const severities = String(c.severitySequence).split('-').map(Number).filter(n => !isNaN(n))
-        if (severities.length > 0) {
-          maxSeverity = Math.max(maxSeverity, ...severities)
-        }
-      }
-      
-      // Check sequence property (alternative name)
-      if (c.sequence) {
-        const severities = String(c.sequence).split('-').map(Number).filter(n => !isNaN(n))
-        if (severities.length > 0) {
-          maxSeverity = Math.max(maxSeverity, ...severities)
-        }
-      }
-      
-      // Check severities array
-      if (Array.isArray(c.severities)) {
-        maxSeverity = Math.max(maxSeverity, ...c.severities)
-      }
-      
-      // Check maxSeverity property directly
-      if (c.maxSeverity) {
-        maxSeverity = Math.max(maxSeverity, c.maxSeverity)
-      }
-      
-      if (maxSeverity >= 4) {
-        console.log(`    🚨 Sharp curve found: maxSeverity=${maxSeverity}, severity=${c.severity}, severitySequence=${c.severitySequence}, isChicane=${c.isChicane}`)
-        return true
-      }
-      
-      return false
-    })
-    
-    if (hasSharpCurve) {
-      console.log(`  ✅ Segment ${seg.id} reclassified from TRANSIT to TECHNICAL`)  // Was SPIRITED
-      return {
-        ...seg,
-        character: ROUTE_CHARACTER.TECHNICAL,  // Was SPIRITED
-        behavior: CHARACTER_BEHAVIORS[ROUTE_CHARACTER.TECHNICAL]
-      }
-    }
-    
-    return seg
-  })
+  // NOTE: We used to have post-processing here that would reclassify TRANSIT (highway)
+  // segments to TECHNICAL if they had sharp curves. This was WRONG because:
+  // 1. Highway interchanges have sharp curves but are still highways
+  // 2. Highway ramps have tight turns but are still part of the highway
+  // 3. The LLM validation step handles any edge cases
+  // 
+  // Highway classification is now based ONLY on road class and speed limit,
+  // NOT on curve characteristics.
   
   // Generate summary
   const summary = generateSummary(segments, coordinates)
@@ -468,50 +408,47 @@ export async function analyzeRouteCharacter(coordinates, curves = []) {
 /**
  * Final classification considering census density + road characteristics + curves
  * UPDATED: No more SPIRITED
+ * FIXED: Highway classification takes priority over curve density
  */
 function finalClassifyPoint(point) {
   const { densityCategory, roadInfo, roadClass, speedLimit, curveDensity, curveAvgSeverity, curveMaxSeverity } = point
   
-  // CRITICAL: Sharp curves (severity 4+) CANNOT be on a highway
-  // No highway in the world has a 90 degree turn
-  // This overrides all other classification
+  // FIRST: Check if this is a highway based on road class or speed
+  // This takes PRIORITY - highways have curves too (interchanges, ramps)
+  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
+  
+  if (isHighway || speedLimit >= 55) {
+    // This IS a highway - don't let curves override this
+    // Highway interchanges have sharp curves but are still highways!
+    return ROUTE_CHARACTER.TRANSIT
+  }
+  
+  // NOT a highway - now consider curves and density
+  
+  // Sharp curves on non-highways
   if (curveMaxSeverity >= 4) {
-    console.log(`  🚨 Sharp curve detected (severity ${curveMaxSeverity}) - NOT highway`)
-    // If there's a sharp curve, classify based on density
     if (densityCategory === 'urban') {
       return ROUTE_CHARACTER.URBAN
     }
-    // Everything else with sharp curves = TECHNICAL
     return ROUTE_CHARACTER.TECHNICAL
-  }
-  
-  // Highway classification: only if no sharp curves
-  const isHighway = ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(roadClass)
-  if (isHighway || speedLimit >= 55) {
-    // But if highway has lots of curves (mountain road), bump to TECHNICAL
-    if (curveDensity >= 3) {
-      return ROUTE_CHARACTER.TECHNICAL  // Was SPIRITED
-    }
-    return ROUTE_CHARACTER.TRANSIT
   }
 
   // TECHNICAL: Rural/low-density areas = the fun twisty roads
   if (densityCategory === 'rural') {
-    // Rural areas default to TECHNICAL (like Weston, Concord, etc.)
     return ROUTE_CHARACTER.TECHNICAL
   }
 
-  // Suburban now maps to TECHNICAL (was SPIRITED)
+  // Suburban maps to TECHNICAL
   if (densityCategory === 'suburban') {
     return ROUTE_CHARACTER.TECHNICAL
   }
 
-  // Urban density = URBAN (unless highway, handled above)
+  // Urban density = URBAN
   if (densityCategory === 'urban') {
     return ROUTE_CHARACTER.URBAN
   }
 
-  // Fallback to TECHNICAL (was SPIRITED)
+  // Fallback to TECHNICAL
   return point.character || ROUTE_CHARACTER.TECHNICAL
 }
 
