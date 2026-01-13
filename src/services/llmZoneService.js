@@ -62,7 +62,7 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
           { role: 'user', content: prompt }
         ],
         temperature: 0.2,  // Low for consistency
-        max_tokens: 2000
+        max_tokens: 4000   // Increased to prevent truncation
       })
     })
 
