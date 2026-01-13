@@ -110,158 +110,68 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
  * Comprehensive system prompt
  */
 function getSystemPrompt() {
-  return `You are an expert driving route analyst for a rally co-pilot navigation app. Your job is to CORRECT zone classifications.
+  return `You are a driving route analyst. Classify road segments as: highway, technical, or urban.
 
-## ZONE TYPES
+RULES:
+1. SANDWICH RULE: If a segment is between two highway segments → it's highway
+2. Road names with "I-" or "Interstate" or "Turnpike" → highway  
+3. motorway/trunk road class → highway
+4. Gas stations, parking lots → urban
+5. Winding backroads → technical
 
-**HIGHWAY** (you must return: "highway")
-- Interstates, turnpikes, major highways (I-95, I-93, Route 128, etc.)
-- High-speed roads with limited access
-- Includes ALL on-ramps and off-ramps
-- ANY section between two highway sections (sandwich rule)
+RESPOND WITH COMPACT JSON ONLY. Use this exact format:
+{"d":[{"i":0,"n":"highway","r":"reason"},{"i":1,"n":"technical","r":"reason"}]}
 
-**TECHNICAL** (you must return: "technical")  
-- Winding backroads, mountain roads, scenic routes
-- Country roads, forest roads
-- ONLY use when driver has EXITED the highway system entirely
+Where:
+- d = decisions array
+- i = segment index
+- n = new classification (highway/technical/urban)
+- r = short reason (max 10 words)
 
-**URBAN** (you must return: "urban")
-- City streets, downtown areas, parking lots
-- Gas stations, shopping centers, residential areas
-
-## CRITICAL RULES
-
-1. **SANDWICH RULE (MOST IMPORTANT)**
-   If a segment is marked ⚠️ SANDWICHED between HIGHWAY segments:
-   → It is almost CERTAINLY highway
-   → Change it to "highway" unless you have STRONG evidence it's a different road
-   → Highway interchanges have curves but are still highway!
-
-2. **Road Names**
-   - "I-XX", "Interstate", "US-XX" → HIGHWAY
-   - "Route XX" at high speed → HIGHWAY
-   - Local street names after exiting → TECHNICAL or URBAN
-
-3. **START/END segments**
-   - Start at gas station/parking → likely URBAN
-   - End in neighborhood → likely TECHNICAL or URBAN
-   - But if next/prev segment is HIGHWAY and this is short → might still be HIGHWAY
-
-## YOUR OUTPUT
-
-For EACH segment, you MUST return:
-- segmentIndex: the segment number
-- newClassification: "highway" OR "technical" OR "urban" (lowercase!)
-- confidence: 0.0-1.0
-- reason: brief explanation
-
-IMPORTANT: If a segment should CHANGE, make sure newClassification is DIFFERENT from currentClassification!
-
-Example - if segment is currently "technical" but should be highway:
-{
-  "segmentIndex": 2,
-  "currentClassification": "technical",
-  "newClassification": "highway",  // THIS MUST BE "highway" TO CHANGE IT!
-  "confidence": 0.9,
-  "reason": "Sandwiched between highway segments, still on I-93"
-}
-
-Return valid JSON only.`
+ONLY include segments that need to CHANGE. Skip segments that are already correct.`
 }
 
 /**
- * Build comprehensive prompt with ALL available data
+ * Build compact prompt with essential data only
  */
 function buildComprehensivePrompt(segments, routeData) {
-  // Extract route-level info
-  const totalDistance = routeData?.distance || 0
-  const totalDistanceMiles = (totalDistance / 1609.34).toFixed(1)
+  const totalDistanceMiles = ((routeData?.distance || 0) / 1609.34).toFixed(1)
   
-  // Get start/end coordinates for context
-  const startCoord = routeData?.coordinates?.[0]
-  const endCoord = routeData?.coordinates?.[routeData.coordinates.length - 1]
-  
-  // Calculate current classification breakdown
-  let highwayDist = 0, techDist = 0, urbanDist = 0
-  segments.forEach(seg => {
-    const len = (seg.endDistance || 0) - (seg.startDistance || 0)
-    if (seg.character === 'transit') highwayDist += len
-    else if (seg.character === 'technical') techDist += len
-    else if (seg.character === 'urban') urbanDist += len
-  })
-  
-  const highwayPct = totalDistance > 0 ? Math.round((highwayDist / totalDistance) * 100) : 0
-  const techPct = totalDistance > 0 ? Math.round((techDist / totalDistance) * 100) : 0
-  const urbanPct = totalDistance > 0 ? Math.round((urbanDist / totalDistance) * 100) : 0
-
-  // Build segment details
-  const segmentDetails = segments.map((seg, i) => {
+  // Build compact segment list
+  const segmentList = segments.map((seg, i) => {
     const prevSeg = segments[i - 1]
     const nextSeg = segments[i + 1]
-    const lengthMiles = ((seg.endDistance - seg.startDistance) / 1609.34).toFixed(2)
+    const lengthMi = ((seg.endDistance - seg.startDistance) / 1609.34).toFixed(1)
     
-    // Collect all road names in this segment
-    const roadNames = seg.roadNames || seg.details?.roadNames || []
-    const uniqueRoadNames = [...new Set(roadNames)].filter(Boolean)
+    const roadNames = seg.details?.roadNames?.join(', ') || 'unknown'
+    const roadClasses = seg.details?.roadClasses?.join(', ') || 'unknown'
+    const avgSpeed = Math.round(seg.details?.avgSpeedLimit || 0)
     
-    // Get road classes
-    const roadClasses = seg.roadClasses || seg.details?.roadClasses || []
-    const uniqueRoadClasses = [...new Set(roadClasses)].filter(Boolean)
-    
-    // Speed info
-    const avgSpeed = seg.details?.avgSpeedLimit || seg.avgSpeedLimit || 'unknown'
-    const minSpeed = seg.details?.minSpeedLimit || seg.minSpeedLimit || avgSpeed
-    const maxSpeed = seg.details?.maxSpeedLimit || seg.maxSpeedLimit || avgSpeed
-    
-    // Position context
-    let positionContext = ''
-    if (i === 0) positionContext = '⚠️ START OF ROUTE'
-    else if (i === segments.length - 1) positionContext = '⚠️ END OF ROUTE'
+    // Flag sandwiched segments
+    let flag = ''
+    if (i === 0) flag = '[START]'
+    else if (i === segments.length - 1) flag = '[END]'
     else if (prevSeg?.character === 'transit' && nextSeg?.character === 'transit' && seg.character !== 'transit') {
-      positionContext = '⚠️ SANDWICHED between HIGHWAY segments'
+      flag = '[SANDWICHED!]'
     }
     
-    // Neighbor info
-    const prevChar = prevSeg ? prevSeg.character.toUpperCase() : 'none'
-    const nextChar = nextSeg ? nextSeg.character.toUpperCase() : 'none'
+    const prev = prevSeg ? prevSeg.character : '-'
+    const next = nextSeg ? nextSeg.character : '-'
     
-    return `
-SEGMENT ${i}: ${seg.character.toUpperCase()} (${lengthMiles} mi)
-├─ Distance: ${(seg.startDistance/1609.34).toFixed(2)} - ${(seg.endDistance/1609.34).toFixed(2)} miles
-├─ Road Names: ${uniqueRoadNames.length > 0 ? uniqueRoadNames.join(', ') : 'unknown'}
-├─ Road Classes: ${uniqueRoadClasses.length > 0 ? uniqueRoadClasses.join(', ') : seg.details?.roadClass || 'unknown'}
-├─ Speed: avg ${avgSpeed} mph (range: ${minSpeed}-${maxSpeed})
-├─ Density: ${seg.details?.densityCategory || 'unknown'} (${seg.details?.density || '?'}/sq mi)
-├─ Curves: ${seg.curveCount || seg.details?.avgCurveDensity || 0} curves, max severity ${seg.maxSeverity || '?'}
-├─ Neighbors: prev=${prevChar}, next=${nextChar}
-${positionContext ? `└─ ${positionContext}` : '└─ (middle segment)'}`
+    return `${i}: ${seg.character} ${lengthMi}mi | roads:${roadNames} | class:${roadClasses} | ${avgSpeed}mph | prev:${prev} next:${next} ${flag}`
   }).join('\n')
 
-  return `
-=== ROUTE ANALYSIS REQUEST ===
+  return `Route: ${totalDistanceMiles}mi, ${segments.length} segments
 
-ROUTE OVERVIEW:
-• Total Distance: ${totalDistanceMiles} miles
-• Segments: ${segments.length}
-• Current Breakdown: ${highwayPct}% Highway, ${techPct}% Technical, ${urbanPct}% Urban
-• Start Coordinates: [${startCoord?.[0]?.toFixed(4)}, ${startCoord?.[1]?.toFixed(4)}]
-• End Coordinates: [${endCoord?.[0]?.toFixed(4)}, ${endCoord?.[1]?.toFixed(4)}]
+SEGMENTS:
+${segmentList}
 
-=== SEGMENTS TO ANALYZE ===
-${segmentDetails}
-
-=== INSTRUCTIONS ===
-1. Analyze EVERY segment
-2. Check if classifications are correct
-3. Pay special attention to segments marked with ⚠️
-4. Look for road name patterns (I-XX = Interstate, etc.)
-5. Consider the full route context
-
-Return your analysis as JSON.`
+Return ONLY segments that need to CHANGE using compact format:
+{"d":[{"i":INDEX,"n":"highway|technical|urban","r":"reason"}]}`
 }
 
 /**
- * Parse LLM response
+ * Parse LLM response - handles compact format
  */
 function parseResponse(content) {
   try {
@@ -281,11 +191,37 @@ function parseResponse(content) {
     }
     
     const parsed = JSON.parse(jsonStr)
-    return parsed
+    
+    // Handle compact format: {"d":[{"i":0,"n":"highway","r":"reason"}]}
+    if (parsed.d && Array.isArray(parsed.d)) {
+      console.log(`📋 Parsed compact format: ${parsed.d.length} decisions`)
+      return {
+        decisions: parsed.d.map(d => ({
+          segmentIndex: d.i,
+          newClassification: d.n,
+          reason: d.r,
+          confidence: 0.9
+        }))
+      }
+    }
+    
+    // Handle standard format: {"decisions":[...]}
+    if (parsed.decisions) {
+      return parsed
+    }
+    
+    // Handle array format: [{...}, {...}]
+    if (Array.isArray(parsed)) {
+      return { decisions: parsed }
+    }
+    
+    console.warn('⚠️ Unknown response format:', Object.keys(parsed))
+    return { decisions: [] }
     
   } catch (err) {
     console.error('Failed to parse LLM response:', err)
-    return { decisions: [], overallAnalysis: 'Parse error' }
+    console.error('Raw content:', content?.slice(0, 500))
+    return { decisions: [] }
   }
 }
 
