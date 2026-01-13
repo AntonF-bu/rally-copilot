@@ -1050,38 +1050,37 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Soft watercolor palette - muted, desaturated tones
+      // Vibrant but refined palette - clear and distinguishable
       const colors = {
-        danger: { bg: 'rgba(180,100,100,0.25)', border: 'rgba(180,100,100,0.5)', text: '#c8a0a0' },
-        significant: { bg: 'rgba(180,150,100,0.25)', border: 'rgba(180,150,100,0.5)', text: '#c8bba0' },
-        sweeper: { bg: 'rgba(100,130,180,0.25)', border: 'rgba(100,130,180,0.5)', text: '#a0b0c8' },
-        wake_up: { bg: 'rgba(100,160,130,0.25)', border: 'rgba(100,160,130,0.5)', text: '#a0c8b8' },
-        section: { bg: 'rgba(140,120,170,0.25)', border: 'rgba(140,120,170,0.5)', text: '#b8a8c8' },
-        sequence: { bg: 'rgba(160,120,140,0.25)', border: 'rgba(160,120,140,0.5)', text: '#c8a8b8' }
+        danger: { bg: '#dc2626', text: '#fff' },      // Vibrant red
+        significant: { bg: '#f59e0b', text: '#000' }, // Amber/orange
+        sweeper: { bg: '#0ea5e9', text: '#fff' },     // Sky blue
+        wake_up: { bg: '#22c55e', text: '#000' },     // Green
+        section: { bg: '#a855f7', text: '#fff' },     // Purple
+        sequence: { bg: '#ec4899', text: '#fff' }     // Pink
       }
       const c = colors[callout.type] || colors.sweeper
       
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Soft watercolor glass style
+      // Clean pill style - solid color, readable
       el.innerHTML = `
         <div style="
-          display:flex;
+          display:inline-flex;
           align-items:center;
           justify-content:center;
           background:${c.bg};
-          padding:3px 7px;
+          padding:2px 6px;
           border-radius:4px;
-          border:1px solid ${c.border};
-          backdrop-filter:blur(8px);
+          box-shadow:0 2px 4px rgba(0,0,0,0.3);
           cursor:pointer;
-          transition:all 0.2s ease;
+          transition:all 0.15s ease;
         " 
-        onmouseover="this.style.background='${c.bg.replace('0.25', '0.4')}'" 
-        onmouseout="this.style.background='${c.bg}'"
+        onmouseover="this.style.transform='scale(1.1)';this.style.boxShadow='0 4px 8px rgba(0,0,0,0.4)'" 
+        onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 2px 4px rgba(0,0,0,0.3)'"
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;${callout.reason || ''}">
-          <span style="font-size:9px;font-weight:500;color:${c.text};white-space:nowrap;letter-spacing:0.3px;">${shortLabel}</span>
+          <span style="font-size:10px;font-weight:700;color:${c.text};white-space:nowrap;">${shortLabel}</span>
         </div>
       `
       
@@ -1492,17 +1491,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               </div>
             )}
             
-            {/* Callout pills - soft watercolor style */}
+            {/* Callout pills - vibrant solid style */}
             <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto mt-1">
               {curatedCallouts.map((callout, i) => {
-                // Soft watercolor palette
+                // Vibrant palette matching map markers
                 const colors = {
-                  danger: { bg: 'rgba(180,100,100,0.2)', border: 'rgba(180,100,100,0.4)', text: '#c8a0a0' },
-                  significant: { bg: 'rgba(180,150,100,0.2)', border: 'rgba(180,150,100,0.4)', text: '#c8bba0' },
-                  sweeper: { bg: 'rgba(100,130,180,0.2)', border: 'rgba(100,130,180,0.4)', text: '#a0b0c8' },
-                  wake_up: { bg: 'rgba(100,160,130,0.2)', border: 'rgba(100,160,130,0.4)', text: '#a0c8b8' },
-                  section: { bg: 'rgba(140,120,170,0.2)', border: 'rgba(140,120,170,0.4)', text: '#b8a8c8' },
-                  sequence: { bg: 'rgba(160,120,140,0.2)', border: 'rgba(160,120,140,0.4)', text: '#c8a8b8' }
+                  danger: { bg: '#dc2626', text: '#fff' },
+                  significant: { bg: '#f59e0b', text: '#000' },
+                  sweeper: { bg: '#0ea5e9', text: '#fff' },
+                  wake_up: { bg: '#22c55e', text: '#000' },
+                  section: { bg: '#a855f7', text: '#fff' },
+                  sequence: { bg: '#ec4899', text: '#fff' }
                 }
                 const c = colors[callout.type] || colors.sweeper
                 
@@ -1527,11 +1526,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                         mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                       }
                     }}
-                    className="px-1.5 py-0.5 rounded text-[9px] font-medium whitespace-nowrap transition-all hover:opacity-70"
+                    className="px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap transition-all hover:opacity-80 hover:scale-105"
                     style={{ 
                       background: c.bg, 
-                      color: c.text,
-                      border: `1px solid ${c.border}`
+                      color: c.text
                     }}
                     title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                   >
