@@ -1,8 +1,10 @@
 // ================================
-// LLM Callout Curator v1.0
+// LLM Callout Curator v2.0
 // 
-// Takes rich road flow data and uses LLM to make
-// intelligent decisions about what to call out
+// Zone-aware intelligent callout curation
+// - Technical: EVERY curve matters, short precise callouts with speed
+// - Highway: All feelable bends + flow narration for sequences
+// - Urban: Very selective, only major turns
 // ================================
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
@@ -17,7 +19,7 @@ export async function curateCalloutsWithLLM(flowData, routeInfo, apiKey) {
     return null
   }
   
-  console.log('🧠 LLM Callout Curator starting...')
+  console.log('🧠 LLM Callout Curator v2.0 starting...')
   const startTime = Date.now()
   
   try {
@@ -39,7 +41,7 @@ export async function curateCalloutsWithLLM(flowData, routeInfo, apiKey) {
           { role: 'user', content: prompt }
         ],
         temperature: 0.3,
-        max_tokens: 2000
+        max_tokens: 4000  // Increased for technical sections with many callouts
       })
     })
     
@@ -73,87 +75,137 @@ export async function curateCalloutsWithLLM(flowData, routeInfo, apiKey) {
 }
 
 function getSystemPrompt() {
-  return `You are an expert rally co-driver analyzing a route to decide what the driver needs to hear.
+  return `You are an expert rally co-driver. Your job is to decide what the driver NEEDS to hear for a safe and engaging drive.
 
-You receive detailed road flow data - continuous samples showing exactly how the road curves. Use this to understand the route's character and decide what callouts are needed.
+THE DRIVING CONTEXT:
+- Driver is enthusiastic, driving spirited on back roads
+- Eyes must stay on the road - they rely 100% on your voice
+- In technical sections: probably doing 60 in a 35 zone - EVERY curve matters
+- On highways: cruising at 70-80mph, need to know what's coming
+- In urban: slow, traffic-managed, only call major turns
 
-ROLE: You're the co-driver. The driver can't look at the map. They need AUDIO warnings about what's ahead. You decide what's important enough to say out loud.
+=== ZONE STRATEGIES ===
 
-IMPORTANT: Be GENEROUS with callouts. It's better to call too many curves than miss one that surprises the driver. Aim for 20-40 callouts on a typical 50+ mile route.
+🔴 TECHNICAL ZONES (winding back roads, 35-45mph zones driven at 50-65mph):
+- Call EVERY curve 15°+ 
+- Format: Include recommended speed - "Right 45mph 30°" or "Hard left 35mph"
+- For tight sequences: Call each one, or use "Right-left-right, stay tight"
+- NEVER skip a curve - driver is pushing hard and needs constant guidance
+- Typical: 3-5 callouts per mile in technical sections
 
-ZONE RULES:
-- URBAN zones: Call curves 60°+ (these are significant in urban context).
-- TRANSIT/HIGHWAY zones: Call out curves 25°+ that matter. After 3+ miles of straight, call 15°+.
-- TECHNICAL zones: Call curves 20°+. These roads are engaging - don't skip!
+🔵 HIGHWAY/TRANSIT ZONES (interstates, highways at 65-80mph):
+- Call ALL bends you can FEEL at speed (typically 15°+)
+- For sequences within 0.5mi: Narrate the flow
+  Example: "Left 25, rolls into soft right, then straight - open throttle"
+- Call danger curves (45°+) with emphasis: "CAUTION right 60"
+- Wake-up calls after 5+ miles straight: "Bend ahead" even for 15° curves
+- On/off ramps are CRITICAL - always call these (often 90°+ turns)
 
-WHAT TO CALL OUT:
-- URBAN: Any curve 60°+ 
-- TRANSIT/HIGHWAY: 
-  * Any curve 45°+ (danger - always call)
-  * Any curve 30°+ (significant - call it)
-  * Any curve 25°+ that breaks the rhythm
-  * Any curve 15°+ after 3+ miles of straight road
-  * Wake-up calls after 6+ miles of straight
-- TECHNICAL: Any curve 20°+ (these roads are fun, call the action!)
-- Sequences of 2-3 curves within 0.5 miles
-- Zone transitions: "Technical ahead" when entering technical
+🟢 URBAN ZONES (city streets, 25-35mph):
+- Very selective - only call 70°+ turns
+- Driver is managing traffic, lights, pedestrians
+- Format: Just direction - "Hard right ahead"
 
-CALLOUT TEXT FORMAT:
-- Keep it SHORT: "Right 45" or "Hard left" or "Right then left"
-- No need to say "degrees" - just the number
-- For sequences: "Two rights" or "Left-right-left"
-- For technical entry: "Technical ahead"
+=== ABSOLUTE RULES ===
 
-OUTPUT FORMAT:
-Return a JSON object with:
+⚠️ NEVER SKIP:
+1. Any curve 70°+ (these are dangerous at any speed)
+2. Highway offramp turns (usually 90°, critical speed change)
+3. Zone transitions ("Technical section ahead")
+4. First curve after 5+ miles of straight road
+
+⚠️ SEQUENCE HANDLING:
+When 3+ curves are within 0.3 miles:
+- OPTION A: Call as sequence "Right-left-right" at start
+- OPTION B: Call each one rapidly
+- OPTION C: For highway, narrate: "Sweeping right, opens to left, hold the line"
+Choose based on zone - technical needs each one, highway can narrate flow
+
+=== CALLOUT FORMAT ===
+
+TECHNICAL:
+- "Right 45mph 25°" (direction, speed, angle)
+- "Hard left, tightens" (for decreasing radius)
+- "Double right" (two similar direction curves)
+
+HIGHWAY:
+- "Right 30" (direction, angle)
+- "Sweeping left, long" (for gradual bends)
+- "Right 40 into left 25" (for sequences)
+- "CAUTION - hard right 70°" (for danger curves)
+
+URBAN:
+- "Hard right" 
+- "Sharp left ahead"
+
+TRANSITIONS:
+- "Technical section ahead - stay sharp"
+- "Highway opens up"
+
+=== OUTPUT FORMAT ===
+
+Return JSON:
 {
-  "analysis": "Brief description of route character",
+  "analysis": "Brief route character summary",
   "callouts": [
     {
       "mile": 2.5,
-      "type": "danger|significant|sweeper|wake_up|section|sequence",
-      "text": "Short callout (2-4 words)",
+      "type": "danger|significant|sweeper|sequence|transition|wake_up",
+      "text": "The actual callout text",
       "reason": "Why this matters"
     }
   ]
 }
 
-Remember: MORE callouts is better than fewer. A good co-driver keeps the driver engaged and informed throughout the drive.`
+EXPECTED CALLOUT COUNTS:
+- Technical zone: 3-5 per mile (for 10mi technical = 30-50 callouts)
+- Highway zone: 1-2 per 5 miles average, more in curvy sections
+- Urban zone: 1-3 total unless very twisty
+
+Remember: In technical zones, MORE IS BETTER. The driver is pushing hard and trusts you completely.`
 }
 
 function buildCurationPrompt(flowData, routeInfo) {
   const { events } = flowData
   const totalMiles = routeInfo.totalMiles || 0
   
-  // Group events by rough sections for easier reading
-  const sections = []
-  let currentSection = { startMile: 0, events: [], character: 'unknown' }
-  
-  events.forEach((event, i) => {
-    // Start new section if big gap or zone change
-    const prevEvent = events[i - 1]
-    const gap = prevEvent ? event.apexMile - prevEvent.apexMile : 0
-    
-    if (gap > 5 || (prevEvent && prevEvent.zoneType !== event.zoneType)) {
-      if (currentSection.events.length > 0) {
-        currentSection.endMile = prevEvent?.apexMile || currentSection.startMile
-        currentSection.character = classifySection(currentSection.events)
-        sections.push(currentSection)
-      }
-      currentSection = { startMile: event.apexMile, events: [], character: 'unknown' }
-    }
-    
-    currentSection.events.push(event)
-  })
-  
-  // Don't forget last section
-  if (currentSection.events.length > 0) {
-    currentSection.endMile = events[events.length - 1]?.apexMile || currentSection.startMile
-    currentSection.character = classifySection(currentSection.events)
-    sections.push(currentSection)
+  // Separate events by zone for zone-specific analysis
+  const zoneEvents = {
+    technical: events.filter(e => e.zoneType === 'technical'),
+    transit: events.filter(e => e.zoneType === 'transit'),
+    urban: events.filter(e => e.zoneType === 'urban')
   }
   
-  // Detect sequences (curves within 0.3 miles of each other)
+  // Build the prompt
+  let prompt = `ROUTE OVERVIEW: ${totalMiles.toFixed(1)} miles total\n`
+  prompt += `Events by zone: Technical=${zoneEvents.technical.length}, Highway=${zoneEvents.transit.length}, Urban=${zoneEvents.urban.length}\n\n`
+  
+  // Zone summary
+  prompt += `=== ZONE BREAKDOWN ===\n`
+  
+  // Find zone boundaries
+  const zoneBoundaries = []
+  let currentZone = events[0]?.zoneType
+  let zoneStart = 0
+  events.forEach((e, i) => {
+    if (e.zoneType !== currentZone) {
+      zoneBoundaries.push({ zone: currentZone, start: zoneStart, end: e.apexMile })
+      currentZone = e.zoneType
+      zoneStart = e.apexMile
+    }
+  })
+  if (events.length > 0) {
+    zoneBoundaries.push({ zone: currentZone, start: zoneStart, end: totalMiles })
+  }
+  
+  zoneBoundaries.forEach(z => {
+    const length = (z.end - z.start).toFixed(1)
+    const eventsInZone = events.filter(e => e.apexMile >= z.start && e.apexMile <= z.end)
+    const density = eventsInZone.length / Math.max(0.1, z.end - z.start)
+    prompt += `${z.zone.toUpperCase()}: Miles ${z.start.toFixed(1)}-${z.end.toFixed(1)} (${length}mi) - ${eventsInZone.length} events (${density.toFixed(1)}/mi)\n`
+  })
+  
+  // Identify sequences (curves within 0.3mi)
   const sequences = []
   let currentSeq = []
   events.forEach((event, i) => {
@@ -161,98 +213,124 @@ function buildCurationPrompt(flowData, routeInfo) {
     const gap = prevEvent ? event.apexMile - prevEvent.apexMile : 999
     
     if (gap <= 0.3) {
-      if (currentSeq.length === 0 && prevEvent) {
-        currentSeq.push(prevEvent)
-      }
+      if (currentSeq.length === 0 && prevEvent) currentSeq.push(prevEvent)
       currentSeq.push(event)
     } else {
-      if (currentSeq.length >= 2) {
-        sequences.push([...currentSeq])
-      }
+      if (currentSeq.length >= 2) sequences.push([...currentSeq])
       currentSeq = []
     }
   })
-  if (currentSeq.length >= 2) {
-    sequences.push(currentSeq)
-  }
+  if (currentSeq.length >= 2) sequences.push(currentSeq)
   
-  // Build the prompt
-  let prompt = `ROUTE: ${totalMiles.toFixed(1)} miles\n\n`
-  
-  // Section overview
-  prompt += `SECTIONS OVERVIEW:\n`
-  sections.forEach((section, i) => {
-    const length = (section.endMile - section.startMile).toFixed(1)
-    const eventCount = section.events.length
-    const maxAngle = Math.max(...section.events.map(e => e.totalAngle))
-    prompt += `${i + 1}. Miles ${section.startMile.toFixed(1)}-${section.endMile.toFixed(1)} (${length}mi): ${section.character.toUpperCase()} - ${eventCount} events, max ${maxAngle}°\n`
-  })
-  
-  // Sequences (close curves that should be called together)
   if (sequences.length > 0) {
-    prompt += `\n⚠️ SEQUENCES (curves within 0.3mi - call these TOGETHER):\n`
+    prompt += `\n=== SEQUENCES (handle as groups) ===\n`
     sequences.forEach((seq, i) => {
-      const dirs = seq.map(e => e.direction[0]).join('-')  // "R-L-R"
-      const angles = seq.map(e => e.totalAngle).join('°, ') + '°'
-      const startMile = seq[0].apexMile.toFixed(1)
-      prompt += `  ${i + 1}. Mile ${startMile}: ${dirs} sequence (${angles})\n`
+      const dirs = seq.map(e => `${e.direction[0]}${e.totalAngle}`).join(' → ')
+      const zone = seq[0].zoneType
+      prompt += `Mile ${seq[0].apexMile.toFixed(1)} [${zone}]: ${dirs}\n`
     })
   }
   
-  // Gaps (straight sections)
-  prompt += `\nSTRAIGHT SECTIONS (gaps between events):\n`
+  // Identify long straights (wake-up opportunities)
+  prompt += `\n=== STRAIGHT SECTIONS (5+ miles) ===\n`
   let lastMile = 0
+  let straightCount = 0
   events.forEach(event => {
     const gap = event.apexMile - lastMile
-    if (gap >= 3) {
-      prompt += `  Miles ${lastMile.toFixed(1)}-${event.apexMile.toFixed(1)}: ${gap.toFixed(1)} miles straight\n`
+    if (gap >= 5) {
+      prompt += `Miles ${lastMile.toFixed(1)}-${event.apexMile.toFixed(1)}: ${gap.toFixed(1)}mi straight → NEXT CURVE: ${event.direction} ${event.totalAngle}° [${event.zoneType}]\n`
+      straightCount++
     }
     lastMile = event.apexMile
   })
-  if (totalMiles - lastMile >= 3) {
-    prompt += `  Miles ${lastMile.toFixed(1)}-${totalMiles.toFixed(1)}: ${(totalMiles - lastMile).toFixed(1)} miles straight\n`
+  if (straightCount === 0) prompt += `None - route is consistently engaging\n`
+  
+  // Danger curves (MUST call)
+  const dangerCurves = events.filter(e => e.totalAngle >= 70 || e.type === 'danger')
+  if (dangerCurves.length > 0) {
+    prompt += `\n=== ⚠️ DANGER CURVES (MUST CALL ALL) ===\n`
+    dangerCurves.forEach(e => {
+      prompt += `Mile ${e.apexMile.toFixed(1)}: ${e.direction} ${e.totalAngle}° [${e.zoneType}] - ${e.shape}\n`
+    })
   }
   
-  // All events with detail
-  prompt += `\nALL ROAD EVENTS (${events.length} total):\n`
-  prompt += `Mile  | Dir   | Angle | Shape    | Type        | Zone\n`
-  prompt += `------|-------|-------|----------|-------------|--------\n`
+  // Technical zone detail (call everything)
+  if (zoneEvents.technical.length > 0) {
+    prompt += `\n=== 🔴 TECHNICAL ZONE EVENTS (call ALL 15°+) ===\n`
+    prompt += `Mile  | Dir   | Angle | Shape    | Notes\n`
+    prompt += `------|-------|-------|----------|-------\n`
+    zoneEvents.technical.forEach(e => {
+      const mile = e.apexMile.toFixed(1).padStart(5)
+      const dir = e.direction.padEnd(5)
+      const angle = `${e.totalAngle}°`.padStart(5)
+      const shape = e.shape.padEnd(8)
+      const notes = e.type === 'danger' ? '⚠️ DANGER' : ''
+      prompt += `${mile} | ${dir} | ${angle} | ${shape} | ${notes}\n`
+    })
+  }
   
-  events.forEach(e => {
-    const mile = e.apexMile.toFixed(1).padStart(5)
-    const dir = e.direction.padEnd(5)
-    const angle = `${e.totalAngle}°`.padStart(5)
-    const shape = e.shape.padEnd(8)
-    const type = e.type.padEnd(11)
-    const zone = e.zoneType
-    prompt += `${mile} | ${dir} | ${angle} | ${shape} | ${type} | ${zone}\n`
+  // Highway zone detail
+  if (zoneEvents.transit.length > 0) {
+    prompt += `\n=== 🔵 HIGHWAY ZONE EVENTS ===\n`
+    prompt += `Mile  | Dir   | Angle | Shape    | Type        | Notes\n`
+    prompt += `------|-------|-------|----------|-------------|-------\n`
+    zoneEvents.transit.forEach(e => {
+      const mile = e.apexMile.toFixed(1).padStart(5)
+      const dir = e.direction.padEnd(5)
+      const angle = `${e.totalAngle}°`.padStart(5)
+      const shape = e.shape.padEnd(8)
+      const type = e.type.padEnd(11)
+      let notes = ''
+      if (e.totalAngle >= 70) notes = '⚠️ DANGER'
+      else if (e.totalAngle >= 45) notes = '⚠️ CAUTION'
+      else if (e.totalAngle >= 25) notes = 'feelable'
+      prompt += `${mile} | ${dir} | ${angle} | ${shape} | ${type} | ${notes}\n`
+    })
+  }
+  
+  // Urban zone detail  
+  if (zoneEvents.urban.length > 0) {
+    prompt += `\n=== 🟢 URBAN ZONE EVENTS (only call 70°+) ===\n`
+    zoneEvents.urban.forEach(e => {
+      if (e.totalAngle >= 50) {
+        prompt += `Mile ${e.apexMile.toFixed(1)}: ${e.direction} ${e.totalAngle}° - ${e.totalAngle >= 70 ? 'CALL THIS' : 'optional'}\n`
+      }
+    })
+  }
+  
+  // Zone transitions
+  prompt += `\n=== ZONE TRANSITIONS ===\n`
+  zoneBoundaries.forEach((z, i) => {
+    if (i > 0) {
+      const prevZone = zoneBoundaries[i-1].zone
+      prompt += `Mile ${z.start.toFixed(1)}: ${prevZone.toUpperCase()} → ${z.zone.toUpperCase()}\n`
+    }
   })
   
-  prompt += `\nBased on this data, decide what callouts the driver needs. Return JSON.`
+  prompt += `\n=== GENERATE CALLOUTS ===
+Based on the above data, generate callouts following zone strategies:
+- Technical: Call EVERY curve 15°+ with speed recommendation
+- Highway: Call bends you can feel, narrate sequences, emphasize danger
+- Urban: Only 70°+
+- NEVER skip danger curves or offramp turns
+
+Return JSON with your callouts.`
   
   return prompt
-}
-
-function classifySection(events) {
-  if (events.length === 0) return 'empty'
-  
-  const avgAngle = events.reduce((sum, e) => sum + e.totalAngle, 0) / events.length
-  const maxAngle = Math.max(...events.map(e => e.totalAngle))
-  const density = events.length / Math.max(1, events[events.length - 1].apexMile - events[0].apexMile)
-  
-  if (maxAngle >= 70 || avgAngle >= 40) return 'technical'
-  if (density > 3 && avgAngle >= 25) return 'winding'
-  if (avgAngle >= 20) return 'flowing'
-  return 'gentle'
 }
 
 function parseCurationResponse(content, flowData) {
   try {
     // Extract JSON from response
     let jsonStr = content
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
-      jsonStr = jsonMatch[0]
+      jsonStr = jsonMatch[1]
+    } else {
+      const objectMatch = content.match(/\{[\s\S]*\}/)
+      if (objectMatch) {
+        jsonStr = objectMatch[0]
+      }
     }
     
     const parsed = JSON.parse(jsonStr)
@@ -267,17 +345,19 @@ function parseCurationResponse(content, flowData) {
       }, null)
       
       return {
-        id: `llm-${callout.mile.toFixed(1)}`,
+        id: `llm-${callout.mile.toFixed(2)}`,
         mile: callout.mile,
-        triggerMile: Math.max(callout.mile - 0.3, 0), // Trigger slightly before
+        triggerMile: Math.max(callout.mile - 0.3, 0),
         triggerDistance: Math.max(callout.mile - 0.3, 0) * 1609.34,
         type: callout.type || 'info',
         text: callout.text,
         reason: callout.reason,
         position: nearestEvent?.position || null,
-        zone: nearestEvent?.zoneType || 'transit', // Get zone from nearest event
+        zone: nearestEvent?.zoneType || 'transit',
         severity: callout.type === 'danger' ? 'critical' : 
-                  callout.type === 'wake_up' ? 'medium' : 'high'
+                  callout.type === 'wake_up' ? 'medium' : 'high',
+        angle: nearestEvent?.totalAngle || null,
+        direction: nearestEvent?.direction || null
       }
     })
     
@@ -289,7 +369,9 @@ function parseCurationResponse(content, flowData) {
     
   } catch (err) {
     console.warn('⚠️ Failed to parse LLM response:', err.message)
-    console.log('Raw content:', content)
+    console.log('Raw content:', content?.slice(0, 500))
     return { analysis: '', callouts: [], raw: null }
   }
 }
+
+export default { curateCalloutsWithLLM }
