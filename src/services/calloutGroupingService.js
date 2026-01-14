@@ -98,24 +98,39 @@ function groupCallouts(callouts, minGap, zoneType) {
   
   const result = []
   let currentGroup = [callouts[0]]
+  let groupsFormed = 0
   
   for (let i = 1; i < callouts.length; i++) {
     const current = callouts[i]
     const prev = callouts[i - 1]
-    const gap = current.mile - prev.mile
     
-    if (gap < minGap) {
+    // Use triggerMile or mile - callouts from RoutePreview use triggerMile
+    const currentMile = current.triggerMile ?? current.mile ?? 0
+    const prevMile = prev.triggerMile ?? prev.mile ?? 0
+    const gap = currentMile - prevMile
+    
+    if (gap < minGap && gap >= 0) {
       // Too close - add to current group
       currentGroup.push(current)
     } else {
       // Gap is sufficient - process current group and start new one
+      if (currentGroup.length > 1) {
+        groupsFormed++
+      }
       result.push(...processGroup(currentGroup, zoneType))
       currentGroup = [current]
     }
   }
   
   // Don't forget last group
+  if (currentGroup.length > 1) {
+    groupsFormed++
+  }
   result.push(...processGroup(currentGroup, zoneType))
+  
+  if (groupsFormed > 0) {
+    console.log(`   ${zoneType}: Formed ${groupsFormed} groups from ${callouts.length} callouts → ${result.length} output`)
+  }
   
   return result
 }
@@ -157,22 +172,26 @@ function createSimpleGroup(group, zoneType) {
   const maxAngle = Math.max(...angles)
   const pattern = detectPattern(directions, angles)
   
+  // Get mile from triggerMile or mile
+  const firstMile = group[0].triggerMile ?? group[0].mile ?? 0
+  const lastMile = group[group.length - 1].triggerMile ?? group[group.length - 1].mile ?? 0
+  
   // Generate rally-style text
   const text = generateRallyText(pattern, directions, maxAngle, group.length)
   
   return {
-    id: `group-${group[0].mile.toFixed(2)}`,
-    mile: group[0].mile,
-    triggerMile: Math.max(group[0].mile - 0.3, 0),
-    triggerDistance: Math.max(group[0].mile - 0.3, 0) * 1609.34,
+    id: `group-${firstMile.toFixed(2)}`,
+    mile: firstMile,
+    triggerMile: Math.max(firstMile - 0.3, 0),
+    triggerDistance: Math.max(firstMile - 0.3, 0) * 1609.34,
     type: 'grouped',
     text: text,
     reason: `${group.length} curves grouped (${pattern})`,
     zone: group[0].zone,
     position: group[0].position,
     priority: maxAngle >= 40 ? 'high' : 'medium',
-    groupedFrom: group.map(c => ({ mile: c.mile, text: c.text, angle: c.angle })),
-    coversUntilMile: group[group.length - 1].mile
+    groupedFrom: group.map(c => ({ mile: c.triggerMile ?? c.mile, text: c.text, angle: c.angle })),
+    coversUntilMile: lastMile
   }
 }
 
@@ -186,6 +205,10 @@ function createDangerWithContext(group, danger, zoneType) {
   
   const dir = danger.direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right'
   const angle = danger.angle || 90
+  
+  // Get mile from triggerMile or mile
+  const firstMile = group[0].triggerMile ?? group[0].mile ?? 0
+  const lastMile = group[group.length - 1].triggerMile ?? group[group.length - 1].mile ?? 0
   
   let text = ''
   
@@ -222,10 +245,10 @@ function createDangerWithContext(group, danger, zoneType) {
   }
   
   return {
-    id: `danger-group-${danger.mile.toFixed(2)}`,
-    mile: group[0].mile,
-    triggerMile: Math.max(group[0].mile - 0.3, 0),
-    triggerDistance: Math.max(group[0].mile - 0.3, 0) * 1609.34,
+    id: `danger-group-${firstMile.toFixed(2)}`,
+    mile: firstMile,
+    triggerMile: Math.max(firstMile - 0.3, 0),
+    triggerDistance: Math.max(firstMile - 0.3, 0) * 1609.34,
     type: 'danger',
     text: text,
     reason: `Danger curve ${angle}° with ${group.length - 1} surrounding curves`,
@@ -234,8 +257,8 @@ function createDangerWithContext(group, danger, zoneType) {
     priority: 'critical',
     angle: angle,
     direction: danger.direction,
-    groupedFrom: group.map(c => ({ mile: c.mile, text: c.text, angle: c.angle })),
-    coversUntilMile: group[group.length - 1].mile
+    groupedFrom: group.map(c => ({ mile: c.triggerMile ?? c.mile, text: c.text, angle: c.angle })),
+    coversUntilMile: lastMile
   }
 }
 
@@ -245,6 +268,10 @@ function createDangerWithContext(group, danger, zoneType) {
 function createDangerSequence(group, dangers, zoneType) {
   const angles = dangers.map(c => c.angle || 90)
   const directions = dangers.map(c => c.direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right')
+  
+  // Get mile from triggerMile or mile
+  const firstMile = group[0].triggerMile ?? group[0].mile ?? 0
+  const lastMile = group[group.length - 1].triggerMile ?? group[group.length - 1].mile ?? 0
   
   let text = ''
   
@@ -282,19 +309,19 @@ function createDangerSequence(group, dangers, zoneType) {
   }
   
   return {
-    id: `danger-seq-${group[0].mile.toFixed(2)}`,
-    mile: group[0].mile,
-    triggerMile: Math.max(group[0].mile - 0.4, 0), // Extra warning for multiple dangers
-    triggerDistance: Math.max(group[0].mile - 0.4, 0) * 1609.34,
+    id: `danger-seq-${firstMile.toFixed(2)}`,
+    mile: firstMile,
+    triggerMile: Math.max(firstMile - 0.4, 0), // Extra warning for multiple dangers
+    triggerDistance: Math.max(firstMile - 0.4, 0) * 1609.34,
     type: 'danger',
     text: text,
-    reason: `${dangers.length} danger curves in ${(group[group.length-1].mile - group[0].mile).toFixed(2)} miles`,
+    reason: `${dangers.length} danger curves in ${(lastMile - firstMile).toFixed(2)} miles`,
     zone: dangers[0].zone,
     position: group[0].position,
     priority: 'critical',
     angle: Math.max(...angles),
-    groupedFrom: group.map(c => ({ mile: c.mile, text: c.text, angle: c.angle })),
-    coversUntilMile: group[group.length - 1].mile
+    groupedFrom: group.map(c => ({ mile: c.triggerMile ?? c.mile, text: c.text, angle: c.angle })),
+    coversUntilMile: lastMile
   }
 }
 
