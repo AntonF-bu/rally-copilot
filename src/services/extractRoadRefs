@@ -1,0 +1,181 @@
+// ================================
+// Road Ref Extraction with Symbolrank
+// Add this to routeService.js or replace existing extractRoadRefs
+// ================================
+
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+/**
+ * Extract road refs from Mapbox Directions API legs
+ * Now includes symbolrank for local roads (for urban detection)
+ * 
+ * @param {Array} legs - Route legs from Mapbox Directions API
+ * @param {number} totalDistance - Total route distance in meters
+ * @returns {Array} Road segments with classification
+ */
+export async function extractRoadRefs(legs, totalDistance) {
+  if (!legs || legs.length === 0) return []
+  
+  const segments = []
+  let currentDistance = 0
+  
+  for (const leg of legs) {
+    if (!leg.steps) continue
+    
+    for (const step of leg.steps) {
+      const ref = step.ref || null
+      const name = step.name || null
+      const distance = step.distance || 0
+      
+      if (distance < 10) continue // Skip tiny segments
+      
+      const startMile = currentDistance / 1609.34
+      const endMile = (currentDistance + distance) / 1609.34
+      const midpointDistance = currentDistance + (distance / 2)
+      
+      // Classify road type
+      const roadClass = classifyRoadType(ref, name)
+      
+      // Get midpoint coordinate for symbolrank lookup
+      const midpointCoord = step.maneuver?.location || null
+      
+      segments.push({
+        startMile,
+        endMile,
+        startDistance: currentDistance,
+        endDistance: currentDistance + distance,
+        ref,
+        name,
+        roadClass,
+        midpointCoord,
+        symbolrank: null // Will be filled for local roads
+      })
+      
+      currentDistance += distance
+    }
+  }
+  
+  // Fetch symbolrank for local roads (in parallel)
+  const localSegments = segments.filter(s => s.roadClass === 'local' && s.midpointCoord)
+  
+  if (localSegments.length > 0) {
+    console.log(`🏙️ Fetching symbolrank for ${localSegments.length} local road segments...`)
+    
+    // Batch queries to avoid too many parallel requests
+    const BATCH_SIZE = 5
+    for (let i = 0; i < localSegments.length; i += BATCH_SIZE) {
+      const batch = localSegments.slice(i, i + BATCH_SIZE)
+      
+      await Promise.all(batch.map(async (seg) => {
+        try {
+          const rank = await fetchSymbolrank(seg.midpointCoord)
+          seg.symbolrank = rank
+        } catch (err) {
+          console.warn(`   Failed to get symbolrank for ${seg.name}:`, err.message)
+          seg.symbolrank = null // Will default to technical
+        }
+      }))
+    }
+  }
+  
+  // Log results
+  console.log(`🛣️ Extracted ${segments.length} road segments from ${legs.length} leg(s)`)
+  console.log('   Sample segments:')
+  segments.slice(0, 10).forEach(seg => {
+    const roadName = seg.ref || seg.name || 'unnamed'
+    const rankInfo = seg.symbolrank ? ` [rank:${seg.symbolrank}]` : ''
+    console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})${rankInfo}`)
+  })
+  if (segments.length > 10) {
+    console.log(`      ... and ${segments.length - 10} more`)
+  }
+  
+  // Count by type
+  const interstates = segments.filter(s => s.roadClass === 'interstate')
+  const usHighways = segments.filter(s => s.roadClass === 'us_highway')
+  const stateRoutes = segments.filter(s => s.roadClass === 'state_route')
+  const localRoads = segments.filter(s => s.roadClass === 'local')
+  const urbanLocals = localRoads.filter(s => s.symbolrank && s.symbolrank <= 10)
+  
+  console.log(`   Summary: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local (${urbanLocals.length} urban)`)
+  
+  return segments
+}
+
+/**
+ * Classify road type from ref and name
+ */
+function classifyRoadType(ref, name) {
+  const refUpper = (ref || '').toUpperCase().trim()
+  const nameUpper = (name || '').toUpperCase().trim()
+  
+  // Interstate: I-90, I 90, I90
+  if (refUpper.match(/^I[\s-]?\d+/)) {
+    return 'interstate'
+  }
+  
+  // US Highway: US-9, US 9, US9, U.S. 9
+  if (refUpper.match(/^U\.?S\.?[\s-]?\d+/)) {
+    return 'us_highway'
+  }
+  
+  // State Route: MA-9, MA 9, NY-17, Route 66
+  if (refUpper.match(/^[A-Z]{2}[\s-]?\d+/) || refUpper.match(/^(ROUTE|RT\.?|RTE\.?)[\s-]?\d+/i)) {
+    return 'state_route'
+  }
+  
+  // Highway-like names
+  if (nameUpper.includes('TURNPIKE') || 
+      nameUpper.includes('PARKWAY') || 
+      nameUpper.includes('EXPRESSWAY') ||
+      nameUpper.includes('FREEWAY') ||
+      nameUpper.includes('THRUWAY') ||
+      nameUpper.includes('INTERSTATE')) {
+    return 'us_highway'
+  }
+  
+  // Has a name = local road
+  if (name && name.length > 0) {
+    return 'local'
+  }
+  
+  return 'unknown'
+}
+
+/**
+ * Fetch symbolrank from Mapbox place_label layer
+ * Uses tilequery API to find nearest place and its symbolrank
+ * 
+ * @param {Array} coord - [lng, lat]
+ * @returns {number|null} symbolrank (1-19) or null if not found
+ */
+async function fetchSymbolrank(coord) {
+  if (!coord || !MAPBOX_TOKEN) return null
+  
+  const [lng, lat] = coord
+  
+  const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json?layers=place_label&limit=1&access_token=${MAPBOX_TOKEN}`
+  
+  const response = await fetch(url)
+  
+  if (!response.ok) {
+    throw new Error(`Mapbox API error: ${response.status}`)
+  }
+  
+  const data = await response.json()
+  
+  if (data.features && data.features.length > 0) {
+    const feature = data.features[0]
+    const symbolrank = feature.properties?.symbolrank
+    
+    if (symbolrank !== undefined) {
+      return symbolrank
+    }
+  }
+  
+  return null
+}
+
+export default {
+  extractRoadRefs
+}
