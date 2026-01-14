@@ -262,7 +262,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       let roadSegments = []
       if (routeData?.legs && routeData.legs.length > 0) {
         console.log('\n🛣️ Extracting road refs from route legs...')
-        roadSegments = extractRoadRefs(routeData.legs, routeData.distance)
+        roadSegments = await extractRoadRefs(routeData.legs, routeData.distance, routeData.coordinates)
         
         // Log road ref summary
         const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
