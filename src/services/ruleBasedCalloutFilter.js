@@ -1,23 +1,29 @@
 // ================================
-// Rule-Based Callout Filter v1.0
+// Rule-Based Callout Filter v1.1
 // 
-// Deterministic filtering of Road Flow events
-// No LLM in critical path - fast and reliable
-// 
-// Thresholds tuned for Boston→Amherst route testing
+// Fixes in v1.1:
+// 1. Highway threshold: 25° → 20° (feelable bends)
+// 2. Never bundle danger curves into sequences
+// 3. Technical threshold: 15° → 12° (more coverage)
+// 4. EXIT only if zone changes after (not just angle-based)
+// 5. Fixed wake-up detection logic
 // ================================
 
 /**
  * Main export: Filter road flow events into callouts
  * @param {Array} events - Road Flow events
  * @param {Object} routeInfo - Route metadata including total miles
+ * @param {Array} zones - Zone segments for exit detection
  * @returns {Object} - Filtered callouts with analysis
  */
-export function filterEventsToCallouts(events, routeInfo) {
-  console.log('📋 Rule-Based Callout Filter v1.0')
+export function filterEventsToCallouts(events, routeInfo, zones = []) {
+  console.log('📋 Rule-Based Callout Filter v1.1')
   console.log(`   Input events: ${events.length}`)
   
   const totalMiles = routeInfo?.totalMiles || 0
+  
+  // Build zone lookup for exit detection
+  const zoneLookup = buildZoneLookup(zones, totalMiles)
   
   // Step 1: Apply zone-based thresholds
   const filteredEvents = events.filter(event => shouldCallout(event, events))
@@ -25,6 +31,7 @@ export function filterEventsToCallouts(events, routeInfo) {
   console.log(`   After threshold filter: ${filteredEvents.length}`)
   
   // Step 2: Detect sequences (curves within 0.3mi of each other)
+  // FIX #2: Pass danger check to exclude danger curves from sequences
   const sequences = detectSequences(filteredEvents)
   
   console.log(`   Sequences detected: ${sequences.length}`)
@@ -35,12 +42,14 @@ export function filterEventsToCallouts(events, routeInfo) {
   console.log(`   Zone transitions: ${transitions.length}`)
   
   // Step 4: Detect wake-up opportunities (first curve after long straight)
+  // FIX #5: Improved wake-up detection
   const wakeUps = detectWakeUpCalls(events, filteredEvents)
   
   console.log(`   Wake-up calls: ${wakeUps.length}`)
   
   // Step 5: Generate callouts with text
-  const callouts = generateCallouts(filteredEvents, sequences, transitions, wakeUps)
+  // FIX #4: Pass zoneLookup for exit detection
+  const callouts = generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneLookup)
   
   console.log(`   Final callouts: ${callouts.length}`)
   
@@ -67,12 +76,35 @@ export function filterEventsToCallouts(events, routeInfo) {
 }
 
 /**
+ * Build zone lookup for determining zone at any mile marker
+ */
+function buildZoneLookup(zones, totalMiles) {
+  if (!zones || zones.length === 0) return null
+  
+  return {
+    zones,
+    getZoneAtMile: (mile) => {
+      for (const zone of zones) {
+        const startMile = (zone.startDistance || 0) / 1609.34
+        const endMile = (zone.endDistance || 0) / 1609.34
+        if (mile >= startMile && mile <= endMile) {
+          return zone.character || 'transit'
+        }
+      }
+      return 'transit' // Default
+    }
+  }
+}
+
+/**
  * Core filtering logic - should this event become a callout?
+ * FIX #1: Highway 25° → 20°
+ * FIX #3: Technical 15° → 12°
  */
 function shouldCallout(event, allEvents) {
   const { zoneType, totalAngle, type } = event
   
-  // RULE 1: ALWAYS call danger curves (45°+ on highway, varies by zone)
+  // RULE 1: ALWAYS call danger curves
   if (type === 'danger') return true
   
   // RULE 2: Zone-specific thresholds
@@ -83,26 +115,25 @@ function shouldCallout(event, allEvents) {
       return totalAngle >= 70
       
     case 'transit':
-      // Highway: Call 25°+ (feelable at speed)
-      // Plus significant curves (30°+)
-      // Plus anything after a long straight (handled separately in wake-ups)
-      if (totalAngle >= 25) return true
+      // FIX #1: Highway threshold lowered to 20° (feelable at speed)
+      if (totalAngle >= 20) return true
       if (type === 'significant') return true
       return false
       
     case 'technical':
-      // Technical: Call EVERYTHING 15°+
+      // FIX #3: Technical threshold lowered to 12° (more coverage)
       // Driver is pushing hard, needs constant guidance
-      return totalAngle >= 15
+      return totalAngle >= 12
       
     default:
       // Unknown zone - use highway rules
-      return totalAngle >= 25
+      return totalAngle >= 20
   }
 }
 
 /**
  * Detect sequences of curves close together
+ * FIX #2: Never include danger curves in sequences - they must stand alone
  */
 function detectSequences(events) {
   const sequences = []
@@ -112,22 +143,31 @@ function detectSequences(events) {
     const prevEvent = events[i - 1]
     const gap = prevEvent ? event.apexMile - prevEvent.apexMile : 999
     
+    // FIX #2: Skip danger curves - they should never be bundled
+    if (event.type === 'danger' || event.totalAngle >= 70) {
+      // Save current sequence if valid
+      if (currentSeq.length >= 3) {
+        sequences.push(createSequence(currentSeq))
+      }
+      currentSeq = []
+      return
+    }
+    
+    // Also check if previous was danger - don't start sequence after danger
+    if (prevEvent && (prevEvent.type === 'danger' || prevEvent.totalAngle >= 70)) {
+      currentSeq = []
+    }
+    
     if (gap <= 0.3) {
       // Close to previous - add to sequence
-      if (currentSeq.length === 0 && prevEvent) {
+      if (currentSeq.length === 0 && prevEvent && prevEvent.type !== 'danger' && prevEvent.totalAngle < 70) {
         currentSeq.push(prevEvent)
       }
       currentSeq.push(event)
     } else {
       // Gap too big - save current sequence if valid
       if (currentSeq.length >= 3) {
-        sequences.push({
-          startMile: currentSeq[0].apexMile,
-          endMile: currentSeq[currentSeq.length - 1].apexMile,
-          events: [...currentSeq],
-          pattern: currentSeq.map(e => e.direction[0]).join('-'),
-          zone: currentSeq[0].zoneType
-        })
+        sequences.push(createSequence(currentSeq))
       }
       currentSeq = []
     }
@@ -135,16 +175,22 @@ function detectSequences(events) {
   
   // Don't forget last sequence
   if (currentSeq.length >= 3) {
-    sequences.push({
-      startMile: currentSeq[0].apexMile,
-      endMile: currentSeq[currentSeq.length - 1].apexMile,
-      events: [...currentSeq],
-      pattern: currentSeq.map(e => e.direction[0]).join('-'),
-      zone: currentSeq[0].zoneType
-    })
+    sequences.push(createSequence(currentSeq))
   }
   
   return sequences
+}
+
+function createSequence(events) {
+  return {
+    startMile: events[0].apexMile,
+    endMile: events[events.length - 1].apexMile,
+    events: [...events],
+    pattern: events.map(e => e.direction[0]).join('-'),
+    zone: events[0].zoneType,
+    maxAngle: Math.max(...events.map(e => e.totalAngle)),
+    hasDanger: events.some(e => e.type === 'danger' || e.totalAngle >= 70)
+  }
 }
 
 /**
@@ -173,54 +219,79 @@ function detectZoneTransitions(events) {
 
 /**
  * Detect wake-up calls needed after long straights
+ * FIX #5: Improved logic - always add wake-up after long straight regardless of inclusion
  */
 function detectWakeUpCalls(allEvents, filteredEvents) {
   const wakeUps = []
   const LONG_STRAIGHT_THRESHOLD = 5 // miles
   
-  let lastEventMile = 0
+  // Find gaps between FILTERED events (what driver will hear)
+  let lastCalloutMile = 0
   
-  allEvents.forEach(event => {
-    const gap = event.apexMile - lastEventMile
+  // Sort filtered events by mile
+  const sortedFiltered = [...filteredEvents].sort((a, b) => a.apexMile - b.apexMile)
+  
+  sortedFiltered.forEach(event => {
+    const gap = event.apexMile - lastCalloutMile
     
     if (gap >= LONG_STRAIGHT_THRESHOLD) {
-      // This is the first curve after a long straight
-      // Check if it's already in filtered events
-      const alreadyIncluded = filteredEvents.some(
-        e => Math.abs(e.apexMile - event.apexMile) < 0.1
-      )
-      
-      if (!alreadyIncluded && event.totalAngle >= 15) {
-        wakeUps.push({
-          mile: event.apexMile,
-          straightDistance: gap,
-          event: event,
-          reason: `First curve after ${gap.toFixed(1)} miles straight`
-        })
-      }
+      // There's a long gap before this callout
+      // Add context about the straight section
+      wakeUps.push({
+        mile: event.apexMile,
+        straightDistance: gap,
+        event: event,
+        reason: `First curve after ${gap.toFixed(1)} miles straight`,
+        enhanceExisting: true // Flag to enhance the existing callout rather than add new
+      })
     }
     
-    lastEventMile = event.apexMile
+    lastCalloutMile = event.apexMile
   })
   
   return wakeUps
 }
 
 /**
+ * Check if a highway curve is actually an exit (zone changes after)
+ * FIX #4: Only call it EXIT if zone changes
+ */
+function isActualExit(event, zoneLookup) {
+  if (!zoneLookup) return false
+  if (event.zoneType !== 'transit') return false
+  if (event.totalAngle < 70) return false
+  
+  // Check zone 0.5 miles ahead
+  const currentZone = zoneLookup.getZoneAtMile(event.apexMile)
+  const aheadZone = zoneLookup.getZoneAtMile(event.apexMile + 0.5)
+  
+  // It's an EXIT if we're leaving transit zone
+  return currentZone === 'transit' && aheadZone !== 'transit'
+}
+
+/**
  * Generate final callouts with text
  */
-function generateCallouts(filteredEvents, sequences, transitions, wakeUps) {
+function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneLookup) {
   const callouts = []
   const sequenceStartMiles = new Set(sequences.map(s => s.startMile))
-  const transitionMiles = new Set(transitions.map(t => t.mile))
-  const wakeUpMiles = new Set(wakeUps.map(w => w.mile))
+  const sequenceEventMiles = new Set()
+  
+  // Build set of all miles that are part of sequences
+  sequences.forEach(seq => {
+    seq.events.forEach(e => sequenceEventMiles.add(e.apexMile.toFixed(2)))
+  })
+  
+  // Build wake-up lookup
+  const wakeUpMiles = new Map()
+  wakeUps.forEach(w => wakeUpMiles.set(w.mile.toFixed(2), w))
   
   // Add zone transition callouts
   transitions.forEach(t => {
     if (t.toZone === 'technical') {
       callouts.push({
         id: `transition-${t.mile.toFixed(2)}`,
-        mile: t.mile - 0.3, // Announce slightly before
+        mile: t.mile - 0.3,
         triggerMile: Math.max(t.mile - 0.5, 0),
         triggerDistance: Math.max(t.mile - 0.5, 0) * 1609.34,
         type: 'transition',
@@ -233,35 +304,18 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps) {
     }
   })
   
-  // Add wake-up callouts
-  wakeUps.forEach(w => {
-    callouts.push({
-      id: `wakeup-${w.mile.toFixed(2)}`,
-      mile: w.mile,
-      triggerMile: Math.max(w.mile - 0.3, 0),
-      triggerDistance: Math.max(w.mile - 0.3, 0) * 1609.34,
-      type: 'wake_up',
-      text: generateWakeUpText(w.event),
-      reason: w.reason,
-      zone: w.event.zoneType,
-      position: w.event.position,
-      angle: w.event.totalAngle,
-      direction: w.event.direction,
-      priority: 'medium'
-    })
-  })
-  
   // Process filtered events
   filteredEvents.forEach(event => {
-    // Skip if this is the start of a sequence (we'll handle it as sequence)
+    const mileKey = event.apexMile.toFixed(2)
+    const isInSequence = sequenceEventMiles.has(mileKey)
     const isSequenceStart = sequenceStartMiles.has(event.apexMile)
-    const isInSequence = sequences.some(s => 
-      event.apexMile >= s.startMile && event.apexMile <= s.endMile
-    )
+    const wakeUpInfo = wakeUpMiles.get(mileKey)
     
-    // For technical zone, call every curve even in sequences
-    // For highway, bundle sequences
-    if (isInSequence && event.zoneType !== 'technical') {
+    // FIX #2: Danger curves ALWAYS get individual callouts, never bundled
+    const isDanger = event.type === 'danger' || event.totalAngle >= 70
+    
+    // For sequences (non-danger, non-technical)
+    if (isInSequence && !isDanger && event.zoneType !== 'technical') {
       // Only add sequence callout at the start
       if (isSequenceStart) {
         const seq = sequences.find(s => s.startMile === event.apexMile)
@@ -278,24 +332,33 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps) {
           priority: 'high'
         })
       }
-      // Skip individual events in highway sequences
+      // Skip individual events in highway sequences (unless danger)
       return
     }
     
     // Generate individual callout
+    // FIX #4: Pass zoneLookup for proper exit detection
+    let calloutText = generateCalloutText(event, zoneLookup)
+    
+    // FIX #5: Enhance with wake-up context if applicable
+    if (wakeUpInfo && wakeUpInfo.straightDistance >= 5) {
+      calloutText = `Bend ahead - ${calloutText.toLowerCase()}`
+    }
+    
     callouts.push({
       id: `curve-${event.apexMile.toFixed(2)}`,
       mile: event.apexMile,
       triggerMile: Math.max(event.apexMile - 0.3, 0),
       triggerDistance: Math.max(event.apexMile - 0.3, 0) * 1609.34,
       type: event.type,
-      text: generateCalloutText(event),
-      reason: generateReason(event),
+      text: calloutText,
+      reason: generateReason(event, zoneLookup, wakeUpInfo),
       zone: event.zoneType,
       position: event.position,
       angle: event.totalAngle,
       direction: event.direction,
-      priority: getPriority(event)
+      priority: getPriority(event),
+      afterStraight: wakeUpInfo ? wakeUpInfo.straightDistance : null
     })
   })
   
@@ -307,20 +370,21 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps) {
 
 /**
  * Generate callout text based on zone and curve type
+ * FIX #4: Only mark as EXIT if zone actually changes
  */
-function generateCalloutText(event) {
+function generateCalloutText(event, zoneLookup) {
   const { direction, totalAngle, zoneType, type, shape } = event
   const dir = direction.charAt(0).toUpperCase() + direction.slice(1).toLowerCase()
   
-  // Detect offramp (high angle curve on highway)
-  if (zoneType === 'transit' && totalAngle >= 70) {
+  // FIX #4: Check if this is an actual exit (zone changes after)
+  if (isActualExit(event, zoneLookup)) {
     return `HARD ${dir.toUpperCase()} - EXIT`
   }
   
-  // Danger curves get emphasis
-  if (type === 'danger' || totalAngle >= 60) {
+  // Danger curves get emphasis (but not EXIT unless zone changes)
+  if (type === 'danger' || totalAngle >= 70) {
     if (totalAngle >= 90) {
-      return `CAUTION - Hard ${dir.toLowerCase()}`
+      return `CAUTION - Hard ${dir.toLowerCase()} ${totalAngle}°`
     }
     return `CAUTION ${dir.toLowerCase()} ${totalAngle}°`
   }
@@ -346,10 +410,9 @@ function generateCalloutText(event) {
  */
 function generateSequenceText(sequence) {
   const count = sequence.events.length
-  const pattern = sequence.pattern // e.g., "R-L-R"
-  const maxAngle = Math.max(...sequence.events.map(e => e.totalAngle))
+  const pattern = sequence.pattern
+  const maxAngle = sequence.maxAngle
   
-  // Describe the pattern
   const directions = pattern.split('-').map(d => d === 'R' ? 'right' : 'left')
   
   if (count === 3) {
@@ -364,34 +427,28 @@ function generateSequenceText(sequence) {
     return `${directions.join('-')}, stay tight`
   }
   
-  // Long sequence
   return `${count} curves ahead, max ${maxAngle}°, stay focused`
-}
-
-/**
- * Generate wake-up text
- */
-function generateWakeUpText(event) {
-  const dir = event.direction.charAt(0).toUpperCase() + event.direction.slice(1).toLowerCase()
-  return `Bend ahead - ${dir.toLowerCase()} ${event.totalAngle}`
 }
 
 /**
  * Generate reason for callout
  */
-function generateReason(event) {
+function generateReason(event, zoneLookup, wakeUpInfo) {
   const { zoneType, totalAngle, type } = event
   
+  if (wakeUpInfo && wakeUpInfo.straightDistance >= 5) {
+    return `First curve after ${wakeUpInfo.straightDistance.toFixed(1)} miles straight - stay alert`
+  }
+  
   if (type === 'danger') {
+    if (isActualExit(event, zoneLookup)) {
+      return `Exit ramp - significant speed reduction needed`
+    }
     return `Danger curve - ${totalAngle}° requires attention`
   }
   
   if (zoneType === 'technical') {
     return `Technical zone - all curves called for driver awareness`
-  }
-  
-  if (zoneType === 'transit' && totalAngle >= 70) {
-    return `Likely exit ramp - significant speed reduction needed`
   }
   
   if (type === 'significant') {
@@ -405,7 +462,7 @@ function generateReason(event) {
  * Get priority for callout
  */
 function getPriority(event) {
-  if (event.type === 'danger' || event.totalAngle >= 60) return 'critical'
+  if (event.type === 'danger' || event.totalAngle >= 70) return 'critical'
   if (event.type === 'significant' || event.totalAngle >= 40) return 'high'
   return 'medium'
 }
@@ -434,11 +491,10 @@ function generateAnalysis(allEvents, callouts, routeInfo) {
 
 /**
  * Fallback: Generate callouts without LLM polish
- * Use this if LLM stage fails
  */
-export function generateFallbackCallouts(events, routeInfo) {
+export function generateFallbackCallouts(events, routeInfo, zones) {
   console.log('⚠️ Using fallback callout generation (no LLM)')
-  return filterEventsToCallouts(events, routeInfo)
+  return filterEventsToCallouts(events, routeInfo, zones)
 }
 
 export default { filterEventsToCallouts, generateFallbackCallouts }
