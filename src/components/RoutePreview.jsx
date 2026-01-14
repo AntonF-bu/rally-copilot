@@ -891,15 +891,31 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // Build SLEEVE segments
+  // Build SLEEVE segments
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
+    // DEBUG: Log what segments we receive
+    console.log('🎨 buildSleeveSegments called with', characterSegments?.length, 'segments:', 
+      characterSegments?.map(s => `${s.character}(${s.startMile?.toFixed(1)}-${s.endMile?.toFixed(1)}mi)`).join(', '))
+    console.log('🎨 First segment details:', characterSegments?.[0] ? JSON.stringify({
+      character: characterSegments[0].character,
+      start: characterSegments[0].start,
+      end: characterSegments[0].end,
+      startDistance: characterSegments[0].startDistance,
+      endDistance: characterSegments[0].endDistance,
+      startMile: characterSegments[0].startMile,
+      endMile: characterSegments[0].endMile
+    }) : 'none')
+    
     if (!coords?.length) return []
     if (!characterSegments?.length) {
+      console.log('🎨 No characterSegments - defaulting to all technical')
       return [{ coords, color: CHARACTER_COLORS.technical.primary, character: 'technical' }]
     }
     
     const segments = []
     
-    characterSegments.forEach((seg) => {
+    characterSegments.forEach((seg, i) => {
+      console.log(`🎨 Processing segment ${i}: ${seg.character}, startDist=${seg.startDistance}, endDist=${seg.endDistance}`)
       let segCoords
       
       if (seg.coordinates?.length > 1) {
