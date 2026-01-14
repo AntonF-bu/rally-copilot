@@ -15,15 +15,23 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyByRoadName, convertToStandardFormat } from '../services/simpleZoneClassifier'
+// UPDATED: Import all needed functions from simpleZoneClassifier v2
+import { 
+  classifyByRoadName, 
+  convertToStandardFormat, 
+  reassignEventZones,
+  extractCurvesFromEvents 
+} from '../services/simpleZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v34
-// NEW: Road ref integration from Mapbox Directions API
-// Uses step.ref (I-90, US-9, MA-66) for zone classification
+// Route Preview - v35
+// UPDATED: simpleZoneClassifier v2 with curve-based gap filling
+// - Road names are AUTHORITATIVE (I-90 = transit, local = technical)
+// - Gaps filled using curve analysis
+// - State routes check curves to decide transit vs technical
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -226,7 +234,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [routeData?.coordinates, fetchElevationData])
 
   // ================================
-  // FETCH ROUTE CHARACTER - v34 with Road Refs
+  // FETCH ROUTE CHARACTER - v35 with simpleZoneClassifier v2
   // ================================
   const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
     if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
@@ -241,15 +249,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     try {
       // ========================================
-      // Step 1: Get Census-based zones (for urban detection)
+      // Step 1: Get Census-based zones (for urban detection at edges)
       // ========================================
       updateStage('zones', 'loading')
       const censusAnalysis = await analyzeRouteCharacter(coordinates, curves || [])
       const censusSegments = censusAnalysis.segments || []
-      console.log('📊 Census zones (fallback):', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
+      console.log('📊 Census zones (reference):', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
       
       // ========================================
-      // Step 2: Extract road refs from Mapbox legs data - NEW!
+      // Step 2: Extract road refs from Mapbox legs data
       // ========================================
       let roadSegments = []
       if (routeData?.legs && routeData.legs.length > 0) {
@@ -281,15 +289,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       console.log('💡 Access road flow data: window.__roadFlowData')
       
       // ========================================
-      // Step 4: Classify zones using VOTING system with road refs
+      // Step 4: Classify zones using simpleZoneClassifier v2
+      // PRIMARY: Road names (I-90 = transit, local = technical)
+      // SECONDARY: Curve analysis for gaps and state routes
       // ========================================
-      console.log('\n🗳️ Classifying zones with voting system...')
+      console.log('\n🛣️ Classifying zones with simpleZoneClassifier v2...')
       
-      // Calculate totalMiles from routeData.distance (which is in meters)
       const totalMiles = routeData.distance / 1609.34
       
-      // Then call the classifier
-      const votedZones = classifyByRoadName(roadSegments, totalMiles)
+      // UPDATED: Extract curves from flow events for gap filling
+      const curvesForAnalysis = extractCurvesFromEvents(flowResult.events)
+      console.log(`   Extracted ${curvesForAnalysis.length} curves for gap analysis`)
+      
+      // UPDATED: Pass curves to classifier for gap filling and state route analysis
+      const votedZones = classifyByRoadName(roadSegments, totalMiles, curvesForAnalysis)
       
       // Convert to standard zone format (adds startDistance/endDistance)
       const activeZones = convertToStandardFormat(votedZones, routeData.distance)
@@ -300,12 +313,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - curve pattern detection is our source of truth now
+      // Skip LLM zone validation - road names are authoritative now
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
       // ========================================
-      // Step 5: Analyze highway bends (using pattern-based zones)
+      // Step 5: Analyze highway bends (using classified zones)
       // ========================================
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
@@ -329,7 +342,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           updateStage('aiCurves', 'loading')
           console.log('📋 Running Hybrid Callout System...')
           
-          // IMPORTANT: Reassign zones to events using our new classification
+          // UPDATED: Use reassignEventZones from simpleZoneClassifier
           const eventsWithCorrectZones = reassignEventZones(flowResult.events, activeZones)
           console.log(`📍 Reassigned zones to ${eventsWithCorrectZones.length} events`)
           
@@ -449,7 +462,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               setAgentResult({
                 summary: {
                   summary: finalResult.analysis,
-                  rhythm: 'Hybrid Callout System v1.2 (with road refs)',
+                  rhythm: 'Hybrid Callout System v1.3 (simpleZoneClassifier v2)',
                   difficulty: 'auto'
                 },
                 reasoning: [
@@ -577,7 +590,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           curves, 
           distance: route.distance, 
           duration: route.duration,
-          legs: route.legs  // NEW: Include legs for road ref extraction
+          legs: route.legs  // Include legs for road ref extraction
         })
       } else { 
         setLoadError('Could not load demo route') 
@@ -775,7 +788,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [copilotProgress, setCopilotProgress] = useState(0)
   const [copilotReady, setCopilotReady] = useState(false)
   const [copilotStatus, setCopilotStatus] = useState('')
-
   // HANDLE START - WITH LLM INTEGRATION
   // ================================
   const handleStart = async () => { 
