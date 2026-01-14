@@ -361,19 +361,28 @@ export function reassignEventZones(events, zones) {
 
 /**
  * Convert to standard zone format (for compatibility)
+ * Includes both start/end AND startDistance/endDistance for compatibility
  */
 export function convertToZoneFormat(zones) {
   console.log('   Converting zones to standard format...')
   return zones.map((z, i) => {
+    // Calculate meters from miles if not already present
+    const startMeters = z.start ?? z.startDistance ?? (z.startMile * 1609.34)
+    const endMeters = z.end ?? z.endDistance ?? (z.endMile * 1609.34)
+    
     const converted = {
-      start: z.start ?? z.startDistance ?? (z.startMile * 1609.34),
-      end: z.end ?? z.endDistance ?? (z.endMile * 1609.34),
+      // Both property naming conventions for compatibility
+      start: startMeters,
+      end: endMeters,
+      startDistance: startMeters,
+      endDistance: endMeters,
+      // Also keep mile values for convenience
       startMile: z.startMile,
       endMile: z.endMile,
       character: z.character,
       reason: z.reason
     }
-    console.log(`      Zone ${i + 1}: ${converted.character} [${converted.startMile?.toFixed(1)}-${converted.endMile?.toFixed(1)}mi] = ${converted.start?.toFixed(0)}-${converted.end?.toFixed(0)}m`)
+    console.log(`      Zone ${i + 1}: ${converted.character} [${z.startMile?.toFixed(1)}-${z.endMile?.toFixed(1)}mi] = ${startMeters?.toFixed(0)}-${endMeters?.toFixed(0)}m`)
     return converted
   })
 }
