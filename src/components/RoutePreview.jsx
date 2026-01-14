@@ -991,28 +991,35 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Short label
       const shortLabel = getShortLabel(callout)
       
-      // Match the actual zone tag colors exactly
-      // Technical: cyan (#22d3ee), Highway/Transit: blue (#3b82f6), Urban: pink (#f472b6)
-      const zoneColors = {
-        technical: '#22d3ee',  // Cyan
-        transit: '#3b82f6',    // Blue
-        highway: '#3b82f6',    // Blue
-        urban: '#f472b6'       // Pink
+      // Highway uses blue, Technical/Urban use severity colors
+      let color
+      if (callout.zone === 'transit' || callout.zone === 'highway') {
+        color = '#3b82f6' // Blue for highway
+      } else {
+        // Technical/Urban use severity-based colors
+        const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
+        if (angle >= 70) {
+          color = '#ef4444' // Red - danger
+        } else if (angle >= 45) {
+          color = '#f97316' // Orange - significant
+        } else {
+          color = '#22c55e' // Green - moderate
+        }
       }
-      const color = zoneColors[callout.zone] || '#3b82f6'
       
-      // More visible style - solid background with good contrast
+      // Style matching the screenshot - solid bg, colored border, white text for non-highway
+      const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
       el.innerHTML = `
         <div style="
-          background: ${color}40;
-          padding: 3px 10px;
-          border-radius: 4px;
+          background: ${isHighway ? color + '30' : color};
+          padding: 4px 10px;
+          border-radius: 6px;
           border: 2px solid ${color};
           cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
         " 
         title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;Zone: ${callout.zone}&#10;${callout.reason || ''}">
-          <span style="font-size:11px;font-weight:600;color:${color};">${shortLabel}</span>
+          <span style="font-size:11px;font-weight:600;color:${isHighway ? color : '#fff'};">${shortLabel}</span>
         </div>
       `
       
@@ -1408,18 +1415,25 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   </div>
                 )}
                 
-                {/* Callout pills - zone tag style */}
+                {/* Callout pills - highway blue, technical/urban severity colors */}
                 <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
                   {curatedCallouts.map((callout, i) => {
-                    // Match actual zone tag colors
-                    // Technical: cyan, Highway/Transit: blue, Urban: pink
-                    const zoneColors = {
-                      technical: '#22d3ee',
-                      transit: '#3b82f6',
-                      highway: '#3b82f6',
-                      urban: '#f472b6'
+                    // Highway uses blue, Technical/Urban use severity colors
+                    let color
+                    const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
+                    if (isHighway) {
+                      color = '#3b82f6' // Blue for highway
+                    } else {
+                      // Technical/Urban use severity-based colors
+                      const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
+                      if (angle >= 70) {
+                        color = '#ef4444' // Red
+                      } else if (angle >= 45) {
+                        color = '#f97316' // Orange
+                      } else {
+                        color = '#22c55e' // Green
+                      }
                     }
-                    const color = zoneColors[callout.zone] || '#3b82f6'
                     
                     // Extract short version
                     const text = callout.text || ''
@@ -1443,11 +1457,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                             mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                           }
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                        className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
                         style={{ 
-                          background: `${color}20`, 
-                          color: color,
-                          border: `1px solid ${color}40`
+                          background: isHighway ? `${color}30` : color, 
+                          color: isHighway ? color : '#fff',
+                          border: `1.5px solid ${color}`
                         }}
                         title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
                       >
