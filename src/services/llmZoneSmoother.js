@@ -163,17 +163,27 @@ function ruleBasedSmoothing(zones) {
   console.log('   Using rule-based smoothing fallback')
   
   // Step 1: Ensure zones are continuous (no gaps)
-  const continuous = ensureContinuousZones(zones)
+  let result = ensureContinuousZones(zones)
   
-  // Step 2: Aggressively merge transit sections between technical zones
-  // This is the key insight: a short transit section between two technical zones
-  // is just a "breather" in what's really a continuous technical section
-  let result = mergeTransitBetweenTechnical(continuous)
+  // Step 2: Absorb tiny technical zones (<0.8mi) into neighbors
+  // These are usually false positives
+  result = absorbTinyTechnicalZones(result)
   
-  // Step 3: Merge remaining short zones
+  // Step 3: Aggressively merge transit sections between technical zones
+  // Run multiple passes until no more changes
+  let changed = true
+  let passes = 0
+  while (changed && passes < 3) {
+    const before = result.length
+    result = mergeTransitBetweenTechnical(result)
+    changed = result.length !== before
+    passes++
+  }
+  
+  // Step 4: Merge remaining short zones
   result = mergeShortZones(result)
   
-  // Step 4: Final pass - merge consecutive same-type zones
+  // Step 5: Final pass - merge consecutive same-type zones
   const merged = []
   for (const zone of result) {
     if (merged.length > 0 && merged[merged.length - 1].character === zone.character) {
@@ -187,6 +197,42 @@ function ruleBasedSmoothing(zones) {
   }
   
   return merged.length > 0 ? merged : zones
+}
+
+/**
+ * Absorb tiny technical zones (<0.8mi) into neighbors
+ * These are usually noise/false positives
+ */
+function absorbTinyTechnicalZones(zones) {
+  const result = []
+  
+  for (let i = 0; i < zones.length; i++) {
+    const zone = zones[i]
+    const length = zone.endMile - zone.startMile
+    
+    // If it's a tiny technical zone, absorb it
+    if (zone.character === 'technical' && length < 0.8) {
+      if (result.length > 0) {
+        // Extend previous zone
+        console.log(`   Absorbing tiny technical zone (${length.toFixed(2)}mi) into previous ${result[result.length - 1].character}`)
+        result[result.length - 1].endMile = zone.endMile
+        result[result.length - 1].end = zone.endMile * 1609.34
+        result[result.length - 1].endDistance = zone.endMile * 1609.34
+      } else if (i + 1 < zones.length) {
+        // Will be absorbed by next zone
+        zones[i + 1].startMile = zone.startMile
+        zones[i + 1].start = zone.startMile * 1609.34
+        zones[i + 1].startDistance = zone.startMile * 1609.34
+        console.log(`   Absorbing tiny technical zone (${length.toFixed(2)}mi) into next zone`)
+      } else {
+        result.push(zone)
+      }
+    } else {
+      result.push(zone)
+    }
+  }
+  
+  return result
 }
 
 /**
@@ -215,8 +261,8 @@ function mergeTransitBetweenTechnical(zones) {
       }
       
       // If there's a technical zone after the transit section(s)
-      // and the total transit length is <= 2.5 miles, absorb it all
-      if (j < zones.length && zones[j].character === 'technical' && totalTransitLength <= 2.5) {
+      // and the total transit length is <= 3.5 miles, absorb it all
+      if (j < zones.length && zones[j].character === 'technical' && totalTransitLength <= 3.5) {
         console.log(`   Absorbing ${(j - i - 1)} transit zone(s) (${totalTransitLength.toFixed(1)}mi total) between technical zones`)
         // Extend current technical zone to include all transit and the next technical
         current.endMile = zones[j].endMile
