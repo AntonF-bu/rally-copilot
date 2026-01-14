@@ -165,8 +165,9 @@ function classifyRoadRef(ref, name) {
   const refUpper = (ref || '').toUpperCase()
   const nameUpper = (name || '').toUpperCase()
   
-  // Interstate highways: I-90, I-95, I-495, etc.
-  if (refUpper.match(/^I-?\d+/) || nameUpper.includes('INTERSTATE')) {
+  // Interstate highways: I-90, I-95, I 90, I90, etc.
+  // FIXED: Now handles "I 90 West" with space
+  if (refUpper.match(/^I[\s-]?\d+/) || nameUpper.includes('INTERSTATE')) {
     return 'interstate'
   }
   
