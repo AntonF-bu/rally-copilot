@@ -286,6 +286,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       console.log('\n🗳️ Classifying zones with voting system...')
       const zones = classifyByRoadName(roadSegments, totalMiles)
       const standardZones = convertToStandardFormat(zones, routeData.distance)
+
+      // Calculate totalMiles from routeData.distance (which is in meters)
+      const totalMiles = routeData.distance / 1609.34
+
+      // Then call the classifier
+      const zones = classifyByRoadName(roadSegments, totalMiles)
       
       // Convert to standard zone format (adds startDistance/endDistance)
       const activeZones = convertToStandardFormat(votedZones)
