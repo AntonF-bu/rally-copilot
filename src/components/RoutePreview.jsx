@@ -16,13 +16,15 @@ import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
 import { classifyZonesV2, convertToZoneFormat } from '../services/zoneClassifierV2'
+import { smoothZonesWithLLM, validateZones } from '../services/llmZoneSmoother'
 import { reassignEventZones } from '../services/curvePatternZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v30
+// Route Preview - v31
+// NEW: LLM Zone Smoother to fix illogical zone sequences
 // NEW: Zone Classifier v2.0 (Driving Feel: angle + shape + census)
 // ================================
 
@@ -270,8 +272,25 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         censusSegments  // Census for validation
       )
       
-      // Zones already in standard format from v2
-      const activeZones = patternZones
+      // Step 3b: Validate zones for issues
+      const zoneIssues = validateZones(patternZones)
+      if (zoneIssues.length > 0) {
+        console.log('⚠️ Zone issues detected:')
+        zoneIssues.forEach(issue => console.log(`   - ${issue}`))
+      }
+      
+      // Step 3c: LLM Zone Smoothing (fix illogical sequences)
+      console.log('\n⚡ Smoothing zones with LLM...')
+      let activeZones
+      try {
+        activeZones = await smoothZonesWithLLM(patternZones, {
+          totalMiles: routeData.distance / 1609.34
+        })
+        console.log(`   Zones after smoothing: ${activeZones.length} (was ${patternZones.length})`)
+      } catch (error) {
+        console.error('LLM smoothing failed, using raw zones:', error)
+        activeZones = patternZones
+      }
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -279,7 +298,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - driving feel classifier is our source of truth
+      // Zone smoothing complete
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
