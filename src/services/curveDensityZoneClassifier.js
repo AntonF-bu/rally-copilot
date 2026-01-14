@@ -110,17 +110,23 @@ function createAnalysisWindows(events, totalMiles, windowSize) {
     const length = end - start
     
     // Find events in this window
+    // Road Flow events have: startMile, apexMile, totalAngle, type
     const windowEvents = events.filter(e => {
-      const eventMile = e.distance / 1609.34
+      // Use apexMile (where the curve actually is) or startMile as fallback
+      const eventMile = e.apexMile ?? e.startMile ?? (e.startDistance ? e.startDistance / 1609.34 : null)
+      if (eventMile === null) return false
       return eventMile >= start && eventMile < end
     })
     
     // Calculate metrics
+    // Road Flow events use 'totalAngle' not 'angle'
     const curveCount = windowEvents.length
     const curvesPerMile = length > 0 ? curveCount / length : 0
-    const angles = windowEvents.map(e => e.angle || 0)
+    const angles = windowEvents.map(e => e.totalAngle ?? e.angle ?? 0)
     const avgAngle = angles.length > 0 ? angles.reduce((a, b) => a + b, 0) / angles.length : 0
     const maxAngle = angles.length > 0 ? Math.max(...angles) : 0
+    
+    // Road Flow events use 'type' with values 'danger', 'significant', 'sweeper'
     const dangerCount = windowEvents.filter(e => e.type === 'danger').length
     const significantCount = windowEvents.filter(e => e.type === 'significant' || e.type === 'danger').length
     
@@ -362,7 +368,8 @@ export function convertToZoneFormat(densitySegments) {
  */
 export function reassignEventZones(events, zones) {
   return events.map(event => {
-    const eventDistance = event.distance
+    // Road Flow events have apexDistance or startDistance (in meters)
+    const eventDistance = event.apexDistance ?? event.startDistance ?? 0
     
     // Find which zone this event falls into
     const zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
