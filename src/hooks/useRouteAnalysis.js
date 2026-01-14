@@ -3,9 +3,8 @@ import useStore from '../store'
 import { getRoute, geocodeAddress } from '../services/routeService'
 
 // ================================
-// Route Analysis Hook - v5
-// SIMPLIFIED: Only updates upcoming curves from store data
-// NO curve detection - Preview handles that!
+// Route Analysis Hook - v6
+// NOW INCLUDES: legs in routeData for road ref extraction
 // ================================
 
 export function useRouteAnalysis() {
@@ -37,7 +36,36 @@ export function useRouteAnalysis() {
   }, [routeZones])
 
   // ================================================================
-  // REROUTE - Simplified, just gets new route coordinates
+  // HELPER: Calculate total route distance
+  // ================================================================
+  const calculateRouteDistance = useCallback((coordinates) => {
+    if (!coordinates || coordinates.length < 2) return 0
+    
+    let total = 0
+    for (let i = 1; i < coordinates.length; i++) {
+      const [lon1, lat1] = coordinates[i - 1]
+      const [lon2, lat2] = coordinates[i]
+      
+      // Haversine formula
+      const R = 6371e3 // Earth's radius in meters
+      const φ1 = lat1 * Math.PI / 180
+      const φ2 = lat2 * Math.PI / 180
+      const Δφ = (lat2 - lat1) * Math.PI / 180
+      const Δλ = (lon2 - lon1) * Math.PI / 180
+
+      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ/2) * Math.sin(Δλ/2)
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+
+      total += R * c
+    }
+    
+    return total
+  }, [])
+
+  // ================================================================
+  // REROUTE - Gets new route with legs
   // ================================================================
   const reroute = useCallback(async () => {
     const currentPosition = useStore.getState().position
@@ -57,10 +85,13 @@ export function useRouteAnalysis() {
         return false
       }
 
-      // Keep existing curves - just update coordinates
+      // Update with new route data INCLUDING legs
       setRouteData(prev => ({
         ...prev,
         coordinates: route.coordinates,
+        distance: route.distance,
+        duration: route.duration,
+        legs: route.legs,  // NEW: Include legs for road ref extraction
         rerouted: true,
         reroutedAt: Date.now()
       }))
@@ -75,6 +106,7 @@ export function useRouteAnalysis() {
 
   // ================================================================
   // INIT DESTINATION ROUTE - For setting up a new destination
+  // NOW INCLUDES: legs in routeData
   // ================================================================
   const initDestinationRoute = useCallback(async (destinationQuery) => {
     const currentPosition = useStore.getState().position
@@ -98,28 +130,149 @@ export function useRouteAnalysis() {
       const route = await getRoute(currentPosition, destCoords)
       if (!route?.coordinates) return false
 
+      // Calculate distance if not provided
+      const distance = route.distance || calculateRouteDistance(route.coordinates)
+
       setRouteData({
         coordinates: route.coordinates,
         curves: [], // Preview will detect these
         destination: destName,
-        distance: calculateRouteDistance(route.coordinates),
-        name: `Route to ${destName}`
+        distance: distance,
+        duration: route.duration,
+        name: `Route to ${destName}`,
+        legs: route.legs,  // NEW: Include legs for road ref extraction
       })
+
+      console.log(`📍 Route initialized: ${destName}, ${(distance/1609.34).toFixed(1)}mi, ${route.legs?.length || 0} leg(s)`)
 
       return true
     } catch (error) {
       console.error('initDestinationRoute error:', error)
       return false
     }
-  }, [setRouteData, setDestination])
+  }, [setRouteData, setDestination, calculateRouteDistance])
 
   // ================================================================
-  // IMPORT FROM URL - Stub for compatibility
+  // INIT MULTI-STOP ROUTE - For routes with multiple waypoints
+  // NOW INCLUDES: legs in routeData
   // ================================================================
-  const importRouteFromUrl = useCallback(async (url) => {
-    console.log('importRouteFromUrl called - use Preview instead')
-    return false
-  }, [])
+  const initMultiStopRoute = useCallback(async (waypointCoords) => {
+    if (!waypointCoords || waypointCoords.length < 2) {
+      console.warn('initMultiStopRoute: Need at least 2 waypoints')
+      return false
+    }
+
+    try {
+      // Import getRouteWithWaypoints dynamically to avoid circular deps
+      const { getRouteWithWaypoints } = await import('../services/routeService')
+      
+      const route = await getRouteWithWaypoints(waypointCoords)
+      if (!route?.coordinates) {
+        console.error('Failed to get multi-stop route')
+        return false
+      }
+
+      // Calculate distance if not provided
+      const distance = route.distance || calculateRouteDistance(route.coordinates)
+
+      setRouteData({
+        coordinates: route.coordinates,
+        curves: [], // Preview will detect these
+        distance: distance,
+        duration: route.duration,
+        name: `Trip with ${waypointCoords.length} stops`,
+        isMultiStop: true,
+        waypointCount: waypointCoords.length,
+        legs: route.legs,  // NEW: Include legs for road ref extraction
+      })
+
+      console.log(`📍 Multi-stop route initialized: ${waypointCoords.length} stops, ${(distance/1609.34).toFixed(1)}mi, ${route.legs?.length || 0} leg(s)`)
+
+      return true
+    } catch (error) {
+      console.error('initMultiStopRoute error:', error)
+      return false
+    }
+  }, [setRouteData, calculateRouteDistance])
+
+  // ================================================================
+  // INIT IMPORTED ROUTE - For routes from Google Maps URLs
+  // NOW INCLUDES: legs in routeData
+  // ================================================================
+  const initImportedRoute = useCallback(async (url) => {
+    try {
+      const { parseGoogleMapsUrl, getRoute: fetchRoute, getRouteWithWaypoints, geocodeAddress: geocode } = await import('../services/routeService')
+      
+      const parsed = parseGoogleMapsUrl(url)
+      if (!parsed) {
+        console.error('Could not parse URL')
+        return false
+      }
+
+      let route = null
+      let routeName = 'Imported Route'
+
+      // Handle different parsing results
+      if (parsed.coordinates && parsed.coordinates.length >= 2) {
+        // Direct coordinates - fetch route
+        if (parsed.coordinates.length === 2) {
+          route = await fetchRoute(parsed.coordinates[0], parsed.coordinates[1])
+        } else {
+          route = await getRouteWithWaypoints(parsed.coordinates)
+        }
+      } else if (parsed.needsGeocoding) {
+        // Need to geocode addresses
+        let startCoords = parsed.originCoordinates
+        let endCoords = parsed.destinationCoordinates
+
+        if (!startCoords && parsed.origin) {
+          const results = await geocode(parsed.origin)
+          if (results?.length > 0) startCoords = results[0].coordinates
+        }
+
+        if (!endCoords && parsed.destination) {
+          const results = await geocode(parsed.destination)
+          if (results?.length > 0) {
+            endCoords = results[0].coordinates
+            routeName = `Route to ${results[0].name}`
+          }
+        }
+
+        if (startCoords && endCoords) {
+          route = await fetchRoute(startCoords, endCoords)
+        }
+      }
+
+      if (!route?.coordinates) {
+        console.error('Failed to get route from parsed URL')
+        return false
+      }
+
+      const distance = route.distance || calculateRouteDistance(route.coordinates)
+
+      setRouteData({
+        coordinates: route.coordinates,
+        curves: [], // Preview will detect these
+        distance: distance,
+        duration: route.duration,
+        name: routeName,
+        isImported: true,
+        legs: route.legs,  // NEW: Include legs for road ref extraction
+      })
+
+      console.log(`📍 Imported route initialized: ${(distance/1609.34).toFixed(1)}mi, ${route.legs?.length || 0} leg(s)`)
+
+      return true
+    } catch (error) {
+      console.error('initImportedRoute error:', error)
+      return false
+    }
+  }, [setRouteData, calculateRouteDistance])
+
+  // ================================================================
+  // IMPORT FROM URL - Alias for compatibility
+  // ================================================================
+  const importRouteFromUrl = initImportedRoute
 
   // ================================================================
   // FETCH ROAD AHEAD - Stub for compatibility
@@ -139,215 +292,97 @@ export function useRouteAnalysis() {
     if (routeMode === 'lookahead') return
 
     const now = Date.now()
-    if (now - lastCurveUpdateRef.current < 250) return
+    if (now - lastCurveUpdateRef.current < 500) return // Throttle to 2Hz
     lastCurveUpdateRef.current = now
 
-    const curves = routeData.curves
-    const coordinates = routeData.coordinates
+    // Find user's position along route
+    const distanceAlong = findDistanceAlongRoute(position, routeData.coordinates)
     
-    // Calculate current distance along route
-    const currentDist = estimateDistanceAlongRoute(position, coordinates)
-    lastDistanceAlongRef.current = currentDist
+    // Only update if moved significantly
+    if (Math.abs(distanceAlong - lastDistanceAlongRef.current) < 10) return
+    lastDistanceAlongRef.current = distanceAlong
 
-    // Filter and map curves - use the SAME curves from Preview
-    const upcoming = curves
+    // Get curves ahead of current position
+    const curvesAhead = routeData.curves
       .filter(curve => {
-        const curveStart = curve.distanceFromStart || 0
-        // Skip curves at very start
-        if (curveStart < 50) return false
-        // Skip curves in transit zones - highway mode handles those
-        if (isInTransitZone(curveStart)) return false
+        const curveDistance = curve.distanceFromStart || 0
+        const distanceToGo = curveDistance - distanceAlong
+        // Only curves 50m to 2000m ahead
+        return distanceToGo > 50 && distanceToGo < 2000
+      })
+      .filter(curve => {
+        // Skip curves in transit zones (unless they're significant)
+        const curveDistance = curve.distanceFromStart || 0
+        if (isInTransitZone(curveDistance) && curve.severity < 4) {
+          return false
+        }
         return true
       })
-      .map(curve => {
-        const curveStart = curve.distanceFromStart || 0
-        const distanceToCurve = curveStart - currentDist
-        
-        return {
-          ...curve,
-          distance: Math.max(0, distanceToCurve),
-          actualDistance: distanceToCurve
-        }
-      })
-      .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
-      .sort((a, b) => a.actualDistance - b.actualDistance)
-      .slice(0, 5)
+      .sort((a, b) => (a.distanceFromStart || 0) - (b.distanceFromStart || 0))
+      .slice(0, 5) // Max 5 upcoming curves
 
-    // Log periodically
-    if (now % 2000 < 300 && upcoming.length > 0) {
-      console.log(`🎯 Upcoming curves (non-transit): ${upcoming.map(c => 
-        `${c.direction}${c.severity}@${Math.round(c.distance)}m`
-      ).join(', ')}`)
-    }
+    setUpcomingCurves(curvesAhead)
 
-    // Always log when setting curves
-    if (upcoming.length > 0) {
-      console.log(`🎯 useRouteAnalysis: Setting ${upcoming.length} upcoming curves to store`)
-    }
-    
-    setUpcomingCurves(upcoming)
-
-    // Set active curve
-    const active = upcoming.find(c => c.distance <= 30 && c.distance >= 0)
-    setActiveCurve(active || null)
-    
-  }, [isRunning, position, routeData, routeMode, routeZones, setUpcomingCurves, setActiveCurve, isInTransitZone])
-
-  // ================================================================
-  // BACKUP: Interval-based updates for live GPS
-  // ================================================================
-  useEffect(() => {
-    if (!isRunning || routeMode === 'demo' || routeMode === 'lookahead') return
-    if (!routeData?.curves?.length) return
-
-    console.log('🔄 Starting live GPS curve update interval')
-
-    const interval = setInterval(() => {
-      const currentPosition = useStore.getState().position
-      const coordinates = routeData.coordinates
-      const curves = routeData.curves
-      const zones = useStore.getState().routeZones
-      
-      if (!currentPosition || !coordinates?.length || !curves?.length) return
-
-      const currentDist = estimateDistanceAlongRoute(currentPosition, coordinates)
-      
-      // Check if in transit zone helper
-      const inTransit = (dist) => {
-        if (!zones?.length) return false
-        return zones.some(z => 
-          z.character === 'transit' && 
-          dist >= z.startDistance && 
-          dist <= z.endDistance
-        )
+    // Set active curve (closest one)
+    if (curvesAhead.length > 0) {
+      const closest = curvesAhead[0]
+      const distanceToCurve = (closest.distanceFromStart || 0) - distanceAlong
+      if (distanceToCurve < 500) {
+        setActiveCurve({ ...closest, distanceTo: distanceToCurve })
+      } else {
+        setActiveCurve(null)
       }
-      
-      const upcoming = curves
-        .filter(curve => {
-          const d = curve.distanceFromStart || 0
-          return d > 50 && !inTransit(d)
-        })
-        .map(curve => {
-          const curveStart = curve.distanceFromStart || 0
-          const distanceToCurve = curveStart - currentDist
-          return {
-            ...curve,
-            distance: Math.max(0, distanceToCurve),
-            actualDistance: distanceToCurve
-          }
-        })
-        .filter(c => c.actualDistance > -30 && c.actualDistance < 2000)
-        .sort((a, b) => a.actualDistance - b.actualDistance)
-        .slice(0, 5)
-
-      if (upcoming.length > 0) {
-        useStore.getState().setUpcomingCurves(upcoming)
-        const active = upcoming.find(c => c.distance <= 30 && c.distance >= 0)
-        useStore.getState().setActiveCurve(active || null)
-      }
-    }, 500)
-
-    return () => {
-      console.log('🔄 Stopping live GPS curve update interval')
-      clearInterval(interval)
+    } else {
+      setActiveCurve(null)
     }
-  }, [isRunning, routeMode, routeData])
+  }, [isRunning, position, routeData, routeMode, routeZones, isInTransitZone, setUpcomingCurves, setActiveCurve])
 
-  // Return exported functions for components that need them
   return {
-    reroute,
     initDestinationRoute,
+    initMultiStopRoute,
+    initImportedRoute,
     importRouteFromUrl,
-    fetchRoadAhead
+    fetchRoadAhead,
+    reroute,
   }
 }
 
-// ================================
-// HELPER FUNCTIONS
-// ================================
+// ================================================================
+// HELPER: Find distance along route for a given position
+// ================================================================
+function findDistanceAlongRoute(position, coordinates) {
+  if (!position || !coordinates?.length) return 0
 
-function calculateRouteDistance(coordinates) {
-  if (!coordinates || coordinates.length < 2) return 0
-  let total = 0
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    total += getDistanceBetween(coordinates[i], coordinates[i + 1])
-  }
-  return total
-}
-
-function getDistanceBetween(coord1, coord2) {
-  const R = 6371e3
-  const φ1 = coord1[1] * Math.PI / 180
-  const φ2 = coord2[1] * Math.PI / 180
-  const Δφ = (coord2[1] - coord1[1]) * Math.PI / 180
-  const Δλ = (coord2[0] - coord1[0]) * Math.PI / 180
-
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ/2) * Math.sin(Δλ/2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-
-  return R * c
-}
-
-function estimateDistanceAlongRoute(position, coordinates) {
-  if (!coordinates || coordinates.length < 2) return 0
+  const [userLng, userLat] = [position[0], position[1]]
   
   let minDist = Infinity
-  let closestSegmentIdx = 0
-  let projectionFactor = 0
+  let closestIndex = 0
   
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    const segStart = coordinates[i]
-    const segEnd = coordinates[i + 1]
-    
-    const projection = projectPointOnSegment(position, segStart, segEnd)
-    const dist = getDistanceBetween(position, projection.point)
-    
+  // Find closest point on route
+  for (let i = 0; i < coordinates.length; i++) {
+    const [lng, lat] = coordinates[i]
+    const dist = Math.sqrt(
+      Math.pow((lng - userLng) * 111000 * Math.cos(userLat * Math.PI / 180), 2) +
+      Math.pow((lat - userLat) * 111000, 2)
+    )
     if (dist < minDist) {
       minDist = dist
-      closestSegmentIdx = i
-      projectionFactor = projection.factor
+      closestIndex = i
     }
   }
   
-  let distAlong = 0
-  for (let i = 0; i < closestSegmentIdx; i++) {
-    distAlong += getDistanceBetween(coordinates[i], coordinates[i + 1])
-  }
-  
-  if (closestSegmentIdx < coordinates.length - 1) {
-    const segmentLength = getDistanceBetween(
-      coordinates[closestSegmentIdx], 
-      coordinates[closestSegmentIdx + 1]
+  // Calculate distance from start to closest point
+  let distance = 0
+  for (let i = 1; i <= closestIndex; i++) {
+    const [lng1, lat1] = coordinates[i - 1]
+    const [lng2, lat2] = coordinates[i]
+    distance += Math.sqrt(
+      Math.pow((lng2 - lng1) * 111000 * Math.cos(lat1 * Math.PI / 180), 2) +
+      Math.pow((lat2 - lat1) * 111000, 2)
     )
-    distAlong += segmentLength * Math.max(0, Math.min(1, projectionFactor))
   }
   
-  return distAlong
-}
-
-function projectPointOnSegment(point, segStart, segEnd) {
-  const dx = segEnd[0] - segStart[0]
-  const dy = segEnd[1] - segStart[1]
-  
-  if (dx === 0 && dy === 0) {
-    return { point: segStart, factor: 0 }
-  }
-  
-  const t = (
-    (point[0] - segStart[0]) * dx + 
-    (point[1] - segStart[1]) * dy
-  ) / (dx * dx + dy * dy)
-  
-  const clampedT = Math.max(0, Math.min(1, t))
-  
-  const projectedPoint = [
-    segStart[0] + clampedT * dx,
-    segStart[1] + clampedT * dy
-  ]
-  
-  return { point: projectedPoint, factor: clampedT }
+  return distance
 }
 
 export default useRouteAnalysis
