@@ -95,14 +95,29 @@ export async function classifyWithVoting(flowEvents, totalDistanceMeters, census
   console.log('🗳️ Voting Zone Classifier v1.1 (with road class)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
   
+  // Validate inputs
+  if (!flowEvents || !Array.isArray(flowEvents)) {
+    console.error('   ❌ Invalid flowEvents - must be array')
+    return []
+  }
+  
+  if (!totalDistanceMeters || totalDistanceMeters <= 0) {
+    console.error('   ❌ Invalid totalDistanceMeters')
+    return []
+  }
+  
   // Step 1: Extract meaningful curves
   const curves = extractCurves(flowEvents)
   console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
   
   // Step 1b: Fetch road class data (if we have coordinates and token)
   let roadClasses = new Map()
-  if (coordinates && coordinates.length > 0 && mapboxToken) {
-    roadClasses = await fetchRoadClasses(coordinates, totalMiles, mapboxToken)
+  if (coordinates && Array.isArray(coordinates) && coordinates.length > 0 && mapboxToken) {
+    try {
+      roadClasses = await fetchRoadClasses(coordinates, totalMiles, mapboxToken)
+    } catch (err) {
+      console.log('   ⚠️ Road class fetch failed:', err.message)
+    }
   } else {
     console.log('   ⚠️ Road class lookup skipped (no coords/token)')
   }
@@ -307,11 +322,24 @@ function scoreWindow(window, allCurves, censusSegments, totalMiles, roadClasses 
   let nearestRoadClass = null
   let nearestDist = Infinity
   
-  for (const [mile, roadClass] of roadClasses) {
-    const dist = Math.abs(mile - midMile)
-    if (dist < nearestDist) {
-      nearestDist = dist
-      nearestRoadClass = roadClass
+  // Defensive: ensure roadClasses is iterable (Map or array of [key, value])
+  if (roadClasses && typeof roadClasses.entries === 'function') {
+    for (const [mile, roadClass] of roadClasses.entries()) {
+      const dist = Math.abs(mile - midMile)
+      if (dist < nearestDist) {
+        nearestDist = dist
+        nearestRoadClass = roadClass
+      }
+    }
+  } else if (roadClasses && roadClasses.size === undefined && typeof roadClasses === 'object') {
+    // Handle plain object {mile: roadClass}
+    for (const [mileStr, roadClass] of Object.entries(roadClasses)) {
+      const mile = parseFloat(mileStr)
+      const dist = Math.abs(mile - midMile)
+      if (dist < nearestDist) {
+        nearestDist = dist
+        nearestRoadClass = roadClass
+      }
     }
   }
   
