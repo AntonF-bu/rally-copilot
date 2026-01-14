@@ -88,16 +88,29 @@ function analyzeCurvesInRange(curves, startMile, endMile) {
 
 /**
  * Determine zone for a state route based on curve characteristics
+ * Uses a buffer zone to catch curves just before/after the segment
  */
 function classifyStateRoute(startMile, endMile, curves) {
-  const stats = analyzeCurvesInRange(curves, startMile, endMile)
+  // Check curves WITH a buffer - transitions affect character
+  const buffer = 0.5 // half mile buffer on each side
+  const stats = analyzeCurvesInRange(curves, startMile - buffer, endMile + buffer)
+  
+  console.log(`   🔍 State route ${startMile.toFixed(1)}-${endMile.toFixed(1)}mi: ${stats.curveCount} curves, avg ${stats.avgAngle.toFixed(0)}°, max ${stats.maxAngle}°`)
+  
+  // If has danger curves nearby = definitely technical
+  if (stats.hasDanger) {
+    console.log(`      → TECHNICAL (danger curve ${stats.maxAngle}° nearby)`)
+    return 'technical'
+  }
   
   // If very few curves and gentle = highway-like state route
-  if (stats.curvesPerMile < 1.5 && stats.avgAngle < 25 && !stats.hasDanger) {
+  if (stats.curvesPerMile < 1.5 && stats.avgAngle < 25) {
+    console.log(`      → TRANSIT (highway-like: ${stats.curvesPerMile.toFixed(1)} curves/mi, ${stats.avgAngle.toFixed(0)}° avg)`)
     return 'transit'
   }
   
   // Otherwise = fun twisty state route
+  console.log(`      → TECHNICAL (twisty: ${stats.curvesPerMile.toFixed(1)} curves/mi, ${stats.avgAngle.toFixed(0)}° avg)`)
   return 'technical'
 }
 
@@ -273,15 +286,27 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
   const mergedZones = mergeAdjacentZones(zones)
   
   // ========================================
+  // STEP 3.5: Clean up fragmentation
+  // ========================================
+  
+  // A) Merge tiny transit segments surrounded by technical
+  const MIN_TRANSIT_LENGTH = 0.3 // miles
+  let cleanedZones = mergeTinyTransitSegments(mergedZones, MIN_TRANSIT_LENGTH)
+  
+  // B) Clean up route START (before first major highway)
+  // If we have fragmented tech/transit/tech before the main highway, consolidate
+  cleanedZones = cleanRouteStart(cleanedZones)
+  
+  // ========================================
   // STEP 4: Log final result
   // ========================================
   console.log('   Final zones:')
-  mergedZones.forEach((z, i) => {
+  cleanedZones.forEach((z, i) => {
     const length = (z.endMile - z.startMile).toFixed(1)
     console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.road}) [${length}mi]`)
   })
   
-  return mergedZones
+  return cleanedZones
 }
 
 /**
@@ -314,6 +339,81 @@ function mergeAdjacentZones(zones) {
   
   merged.push(current)
   return merged
+}
+
+/**
+ * Merge tiny transit segments that are surrounded by technical zones
+ * e.g., 0.1mi of US-202 in the middle of local roads should become technical
+ */
+function mergeTinyTransitSegments(zones, minLength) {
+  if (zones.length <= 2) return zones
+  
+  const result = []
+  
+  for (let i = 0; i < zones.length; i++) {
+    const zone = zones[i]
+    const prev = i > 0 ? zones[i - 1] : null
+    const next = i < zones.length - 1 ? zones[i + 1] : null
+    
+    const length = zone.endMile - zone.startMile
+    
+    // Check if this is a tiny transit segment surrounded by technical
+    if (zone.character === 'transit' && length < minLength) {
+      const prevIsTechnical = prev?.character === 'technical'
+      const nextIsTechnical = next?.character === 'technical'
+      
+      if (prevIsTechnical && nextIsTechnical) {
+        // Absorb into previous technical zone
+        console.log(`   🔀 Merging tiny transit ${zone.startMile.toFixed(1)}-${zone.endMile.toFixed(1)}mi (${length.toFixed(2)}mi) into technical`)
+        if (result.length > 0) {
+          result[result.length - 1].endMile = zone.endMile
+        }
+        continue
+      }
+    }
+    
+    result.push({ ...zone })
+  }
+  
+  // After absorbing, we may have created new adjacent same-character zones
+  return mergeAdjacentZones(result)
+}
+
+/**
+ * Clean up route start - consolidate fragmented zones before the first major highway
+ * Pattern: TECH → TRANSIT → TECH → BIG_HIGHWAY should become → TRANSIT → BIG_HIGHWAY
+ * (We're in a city navigating to the highway - treat it all as transit/urban)
+ */
+function cleanRouteStart(zones) {
+  if (zones.length < 3) return zones
+  
+  // Find the first major highway segment (transit zone > 10 miles)
+  const majorHighwayIdx = zones.findIndex(z => 
+    z.character === 'transit' && (z.endMile - z.startMile) > 10
+  )
+  
+  if (majorHighwayIdx <= 0) return zones // No major highway or it's first
+  
+  // Everything before the major highway
+  const beforeHighway = zones.slice(0, majorHighwayIdx)
+  const totalLengthBefore = beforeHighway.reduce((sum, z) => sum + (z.endMile - z.startMile), 0)
+  
+  // If it's short (< 2 miles) and fragmented, consolidate to transit
+  if (totalLengthBefore < 2 && beforeHighway.length >= 2) {
+    console.log(`   🔀 Consolidating fragmented route start (${totalLengthBefore.toFixed(1)}mi) to TRANSIT`)
+    
+    const consolidatedStart = {
+      startMile: 0,
+      endMile: zones[majorHighwayIdx].startMile,
+      character: 'transit',
+      road: 'city navigation',
+      reason: 'consolidated start'
+    }
+    
+    return [consolidatedStart, ...zones.slice(majorHighwayIdx)]
+  }
+  
+  return zones
 }
 
 /**
