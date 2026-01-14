@@ -337,19 +337,42 @@ function removeZoneOverlaps(zones) {
 
 /**
  * Extract meaningful curves from flow events
+ * Road Flow Analyzer outputs: mile, angle, direction, shape, type, length
  */
 function extractCurves(flowEvents) {
-  return flowEvents
-    .filter(e => e.angle >= THRESHOLDS.minAngleToCount)
-    .map(e => ({
-      mile: e.mile,
-      angle: e.angle,
-      direction: e.direction,
-      shape: e.shape,
-      length: e.length,
-      type: e.type,
-    }))
+  if (!flowEvents || flowEvents.length === 0) {
+    console.log('   ⚠️ No flow events to extract curves from')
+    return []
+  }
+  
+  // Debug: show first event structure
+  const first = flowEvents[0]
+  console.log(`   Event sample: mile=${first.mile}, angle=${first.angle}, dir=${first.direction}`)
+  
+  const curves = flowEvents
+    .filter(e => {
+      // Road flow analyzer uses 'angle' directly
+      const angle = e.angle ?? e.totalAngle ?? 0
+      return angle >= THRESHOLDS.minAngleToCount
+    })
+    .map(e => {
+      const mile = e.mile ?? e.apexMile ?? e.startMile ?? 0
+      const angle = e.angle ?? e.totalAngle ?? 0
+      
+      return {
+        mile,
+        angle,
+        direction: e.direction || 'UNKNOWN',
+        shape: e.shape || 'medium',
+        length: e.length ?? 0,
+        type: e.type || 'curve',
+      }
+    })
     .sort((a, b) => a.mile - b.mile)
+  
+  console.log(`   Extracted ${curves.length} curves ≥${THRESHOLDS.minAngleToCount}° from ${flowEvents.length} events`)
+  
+  return curves
 }
 
 /**
