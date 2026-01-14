@@ -1,6 +1,6 @@
 // ================================
 // Route Service - v2.0
-// NOW INCLUDES: steps=true for road ref data
+// NOW INCLUDES: steps=true for road ref data (I-90, US-9, etc.)
 // ================================
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
@@ -32,14 +32,14 @@ export async function geocodeAddress(query) {
 
 /**
  * Get route between two points
- * NOW RETURNS: legs with step-by-step road info including refs
+ * NOW RETURNS: legs with step-by-step road info including refs (I-90, US-9, etc.)
  */
 export async function getRoute(start, end) {
   if (!start || !end || !MAPBOX_TOKEN) return null
 
   try {
     const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`
-    // ADDED: steps=true to get road refs (I-90, US-9, etc.)
+    // ADDED: steps=true to get road refs
     const response = await fetch(
       `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
     )
@@ -51,8 +51,7 @@ export async function getRoute(start, end) {
         coordinates: route.geometry.coordinates,
         distance: route.distance,
         duration: route.duration,
-        // NEW: Include legs for road ref extraction
-        legs: route.legs || [],
+        legs: route.legs || [],  // NEW: Include legs for road ref extraction
       }
     }
     return null
@@ -83,8 +82,7 @@ export async function getRouteWithWaypoints(waypoints) {
         coordinates: route.geometry.coordinates,
         distance: route.distance,
         duration: route.duration,
-        // NEW: Include legs for road ref extraction
-        legs: route.legs || [],
+        legs: route.legs || [],  // NEW: Include legs for road ref extraction
       }
     }
     return null
@@ -107,7 +105,6 @@ export function extractRoadRefs(legs, totalDistanceMeters) {
   
   const roadSegments = []
   let cumulativeDistance = 0
-  const totalMiles = totalDistanceMeters / 1609.34
   
   for (const leg of legs) {
     if (!leg.steps) continue
@@ -144,9 +141,12 @@ export function extractRoadRefs(legs, totalDistanceMeters) {
   // Log sample for debugging
   if (roadSegments.length > 0) {
     console.log('   Sample segments:')
-    roadSegments.slice(0, 5).forEach(seg => {
+    roadSegments.slice(0, 8).forEach(seg => {
       console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${seg.ref || seg.name} (${seg.roadClass})`)
     })
+    if (roadSegments.length > 8) {
+      console.log(`      ... and ${roadSegments.length - 8} more`)
+    }
   }
   
   return roadSegments
@@ -165,29 +165,43 @@ function classifyRoadRef(ref, name) {
   const refUpper = (ref || '').toUpperCase()
   const nameUpper = (name || '').toUpperCase()
   
-  // Interstate highways: I-90, I-95, etc.
-  if (refUpper.match(/^I-\d+/) || nameUpper.includes('INTERSTATE')) {
+  // Interstate highways: I-90, I-95, I-495, etc.
+  if (refUpper.match(/^I-?\d+/) || nameUpper.includes('INTERSTATE')) {
     return 'interstate'
   }
   
-  // US highways: US-1, US-9, US-20, etc.
-  if (refUpper.match(/^US-?\d+/) || nameUpper.includes('US ROUTE') || nameUpper.includes('US HIGHWAY')) {
+  // US highways: US-1, US-9, US-20, US 9, etc.
+  if (refUpper.match(/^US[\s-]?\d+/) || nameUpper.includes('US ROUTE') || nameUpper.includes('US HIGHWAY')) {
     return 'us_highway'
   }
   
-  // State routes: MA-9, NY-17, etc. (2-letter prefix followed by dash and number)
-  if (refUpper.match(/^[A-Z]{2}-?\d+/)) {
+  // State routes: MA-9, NY-17, MA 9, Route 9, etc. (2-letter prefix followed by number)
+  if (refUpper.match(/^[A-Z]{2}[\s-]?\d+/)) {
     return 'state_route'
   }
   
   // Named routes without ref (often state or county roads)
-  if (nameUpper.includes('ROUTE') || nameUpper.includes('HIGHWAY') || nameUpper.includes('PIKE') || nameUpper.includes('TURNPIKE')) {
+  if (nameUpper.includes('STATE ROUTE') || nameUpper.includes('STATE HIGHWAY')) {
     return 'state_route'
   }
   
+  // Parkways and turnpikes - usually highway-like
+  if (nameUpper.includes('TURNPIKE') || nameUpper.includes('PIKE') || nameUpper.includes('PARKWAY') || nameUpper.includes('EXPRESSWAY') || nameUpper.includes('FREEWAY')) {
+    return 'us_highway'  // Treat as highway-equivalent
+  }
+  
   // Local roads (no ref, or common local road names)
-  if (!ref || nameUpper.includes('STREET') || nameUpper.includes('AVENUE') || nameUpper.includes('ROAD') || nameUpper.includes('DRIVE') || nameUpper.includes('LANE')) {
-    return 'local'
+  if (!ref) {
+    if (nameUpper.includes('STREET') || nameUpper.includes('AVENUE') || nameUpper.includes('ROAD') || 
+        nameUpper.includes('DRIVE') || nameUpper.includes('LANE') || nameUpper.includes('COURT') ||
+        nameUpper.includes('CIRCLE') || nameUpper.includes('WAY') || nameUpper.includes('BOULEVARD')) {
+      return 'local'
+    }
+  }
+  
+  // If there's a ref but we couldn't classify it, assume state route
+  if (ref) {
+    return 'state_route'
   }
   
   return 'unknown'
@@ -260,41 +274,65 @@ export function parseGoogleMapsUrl(url) {
       const originStr = saddrMatch ? decodeURIComponent(saddrMatch[1]).replace(/\+/g, ' ') : null
       const daddrStr = daddrMatch ? decodeURIComponent(daddrMatch[1]).replace(/\+/g, ' ') : null
       
-      // Parse daddr which may have multiple destinations
+      console.log('saddr:', originStr)
+      console.log('daddr:', daddrStr)
+      
+      // Parse all waypoints from daddr (can have "to:" separators)
+      const allWaypoints = []
+      
+      // Add origin first
+      if (originStr) {
+        const originCoords = parseCoordinateString(originStr)
+        if (originCoords) {
+          allWaypoints.push({ coords: originCoords, name: null })
+        } else {
+          allWaypoints.push({ coords: null, name: originStr })
+        }
+      }
+      
+      // Parse destinations (split by " to:" pattern)
       if (daddrStr) {
-        const destinations = daddrStr.split(' to:').map(d => d.trim())
-        const allPoints = originStr ? [originStr, ...destinations] : destinations
+        const destParts = daddrStr.split(/\s+to:/)
+        console.log('Destination parts:', destParts)
         
-        const coordinates = []
-        const needsGeocoding = []
-        
-        for (const point of allPoints) {
-          const coords = parseCoordinateString(point)
+        for (const part of destParts) {
+          const trimmed = part.trim()
+          if (!trimmed) continue
+          
+          const coords = parseCoordinateString(trimmed)
           if (coords) {
-            coordinates.push(coords)
+            allWaypoints.push({ coords, name: null })
           } else {
-            needsGeocoding.push(point)
+            allWaypoints.push({ coords: null, name: trimmed })
           }
         }
-        
-        if (coordinates.length >= 2 && needsGeocoding.length === 0) {
-          return { coordinates }
-        }
-        
-        if (coordinates.length >= 1) {
+      }
+      
+      console.log('All waypoints:', allWaypoints)
+      
+      const needsGeocoding = allWaypoints.some(w => w.coords === null)
+      
+      if (allWaypoints.length >= 2) {
+        if (!needsGeocoding) {
           return { 
-            coordinates, 
-            needsGeocoding: true,
-            placesToGeocode: needsGeocoding
+            coordinates: allWaypoints.map(w => w.coords),
+            isMultiStop: allWaypoints.length > 2
           }
         }
         
         return {
           needsGeocoding: true,
-          origin: originStr,
-          destination: destinations[destinations.length - 1],
-          viaPoints: destinations.slice(0, -1)
+          waypoints: allWaypoints,
+          isMultiStop: allWaypoints.length > 2
         }
+      }
+      
+      if (allWaypoints.length === 1) {
+        const wp = allWaypoints[0]
+        if (wp.coords) {
+          return { coordinates: [wp.coords], needsOrigin: true }
+        }
+        return { needsGeocoding: true, destination: wp.name }
       }
     }
 
