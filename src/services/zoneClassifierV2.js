@@ -384,12 +384,16 @@ function mergeSmallZones(zones, minLengthMiles) {
     } else {
       // Merge into previous or next zone
       if (result.length > 0) {
-        // Extend previous zone
+        // Extend previous zone - update ALL properties
         result[result.length - 1].endMile = zone.endMile
+        result[result.length - 1].end = zone.endMile * 1609.34
+        result[result.length - 1].endDistance = zone.endMile * 1609.34
         result[result.length - 1].reason += ' (merged)'
       } else if (i + 1 < zones.length) {
-        // Will be absorbed by next zone
+        // Will be absorbed by next zone - update ALL properties
         zones[i + 1].startMile = zone.startMile
+        zones[i + 1].start = zone.startMile * 1609.34
+        zones[i + 1].startDistance = zone.startMile * 1609.34
       }
     }
   }
@@ -423,9 +427,11 @@ function applyUrbanAtEdges(zones, totalMiles, censusSegments) {
           result[0].character = 'urban'
           result[0].reason = 'Census urban (route start)'
         } else {
-          // Split first zone
+          // Split first zone - update ALL properties
           const newUrban = createZone(0, urbanEndMile, 'urban', 'Census urban (route start)')
           result[0].startMile = urbanEndMile
+          result[0].start = urbanEndMile * 1609.34
+          result[0].startDistance = urbanEndMile * 1609.34
           result.unshift(newUrban)
         }
       }
@@ -450,9 +456,11 @@ function applyUrbanAtEdges(zones, totalMiles, censusSegments) {
           result[lastIdx].character = 'urban'
           result[lastIdx].reason = 'Census urban (route end)'
         } else {
-          // Split last zone
+          // Split last zone - update ALL properties
           const newUrban = createZone(urbanStartMile, totalMiles, 'urban', 'Census urban (route end)')
           result[lastIdx].endMile = urbanStartMile
+          result[lastIdx].end = urbanStartMile * 1609.34
+          result[lastIdx].endDistance = urbanStartMile * 1609.34
           result.push(newUrban)
         }
       }
