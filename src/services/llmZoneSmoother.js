@@ -162,39 +162,44 @@ function ruleBasedSmoothing(zones) {
   
   console.log('   Using rule-based smoothing fallback')
   
+  // Step 1: Ensure zones are continuous (no gaps)
+  const continuous = ensureContinuousZones(zones)
+  
+  // Step 2: Merge short zones and fix ping-pong patterns
   const result = []
   let i = 0
   
-  while (i < zones.length) {
-    const current = { ...zones[i] }
+  while (i < continuous.length) {
+    const current = { ...continuous[i] }
+    const currentLength = current.endMile - current.startMile
     
-    // Look ahead for short zones that should be absorbed
-    while (i + 1 < zones.length) {
-      const next = zones[i + 1]
+    // Look ahead for patterns to merge
+    while (i + 1 < continuous.length) {
+      const next = continuous[i + 1]
       const nextLength = next.endMile - next.startMile
       
-      // If next zone is very short AND we have a zone after it of the same type as current
-      if (nextLength < 0.5 && i + 2 < zones.length) {
-        const afterNext = zones[i + 2]
+      // Pattern 1: SAME → SHORT_DIFFERENT (<0.8mi) → SAME
+      // Absorb the short different zone
+      if (nextLength < 0.8 && i + 2 < continuous.length) {
+        const afterNext = continuous[i + 2]
         
-        // Absorb pattern: SAME → SHORT_DIFFERENT → SAME
         if (afterNext.character === current.character) {
           console.log(`   Absorbing short ${next.character} zone (${nextLength.toFixed(2)}mi) between ${current.character} zones`)
           current.endMile = afterNext.endMile
-          current.end = afterNext.end
-          current.endDistance = afterNext.endDistance
+          current.end = afterNext.endMile * 1609.34
+          current.endDistance = afterNext.endMile * 1609.34
           current.reason = (current.reason || '') + ' (merged)'
           i += 2 // Skip the absorbed zones
           continue
         }
       }
       
-      // If next zone is very short (<0.3mi), absorb it
-      if (nextLength < 0.3) {
+      // Pattern 2: Very short zone (<0.4mi) - absorb into current
+      if (nextLength < 0.4) {
         console.log(`   Absorbing very short ${next.character} zone (${nextLength.toFixed(2)}mi) into ${current.character}`)
         current.endMile = next.endMile
-        current.end = next.end
-        current.endDistance = next.endDistance
+        current.end = next.endMile * 1609.34
+        current.endDistance = next.endMile * 1609.34
         current.reason = (current.reason || '') + ' (absorbed short)'
         i++
         continue
@@ -203,8 +208,61 @@ function ruleBasedSmoothing(zones) {
       break
     }
     
+    // Pattern 3: Current zone is very short (<0.3mi) - extend previous zone instead
+    if (currentLength < 0.3 && result.length > 0) {
+      const prev = result[result.length - 1]
+      prev.endMile = current.endMile
+      prev.end = current.endMile * 1609.34
+      prev.endDistance = current.endMile * 1609.34
+      console.log(`   Extended previous ${prev.character} zone to absorb short ${current.character} zone`)
+      i++
+      continue
+    }
+    
     result.push(current)
     i++
+  }
+  
+  // Step 3: Final pass - merge consecutive same-type zones
+  const merged = []
+  for (const zone of result) {
+    if (merged.length > 0 && merged[merged.length - 1].character === zone.character) {
+      // Extend previous zone
+      merged[merged.length - 1].endMile = zone.endMile
+      merged[merged.length - 1].end = zone.endMile * 1609.34
+      merged[merged.length - 1].endDistance = zone.endMile * 1609.34
+    } else {
+      merged.push(zone)
+    }
+  }
+  
+  return merged.length > 0 ? merged : zones
+}
+
+/**
+ * Ensure zones are continuous with no gaps
+ */
+function ensureContinuousZones(zones) {
+  if (zones.length <= 1) return zones
+  
+  const result = []
+  
+  for (let i = 0; i < zones.length; i++) {
+    const zone = { ...zones[i] }
+    
+    // If there's a gap from previous zone, extend previous to cover it
+    if (result.length > 0) {
+      const prev = result[result.length - 1]
+      if (zone.startMile > prev.endMile + 0.01) {
+        const gap = zone.startMile - prev.endMile
+        console.log(`   Closing gap of ${gap.toFixed(2)}mi between zones`)
+        prev.endMile = zone.startMile
+        prev.end = zone.startMile * 1609.34
+        prev.endDistance = zone.startMile * 1609.34
+      }
+    }
+    
+    result.push(zone)
   }
   
   return result
