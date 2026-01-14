@@ -282,22 +282,35 @@ export function reassignEventZones(events, zones) {
   // Debug: log zone ranges
   console.log('📍 reassignEventZones: Zone ranges (meters):')
   zones.forEach((z, i) => {
-    console.log(`   ${i + 1}. ${z.character}: ${z.start?.toFixed(0) || 'N/A'}-${z.end?.toFixed(0) || 'N/A'}m`)
+    console.log(`   ${i + 1}. ${z.character}: ${z.start?.toFixed(0) || 'N/A'}-${z.end?.toFixed(0) || 'N/A'}m (${z.startMile?.toFixed(1)}-${z.endMile?.toFixed(1)}mi)`)
   })
   
-  // Debug: log sample event
+  // Debug: log sample event to see its structure
   const sampleEvent = events[Math.floor(events.length / 2)]
-  console.log(`📍 Sample event: mile=${sampleEvent.mile}, distance=${sampleEvent.distance}`)
+  console.log(`📍 Sample event keys: ${Object.keys(sampleEvent).join(', ')}`)
+  console.log(`📍 Sample event: mile=${sampleEvent.mile}, apexMile=${sampleEvent.apexMile}, distance=${sampleEvent.distance}`)
   
   let reassigned = 0
   let notFound = 0
   
   const updatedEvents = events.map(event => {
-    // Get event position in meters
-    const eventDistance = event.distance ?? (event.mile * 1609.34) ?? 0
+    // Road Flow Analyzer uses 'apexMile' for the mile position
+    // Try multiple property names for compatibility
+    const eventMile = event.mile ?? event.apexMile ?? event.triggerMile ?? 0
+    const eventDistance = event.distance ?? (eventMile * 1609.34)
     
-    // Find which zone this event falls into
-    const zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
+    // Find which zone this event falls into - try BOTH mile and meter lookups
+    let zone = null
+    
+    // First try meter-based lookup
+    if (zones[0]?.start !== undefined) {
+      zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
+    }
+    
+    // If that fails, try mile-based lookup
+    if (!zone && zones[0]?.startMile !== undefined) {
+      zone = zones.find(z => eventMile >= z.startMile && eventMile < z.endMile)
+    }
     
     if (!zone) {
       notFound++
