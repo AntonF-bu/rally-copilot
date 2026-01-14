@@ -126,10 +126,9 @@ export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegmen
  * Extract curves from flow events
  */
 function extractCurves(flowEvents) {
-  // Debug: log first few events to see structure
+  // Debug: log first event to see full structure
   if (flowEvents.length > 0) {
-    console.log('   Sample event keys:', Object.keys(flowEvents[0]))
-    console.log('   Sample event angle:', flowEvents[0].angle, 'type:', typeof flowEvents[0].angle)
+    console.log('   Sample event FULL:', JSON.stringify(flowEvents[0], null, 2))
   }
   
   const curves = flowEvents
@@ -148,8 +147,18 @@ function extractCurves(flowEvents) {
         angle = parseFloat(angle.replace('°', '')) || 0
       }
       
+      // Try multiple property names for mile position
+      let mile = e.mile ?? e.triggerMile ?? e.startMile ?? e.distance ?? 0
+      if (typeof mile === 'string') {
+        mile = parseFloat(mile) || 0
+      }
+      // Convert meters to miles if needed (if value > 100, it's probably meters)
+      if (mile > 100) {
+        mile = mile / 1609.34
+      }
+      
       return {
-        mile: e.mile ?? e.triggerMile ?? 0,
+        mile: mile,
         angle: angle,
         length: e.length ?? e.curveLength ?? 0,
         direction: e.direction ?? 'UNKNOWN',
@@ -161,8 +170,8 @@ function extractCurves(flowEvents) {
   
   console.log(`   Extracted ${curves.length} curves from ${flowEvents.length} events`)
   if (curves.length > 0) {
-    console.log(`   First curve: mile ${curves[0].mile.toFixed(1)}, ${curves[0].angle}°`)
-    console.log(`   Last curve: mile ${curves[curves.length-1].mile.toFixed(1)}, ${curves[curves.length-1].angle}°`)
+    console.log(`   First 3 curves:`, curves.slice(0, 3).map(c => `${c.mile.toFixed(1)}mi/${c.angle}°`).join(', '))
+    console.log(`   Last 3 curves:`, curves.slice(-3).map(c => `${c.mile.toFixed(1)}mi/${c.angle}°`).join(', '))
   }
   
   return curves
