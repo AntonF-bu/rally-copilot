@@ -15,14 +15,14 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyByPattern, convertToZoneFormat, reassignEventZones } from '../services/curvePatternZoneClassifier'
+import { classifyZonesByCurveDensity, convertToZoneFormat, reassignEventZones } from '../services/curveDensityZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v29
-// NEW: Curve Pattern Zone Classifier (simpler, more robust)
+// Route Preview - v28
+// NEW: Curve-Density-First Zone Classification
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -261,16 +261,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones based on CURVE PATTERNS (simple cluster detection)
-      console.log('\n🎯 Classifying zones by curve patterns...')
-      const patternZones = classifyByPattern(
+      // Step 3: Classify zones based on CURVE DENSITY (primary method)
+      console.log('\n🎯 Classifying zones by curve density...')
+      const densityZones = classifyZonesByCurveDensity(
+        coordinates,
         flowResult.events,
         routeData.distance,
         censusSegments  // Pass census as fallback for urban detection
       )
       
       // Convert to standard zone format
-      const activeZones = convertToZoneFormat(patternZones)
+      const activeZones = convertToZoneFormat(densityZones)
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -278,11 +279,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - curve pattern detection is our source of truth now
+      // Skip LLM zone validation - curve density is our source of truth now
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
-      // Step 4: Analyze highway bends (using pattern-based zones)
+      // Step 4: Analyze highway bends (using curve-density zones)
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
         updateStage('highway', 'loading')
