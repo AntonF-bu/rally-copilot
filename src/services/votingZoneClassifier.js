@@ -126,17 +126,46 @@ export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegmen
  * Extract curves from flow events
  */
 function extractCurves(flowEvents) {
-  return flowEvents
-    .filter(e => e.angle >= THRESHOLDS.minAngleToCount)
-    .map(e => ({
-      mile: e.mile,
-      angle: e.angle,
-      length: e.length || 0,
-      direction: e.direction,
-      type: e.type,
-      shape: e.shape
-    }))
+  // Debug: log first few events to see structure
+  if (flowEvents.length > 0) {
+    console.log('   Sample event keys:', Object.keys(flowEvents[0]))
+    console.log('   Sample event angle:', flowEvents[0].angle, 'type:', typeof flowEvents[0].angle)
+  }
+  
+  const curves = flowEvents
+    .filter(e => {
+      // Handle angle as number or string (might have ° symbol)
+      let angle = e.angle ?? e.totalAngle ?? e.maxAngle ?? 0
+      if (typeof angle === 'string') {
+        angle = parseFloat(angle.replace('°', '')) || 0
+      }
+      return angle >= THRESHOLDS.minAngleToCount
+    })
+    .map(e => {
+      // Parse angle, handling string with ° symbol
+      let angle = e.angle ?? e.totalAngle ?? e.maxAngle ?? 0
+      if (typeof angle === 'string') {
+        angle = parseFloat(angle.replace('°', '')) || 0
+      }
+      
+      return {
+        mile: e.mile ?? e.triggerMile ?? 0,
+        angle: angle,
+        length: e.length ?? e.curveLength ?? 0,
+        direction: e.direction ?? 'UNKNOWN',
+        type: e.type ?? 'curve',
+        shape: e.shape ?? 'medium'
+      }
+    })
     .sort((a, b) => a.mile - b.mile)
+  
+  console.log(`   Extracted ${curves.length} curves from ${flowEvents.length} events`)
+  if (curves.length > 0) {
+    console.log(`   First curve: mile ${curves[0].mile.toFixed(1)}, ${curves[0].angle}°`)
+    console.log(`   Last curve: mile ${curves[curves.length-1].mile.toFixed(1)}, ${curves[curves.length-1].angle}°`)
+  }
+  
+  return curves
 }
 
 /**
