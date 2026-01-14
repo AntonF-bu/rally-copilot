@@ -1,15 +1,11 @@
 // ================================
-// Voting Zone Classifier v1.0
+// Voting Zone Classifier v1.2
 // 
+// NEW: Road ref integration from Mapbox Directions API
+// Uses step.ref (I-90, US-9, MA-66) as strong signal
+//
 // Multiple signals vote on zone classification
 // No single point of failure - consensus wins
-//
-// Lessons learned baked in:
-// - ONE canonical format throughout
-// - Multiple window sizes (0.5mi clusters, 2mi sustained)
-// - Log the WHY with reasons array
-// - Minimum zone length to avoid fragmentation
-// - Fail safe to transit
 // ================================
 
 /**
@@ -32,7 +28,13 @@ const WEIGHTS = {
   // Pro-Urban signals (only at route start/end)
   censusSaysUrban: 10,    // Census urban at route edges - STRONG override
   
-  // Road class signals (from Mapbox) - STRONG signals
+  // Road class signals (from Mapbox Directions step.ref) - STRONG signals
+  roadRefInterstate: 10,  // I-90, I-95 = definitely highway/transit
+  roadRefUSHighway: 6,    // US-1, US-9 = likely highway
+  roadRefStateRoute: 0,   // MA-9, NY-17 = neutral (could be either)
+  roadRefLocal: -4,       // Local roads = likely technical (negative = pro-technical)
+  
+  // Legacy road class signals (from Mapbox Tilequery - may not be used)
   roadClassMotorway: 8,   // motorway/trunk = definitely highway/transit
   roadClassPrimary: 4,    // primary = likely highway
   roadClassSecondary: -2, // secondary = could be technical (negative = pro-technical)
@@ -63,11 +65,11 @@ const THRESHOLDS = {
   gapThresholdMiles: 2.0,      // Gap this long = transit signal
   
   // Zone cleanup
-  minZoneLengthMiles: 0.5,     // Minimum zone length (reduced from 1.0)
+  minZoneLengthMiles: 0.5,     // Minimum zone length
   analysisWindowMiles: 0.5,    // Sliding window for analysis
   
   // Urban limits
-  maxUrbanMiles: 1.0,          // Urban only at route edges
+  maxUrbanMiles: 2.0,          // Urban only at route edges (increased from 1.0)
 }
 
 /**
@@ -80,21 +82,25 @@ function createZone(startMile, endMile, character, score, reasons) {
     character,
     score: { ...score },
     reasons: [...reasons],
-    // Computed helpers
     lengthMiles: endMile - startMile,
   }
 }
 
 /**
- * Main entry point
- * Now accepts coordinates and mapboxToken for road class lookups
- * Returns zones synchronously (road class fetch happens in background if provided)
+ * Main entry point - UPDATED to accept road segments
+ * 
+ * @param {Array} flowEvents - Events from Road Flow Analyzer
+ * @param {number} totalDistanceMeters - Total route distance
+ * @param {Array} censusSegments - Census data for urban detection
+ * @param {Array} roadSegments - Road refs from extractRoadRefs() - NEW!
+ * @returns {Array} Zone segments
  */
-export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
+export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = [], roadSegments = []) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🗳️ Voting Zone Classifier v1.1 (with road class)')
+  console.log('🗳️ Voting Zone Classifier v1.2 (with road refs)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
+  console.log(`   Road segments: ${roadSegments.length}`)
   
   // Validate inputs
   if (!flowEvents || !Array.isArray(flowEvents)) {
@@ -111,84 +117,23 @@ export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegmen
   const curves = extractCurves(flowEvents)
   console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
   
-  // For now, skip road class lookup to keep it synchronous
-  // TODO: Add async version that fetches road classes
-  let roadClasses = new Map()
-  console.log('   ⚠️ Road class lookup skipped (sync mode)')
-  
-  // Step 2: Build voting windows along the route
-  const windows = buildVotingWindows(curves, totalMiles, censusSegments)
-  console.log(`   Analysis windows: ${windows.length}`)
-  
-  // Step 3: Score each window (now with road classes)
-  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles, roadClasses))
-  
-  // Step 4: Determine character for each window
-  const classifiedWindows = scoredWindows.map(classifyWindow)
-  
-  // Step 5: Merge adjacent windows with same character into zones
-  const rawZones = mergeWindowsToZones(classifiedWindows)
-  console.log(`   Raw zones: ${rawZones.length}`)
-  
-  // Step 6: Clean up tiny zones
-  const cleanedZones = cleanupZones(rawZones, totalMiles)
-  console.log(`   After cleanup: ${cleanedZones.length}`)
-  
-  // Step 7: Apply urban at route edges if Census supports it
-  const finalZones = applyUrbanEdges(cleanedZones, censusSegments, totalMiles)
-  
-  // Log results
-  console.log(`   Final zones:`)
-  finalZones.forEach((z, i) => {
-    const reasonStr = z.reasons.slice(0, 3).join(', ')
-    console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.lengthMiles.toFixed(1)}mi) [T:${z.score.technical} H:${z.score.transit}] - ${reasonStr}`)
-  })
-  
-  return finalZones
-}
-
-/**
- * Async version with road class lookup
- */
-export async function classifyWithVotingAsync(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
-  const totalMiles = totalDistanceMeters / 1609.34
-  
-  console.log('🗳️ Voting Zone Classifier v1.1 (async with road class)')
-  console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
-  
-  // Validate inputs
-  if (!flowEvents || !Array.isArray(flowEvents)) {
-    console.error('   ❌ Invalid flowEvents - must be array')
-    return []
-  }
-  
-  if (!totalDistanceMeters || totalDistanceMeters <= 0) {
-    console.error('   ❌ Invalid totalDistanceMeters')
-    return []
-  }
-  
-  // Step 1: Extract meaningful curves
-  const curves = extractCurves(flowEvents)
-  console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
-  
-  // Step 1b: Fetch road class data (if we have coordinates and token)
-  let roadClasses = new Map()
-  if (coordinates && Array.isArray(coordinates) && coordinates.length > 0 && mapboxToken) {
-    try {
-      roadClasses = await fetchRoadClasses(coordinates, totalMiles, mapboxToken)
-    } catch (err) {
-      console.log('   ⚠️ Road class fetch failed:', err.message)
-    }
+  // Step 1b: Log road ref coverage
+  if (roadSegments.length > 0) {
+    const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
+    const usHighways = roadSegments.filter(s => s.roadClass === 'us_highway')
+    const stateRoutes = roadSegments.filter(s => s.roadClass === 'state_route')
+    const localRoads = roadSegments.filter(s => s.roadClass === 'local')
+    console.log(`   Road refs: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local`)
   } else {
-    console.log('   ⚠️ Road class lookup skipped (no coords/token)')
+    console.log('   ⚠️ No road ref data available')
   }
   
   // Step 2: Build voting windows along the route
   const windows = buildVotingWindows(curves, totalMiles, censusSegments)
   console.log(`   Analysis windows: ${windows.length}`)
   
-  // Step 3: Score each window (now with road classes)
-  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles, roadClasses))
+  // Step 3: Score each window (now with road refs!)
+  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles, roadSegments))
   
   // Step 4: Determine character for each window
   const classifiedWindows = scoredWindows.map(classifyWindow)
@@ -218,14 +163,8 @@ export async function classifyWithVotingAsync(flowEvents, totalDistanceMeters, c
  * Extract curves from flow events
  */
 function extractCurves(flowEvents) {
-  // Debug: log first event to see full structure
-  if (flowEvents.length > 0) {
-    console.log('   Sample event FULL:', JSON.stringify(flowEvents[0], null, 2))
-  }
-  
   const curves = flowEvents
     .filter(e => {
-      // Handle angle as number or string (might have ° symbol)
       let angle = e.angle ?? e.totalAngle ?? e.maxAngle ?? 0
       if (typeof angle === 'string') {
         angle = parseFloat(angle.replace('°', '')) || 0
@@ -233,25 +172,22 @@ function extractCurves(flowEvents) {
       return angle >= THRESHOLDS.minAngleToCount
     })
     .map(e => {
-      // Parse angle, handling string with ° symbol
       let angle = e.angle ?? e.totalAngle ?? e.maxAngle ?? 0
       if (typeof angle === 'string') {
         angle = parseFloat(angle.replace('°', '')) || 0
       }
       
-      // Try multiple property names for mile position
-      let mile = e.mile ?? e.triggerMile ?? e.startMile ?? e.distance ?? 0
+      let mile = e.mile ?? e.triggerMile ?? e.startMile ?? e.apexMile ?? 0
       if (typeof mile === 'string') {
         mile = parseFloat(mile) || 0
       }
-      // Convert meters to miles if needed (if value > 100, it's probably meters)
       if (mile > 100) {
         mile = mile / 1609.34
       }
       
       return {
-        mile: mile,
-        angle: angle,
+        mile,
+        angle,
         length: e.length ?? e.curveLength ?? 0,
         direction: e.direction ?? 'UNKNOWN',
         type: e.type ?? 'curve',
@@ -260,83 +196,12 @@ function extractCurves(flowEvents) {
     })
     .sort((a, b) => a.mile - b.mile)
   
-  console.log(`   Extracted ${curves.length} curves from ${flowEvents.length} events`)
   if (curves.length > 0) {
     console.log(`   First 3 curves:`, curves.slice(0, 3).map(c => `${c.mile.toFixed(1)}mi/${c.angle}°`).join(', '))
     console.log(`   Last 3 curves:`, curves.slice(-3).map(c => `${c.mile.toFixed(1)}mi/${c.angle}°`).join(', '))
   }
   
   return curves
-}
-
-/**
- * Fetch road class data from Mapbox for sample points along route
- * Returns a Map of mile -> roadClass
- */
-async function fetchRoadClasses(coordinates, totalMiles, mapboxToken) {
-  const roadClasses = new Map()
-  
-  if (!mapboxToken || !coordinates || coordinates.length < 2) {
-    console.log('   ⚠️ No Mapbox token or coordinates for road class lookup')
-    return roadClasses
-  }
-  
-  // Sample every 2 miles (to limit API calls)
-  const sampleInterval = 2 // miles
-  const numSamples = Math.ceil(totalMiles / sampleInterval) + 1
-  const coordsPerMile = coordinates.length / totalMiles
-  
-  console.log(`   🛣️ Fetching road classes for ${numSamples} sample points...`)
-  
-  // Batch requests to avoid rate limiting
-  const batchSize = 10
-  const batches = []
-  
-  for (let i = 0; i < numSamples; i++) {
-    const mile = i * sampleInterval
-    const coordIndex = Math.min(Math.floor(mile * coordsPerMile), coordinates.length - 1)
-    const coord = coordinates[coordIndex]
-    
-    if (coord && coord.length >= 2) {
-      batches.push({ mile, lng: coord[0], lat: coord[1] })
-    }
-  }
-  
-  // Process in batches
-  for (let b = 0; b < batches.length; b += batchSize) {
-    const batch = batches.slice(b, b + batchSize)
-    
-    await Promise.all(batch.map(async ({ mile, lng, lat }) => {
-      try {
-        const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json?layers=road&limit=1&access_token=${mapboxToken}`
-        const response = await fetch(url)
-        
-        if (response.ok) {
-          const data = await response.json()
-          if (data.features && data.features.length > 0) {
-            const props = data.features[0].properties
-            const roadClass = props.class || 'unknown'
-            roadClasses.set(mile, roadClass)
-          }
-        }
-      } catch (err) {
-        // Silently fail for individual points
-      }
-    }))
-    
-    // Small delay between batches
-    if (b + batchSize < batches.length) {
-      await new Promise(r => setTimeout(r, 100))
-    }
-  }
-  
-  console.log(`   ✅ Road class data: ${roadClasses.size} samples`)
-  if (roadClasses.size > 0) {
-    const sample = Array.from(roadClasses.entries()).slice(0, 5)
-    console.log(`   Sample: ${sample.map(([m, c]) => `${m}mi:${c}`).join(', ')}`)
-  }
-  
-  return roadClasses
 }
 
 /**
@@ -360,9 +225,9 @@ function buildVotingWindows(curves, totalMiles, censusSegments) {
 }
 
 /**
- * Score a window with all voting signals
+ * Score a window with all voting signals - UPDATED with road refs
  */
-function scoreWindow(window, allCurves, censusSegments, totalMiles, roadClasses = new Map()) {
+function scoreWindow(window, allCurves, censusSegments, totalMiles, roadSegments = []) {
   const { startMile, endMile, midMile } = window
   const score = { technical: 0, transit: 0, urban: 0 }
   const reasons = []
@@ -377,62 +242,56 @@ function scoreWindow(window, allCurves, censusSegments, totalMiles, roadClasses 
   const curvesInClusterWindow = allCurves.filter(c => c.mile >= startMile && c.mile < clusterEnd)
   const curvesInSustainedWindow = allCurves.filter(c => c.mile >= startMile && c.mile < sustainedEnd)
   
-  // === ROAD CLASS SIGNALS (strongest!) ===
-  
-  // Find the nearest road class sample for this window
-  let nearestRoadClass = null
-  let nearestDist = Infinity
-  
-  // Defensive: ensure roadClasses is iterable (Map or array of [key, value])
-  if (roadClasses && typeof roadClasses.entries === 'function') {
-    for (const [mile, roadClass] of roadClasses.entries()) {
-      const dist = Math.abs(mile - midMile)
-      if (dist < nearestDist) {
-        nearestDist = dist
-        nearestRoadClass = roadClass
+  // === ROAD REF SIGNALS (strongest - from Mapbox Directions API) ===
+  if (roadSegments && roadSegments.length > 0) {
+    // Find the road segment(s) that cover this window
+    const roadsInWindow = roadSegments.filter(seg => 
+      (seg.startMile <= endMile && seg.endMile >= startMile)
+    )
+    
+    if (roadsInWindow.length > 0) {
+      // Use the dominant road class in this window (by distance covered)
+      const roadClassCoverage = {}
+      for (const seg of roadsInWindow) {
+        const overlapStart = Math.max(seg.startMile, startMile)
+        const overlapEnd = Math.min(seg.endMile, endMile)
+        const coverage = overlapEnd - overlapStart
+        roadClassCoverage[seg.roadClass] = (roadClassCoverage[seg.roadClass] || 0) + coverage
       }
-    }
-  } else if (roadClasses && roadClasses.size === undefined && typeof roadClasses === 'object') {
-    // Handle plain object {mile: roadClass}
-    for (const [mileStr, roadClass] of Object.entries(roadClasses)) {
-      const mile = parseFloat(mileStr)
-      const dist = Math.abs(mile - midMile)
-      if (dist < nearestDist) {
-        nearestDist = dist
-        nearestRoadClass = roadClass
+      
+      // Find dominant road class
+      let dominantClass = 'unknown'
+      let maxCoverage = 0
+      for (const [roadClass, coverage] of Object.entries(roadClassCoverage)) {
+        if (coverage > maxCoverage) {
+          maxCoverage = coverage
+          dominantClass = roadClass
+        }
       }
-    }
-  }
-  
-  if (nearestRoadClass && nearestDist < 3) { // Within 3 miles of sample
-    switch (nearestRoadClass) {
-      case 'motorway':
-      case 'motorway_link':
-      case 'trunk':
-      case 'trunk_link':
-        score.transit += WEIGHTS.roadClassMotorway
-        reasons.push(`road: ${nearestRoadClass}`)
-        break
-      case 'primary':
-      case 'primary_link':
-        score.transit += WEIGHTS.roadClassPrimary
-        reasons.push(`road: ${nearestRoadClass}`)
-        break
-      case 'secondary':
-      case 'secondary_link':
-        score.technical += Math.abs(WEIGHTS.roadClassSecondary)
-        reasons.push(`road: ${nearestRoadClass}`)
-        break
-      case 'tertiary':
-      case 'tertiary_link':
-        score.technical += Math.abs(WEIGHTS.roadClassTertiary)
-        reasons.push(`road: ${nearestRoadClass}`)
-        break
-      case 'residential':
-      case 'service':
-        score.technical += Math.abs(WEIGHTS.roadClassResidential)
-        reasons.push(`road: ${nearestRoadClass}`)
-        break
+      
+      // Apply road ref signal
+      switch (dominantClass) {
+        case 'interstate':
+          score.transit += WEIGHTS.roadRefInterstate
+          const interstateRef = roadsInWindow.find(r => r.roadClass === 'interstate')?.ref
+          reasons.push(`road: ${interstateRef || 'Interstate'}`)
+          break
+        case 'us_highway':
+          score.transit += WEIGHTS.roadRefUSHighway
+          const usRef = roadsInWindow.find(r => r.roadClass === 'us_highway')?.ref
+          reasons.push(`road: ${usRef || 'US Highway'}`)
+          break
+        case 'state_route':
+          // Neutral - state routes can be either highway or technical
+          // Don't add points, but log it
+          const stateRef = roadsInWindow.find(r => r.roadClass === 'state_route')?.ref
+          if (stateRef) reasons.push(`road: ${stateRef}`)
+          break
+        case 'local':
+          score.technical += Math.abs(WEIGHTS.roadRefLocal)
+          reasons.push(`road: local`)
+          break
+      }
     }
   }
   
@@ -481,66 +340,62 @@ function scoreWindow(window, allCurves, censusSegments, totalMiles, roadClasses 
   
   // === TRANSIT SIGNALS ===
   
-  // Signal 6: Long gap (check if we're in a gap)
+  // Signal 6: Long gap (2mi+ without curves)
   const gapInfo = findGapAtMile(midMile, allCurves)
   if (gapInfo && gapInfo.length >= THRESHOLDS.gapThresholdMiles) {
     score.transit += WEIGHTS.longGap
     reasons.push(`gap: ${gapInfo.length.toFixed(1)}mi without curves`)
   }
   
-  // Signal 7: Sparse window (very few curves in 2mi)
+  // Signal 7: Sparse window (<2 curves in 2mi)
   if (curvesInSustainedWindow.length < 2) {
     score.transit += WEIGHTS.sparseWindow
-    reasons.push(`sparse: only ${curvesInSustainedWindow.length} curve(s) in ${THRESHOLDS.sustainedWindowMiles}mi`)
+    reasons.push(`sparse: only ${curvesInSustainedWindow.length} curve(s) in 2mi`)
   }
   
-  // Signal 8: Census says rural (weak transit signal)
+  // Signal 8: Census rural (weak signal)
   const censusChar = getCensusCharacterAtMile(midMile, censusSegments)
   if (censusChar === 'rural') {
     score.transit += WEIGHTS.censusSaysRural
     reasons.push(`census: rural`)
   }
   
-  // === URBAN SIGNALS (only at edges) ===
+  // === URBAN SIGNALS (only at route edges) ===
+  const isNearStart = midMile <= THRESHOLDS.maxUrbanMiles
+  const isNearEnd = midMile >= (totalMiles - THRESHOLDS.maxUrbanMiles)
   
-  // Signal 9: Census says urban at route edges
-  if (censusChar === 'urban') {
-    if (midMile < THRESHOLDS.maxUrbanMiles || midMile > totalMiles - THRESHOLDS.maxUrbanMiles) {
-      score.urban += WEIGHTS.censusSaysUrban
-      reasons.push(`census: urban at route edge`)
-    }
+  if ((isNearStart || isNearEnd) && censusChar === 'urban') {
+    score.urban += WEIGHTS.censusSaysUrban
+    reasons.push(`census: urban at route ${isNearStart ? 'start' : 'end'}`)
   }
   
-  return {
-    ...window,
-    score,
-    reasons,
-    curvesInWindow: curvesInWindow.length,
-  }
+  return { ...window, score, reasons }
 }
 
 /**
- * Find if a mile position is within a gap between curves
+ * Find if there's a gap (no curves) at a given mile
  */
 function findGapAtMile(mile, allCurves) {
-  if (allCurves.length === 0) return { length: Infinity }
+  if (!allCurves.length) return { start: 0, end: 1000, length: 1000 }
   
-  // Find the curve before and after this mile
+  const sortedCurves = [...allCurves].sort((a, b) => a.mile - b.mile)
+  
+  // Find curves before and after this mile
   let prevCurve = null
   let nextCurve = null
   
-  for (const curve of allCurves) {
-    if (curve.mile <= mile) {
-      prevCurve = curve
-    } else if (!nextCurve) {
-      nextCurve = curve
+  for (let i = 0; i < sortedCurves.length; i++) {
+    if (sortedCurves[i].mile <= mile) {
+      prevCurve = sortedCurves[i]
+    }
+    if (sortedCurves[i].mile > mile && !nextCurve) {
+      nextCurve = sortedCurves[i]
       break
     }
   }
   
-  // Calculate gap
   const gapStart = prevCurve ? prevCurve.mile : 0
-  const gapEnd = nextCurve ? nextCurve.mile : mile + 10  // Assume gap continues
+  const gapEnd = nextCurve ? nextCurve.mile : mile + 10
   
   if (mile >= gapStart && mile <= gapEnd) {
     return { start: gapStart, end: gapEnd, length: gapEnd - gapStart }
@@ -572,8 +427,7 @@ function classifyWindow(window) {
   const { score } = window
   
   // Urban wins if it has points (only given at route edges when Census says urban)
-  // Urban overrides technical because dense urban 90° turns != rally technical
-  if (score.urban > 0) {
+  if (score.urban > 0 && score.urban >= score.technical) {
     return { ...window, character: 'urban' }
   }
   
@@ -715,32 +569,69 @@ function applyUrbanEdges(zones, censusSegments, totalMiles) {
   const result = [...zones]
   const maxUrban = THRESHOLDS.maxUrbanMiles
   
-  // Check start
-  const startCensus = getCensusCharacterAtMile(0.1, censusSegments)
+  // Check start - FORCE urban if census says urban in first 2 miles
+  const startCensus = getCensusCharacterAtMile(0.5, censusSegments)
   if (startCensus === 'urban' && result[0].character !== 'urban') {
-    const urbanEnd = Math.min(maxUrban, result[0].endMile)
+    // Find where urban should end (either maxUrban or where census stops saying urban)
+    let urbanEndMile = maxUrban
+    for (let mile = 0.5; mile <= maxUrban; mile += 0.5) {
+      if (getCensusCharacterAtMile(mile, censusSegments) !== 'urban') {
+        urbanEndMile = mile
+        break
+      }
+    }
     
-    if (urbanEnd > 0.2) {
-      // Split first zone if needed
-      if (result[0].startMile < urbanEnd && result[0].endMile > urbanEnd) {
-        const remainder = { ...result[0], startMile: urbanEnd, lengthMiles: result[0].endMile - urbanEnd }
-        result[0] = createZone(0, urbanEnd, 'urban', { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, ['census: urban at start'])
+    if (urbanEndMile > 0.3) {
+      // Split/replace first zone
+      if (result[0].endMile <= urbanEndMile) {
+        // First zone is entirely within urban range - just change its character
+        result[0].character = 'urban'
+        result[0].reasons.unshift('census: urban at start (forced)')
+      } else {
+        // Split first zone
+        const remainder = { 
+          ...result[0], 
+          startMile: urbanEndMile, 
+          lengthMiles: result[0].endMile - urbanEndMile 
+        }
+        result[0] = createZone(
+          0, 
+          urbanEndMile, 
+          'urban', 
+          { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, 
+          ['census: urban at start (forced)']
+        )
         result.splice(1, 0, remainder)
       }
     }
   }
   
   // Check end
-  const endCensus = getCensusCharacterAtMile(totalMiles - 0.1, censusSegments)
+  const endCensus = getCensusCharacterAtMile(totalMiles - 0.5, censusSegments)
   if (endCensus === 'urban' && result[result.length - 1].character !== 'urban') {
     const urbanStart = Math.max(totalMiles - maxUrban, result[result.length - 1].startMile)
     
-    if (totalMiles - urbanStart > 0.2) {
+    if (totalMiles - urbanStart > 0.3) {
       const lastIdx = result.length - 1
-      if (result[lastIdx].startMile < urbanStart && result[lastIdx].endMile > urbanStart) {
-        const remainder = { ...result[lastIdx], endMile: urbanStart, lengthMiles: urbanStart - result[lastIdx].startMile }
+      if (result[lastIdx].startMile >= urbanStart) {
+        // Last zone is entirely within urban range
+        result[lastIdx].character = 'urban'
+        result[lastIdx].reasons.unshift('census: urban at end (forced)')
+      } else if (result[lastIdx].startMile < urbanStart && result[lastIdx].endMile > urbanStart) {
+        // Split last zone
+        const remainder = { 
+          ...result[lastIdx], 
+          endMile: urbanStart, 
+          lengthMiles: urbanStart - result[lastIdx].startMile 
+        }
         result[lastIdx] = remainder
-        result.push(createZone(urbanStart, totalMiles, 'urban', { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, ['census: urban at end']))
+        result.push(createZone(
+          urbanStart, 
+          totalMiles, 
+          'urban', 
+          { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, 
+          ['census: urban at end (forced)']
+        ))
       }
     }
   }
@@ -753,7 +644,7 @@ function applyUrbanEdges(zones, censusSegments, totalMiles) {
  */
 export function reassignEventZones(events, zones) {
   return events.map(event => {
-    const eventMile = event.mile ?? event.triggerMile ?? 0
+    const eventMile = event.mile ?? event.triggerMile ?? event.apexMile ?? 0
     
     // Find which zone this event falls into
     const zone = zones.find(z => eventMile >= z.startMile && eventMile < z.endMile)
@@ -773,10 +664,16 @@ export function reassignEventZones(events, zones) {
 export function convertToStandardFormat(zones) {
   return zones.map(z => ({
     ...z,
-    // Add meter-based distances for compatibility
     start: z.startMile * 1609.34,
     end: z.endMile * 1609.34,
     startDistance: z.startMile * 1609.34,
     endDistance: z.endMile * 1609.34,
   }))
+}
+
+// Export for use in RoutePreview
+export default {
+  classifyWithVoting,
+  reassignEventZones,
+  convertToStandardFormat,
 }
