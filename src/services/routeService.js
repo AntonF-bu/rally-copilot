@@ -1,6 +1,6 @@
 // ================================
-// Route Service
-// Handles Mapbox API calls
+// Route Service - v2.0
+// NOW INCLUDES: steps=true for road ref data
 // ================================
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
@@ -32,14 +32,16 @@ export async function geocodeAddress(query) {
 
 /**
  * Get route between two points
+ * NOW RETURNS: legs with step-by-step road info including refs
  */
 export async function getRoute(start, end) {
   if (!start || !end || !MAPBOX_TOKEN) return null
 
   try {
     const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`
+    // ADDED: steps=true to get road refs (I-90, US-9, etc.)
     const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
     )
     const data = await response.json()
     
@@ -49,6 +51,8 @@ export async function getRoute(start, end) {
         coordinates: route.geometry.coordinates,
         distance: route.distance,
         duration: route.duration,
+        // NEW: Include legs for road ref extraction
+        legs: route.legs || [],
       }
     }
     return null
@@ -60,14 +64,16 @@ export async function getRoute(start, end) {
 
 /**
  * Get route with multiple waypoints
+ * NOW RETURNS: legs with step-by-step road info
  */
 export async function getRouteWithWaypoints(waypoints) {
   if (!waypoints || waypoints.length < 2 || !MAPBOX_TOKEN) return null
 
   try {
     const coords = waypoints.map(w => `${w[0]},${w[1]}`).join(';')
+    // ADDED: steps=true to get road refs
     const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
     )
     const data = await response.json()
     
@@ -77,6 +83,8 @@ export async function getRouteWithWaypoints(waypoints) {
         coordinates: route.geometry.coordinates,
         distance: route.distance,
         duration: route.duration,
+        // NEW: Include legs for road ref extraction
+        legs: route.legs || [],
       }
     }
     return null
@@ -84,6 +92,119 @@ export async function getRouteWithWaypoints(waypoints) {
     console.error('Routing error:', error)
     return null
   }
+}
+
+/**
+ * Extract road refs from route legs
+ * Maps each step's ref to its mile position along the route
+ * 
+ * @param {Array} legs - Route legs from Mapbox Directions API
+ * @param {number} totalDistanceMeters - Total route distance
+ * @returns {Array} Array of { startMile, endMile, ref, name, roadClass }
+ */
+export function extractRoadRefs(legs, totalDistanceMeters) {
+  if (!legs || !legs.length) return []
+  
+  const roadSegments = []
+  let cumulativeDistance = 0
+  const totalMiles = totalDistanceMeters / 1609.34
+  
+  for (const leg of legs) {
+    if (!leg.steps) continue
+    
+    for (const step of leg.steps) {
+      const stepDistanceMeters = step.distance || 0
+      const startMile = cumulativeDistance / 1609.34
+      const endMile = (cumulativeDistance + stepDistanceMeters) / 1609.34
+      
+      // Extract ref (e.g., "I-90", "US-9", "MA-66")
+      const ref = step.ref || null
+      const name = step.name || null
+      
+      // Classify road type from ref
+      const roadClass = classifyRoadRef(ref, name)
+      
+      if (ref || name) {
+        roadSegments.push({
+          startMile,
+          endMile,
+          ref,
+          name,
+          roadClass,
+          distance: stepDistanceMeters,
+        })
+      }
+      
+      cumulativeDistance += stepDistanceMeters
+    }
+  }
+  
+  console.log(`🛣️ Extracted ${roadSegments.length} road segments from ${legs.length} leg(s)`)
+  
+  // Log sample for debugging
+  if (roadSegments.length > 0) {
+    console.log('   Sample segments:')
+    roadSegments.slice(0, 5).forEach(seg => {
+      console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${seg.ref || seg.name} (${seg.roadClass})`)
+    })
+  }
+  
+  return roadSegments
+}
+
+/**
+ * Classify road type from ref string
+ * 
+ * @param {string} ref - Road ref (e.g., "I-90", "US-9", "MA-66")
+ * @param {string} name - Road name fallback
+ * @returns {string} Road class: 'interstate', 'us_highway', 'state_route', 'local', 'unknown'
+ */
+function classifyRoadRef(ref, name) {
+  if (!ref && !name) return 'unknown'
+  
+  const refUpper = (ref || '').toUpperCase()
+  const nameUpper = (name || '').toUpperCase()
+  
+  // Interstate highways: I-90, I-95, etc.
+  if (refUpper.match(/^I-\d+/) || nameUpper.includes('INTERSTATE')) {
+    return 'interstate'
+  }
+  
+  // US highways: US-1, US-9, US-20, etc.
+  if (refUpper.match(/^US-?\d+/) || nameUpper.includes('US ROUTE') || nameUpper.includes('US HIGHWAY')) {
+    return 'us_highway'
+  }
+  
+  // State routes: MA-9, NY-17, etc. (2-letter prefix followed by dash and number)
+  if (refUpper.match(/^[A-Z]{2}-?\d+/)) {
+    return 'state_route'
+  }
+  
+  // Named routes without ref (often state or county roads)
+  if (nameUpper.includes('ROUTE') || nameUpper.includes('HIGHWAY') || nameUpper.includes('PIKE') || nameUpper.includes('TURNPIKE')) {
+    return 'state_route'
+  }
+  
+  // Local roads (no ref, or common local road names)
+  if (!ref || nameUpper.includes('STREET') || nameUpper.includes('AVENUE') || nameUpper.includes('ROAD') || nameUpper.includes('DRIVE') || nameUpper.includes('LANE')) {
+    return 'local'
+  }
+  
+  return 'unknown'
+}
+
+/**
+ * Get road class at a specific mile position
+ * 
+ * @param {number} mile - Mile position along route
+ * @param {Array} roadSegments - From extractRoadRefs()
+ * @returns {object|null} { ref, name, roadClass } or null
+ */
+export function getRoadAtMile(mile, roadSegments) {
+  if (!roadSegments || !roadSegments.length) return null
+  
+  const segment = roadSegments.find(seg => mile >= seg.startMile && mile < seg.endMile)
+  return segment || null
 }
 
 /**
@@ -130,7 +251,6 @@ export function parseGoogleMapsUrl(url) {
     console.log('Decoded URL:', decodedUrl)
 
     // Format 0: saddr/daddr format (older Google Maps format)
-    // Example: ?saddr=42.3528913,-71.0756559&daddr=Campion+Center+to:42.123,-71.456+to:Place2
     const saddrMatch = decodedUrl.match(/[?&]saddr=([^&]+)/)
     const daddrMatch = decodedUrl.match(/[?&]daddr=([^&]+)/)
     
@@ -140,77 +260,46 @@ export function parseGoogleMapsUrl(url) {
       const originStr = saddrMatch ? decodeURIComponent(saddrMatch[1]).replace(/\+/g, ' ') : null
       const daddrStr = daddrMatch ? decodeURIComponent(daddrMatch[1]).replace(/\+/g, ' ') : null
       
-      console.log('saddr:', originStr)
-      console.log('daddr:', daddrStr)
-      
-      // Parse all waypoints from daddr (can have "to:" separators)
-      const allWaypoints = []
-      
-      // Add origin first
-      if (originStr) {
-        const originCoords = parseCoordinateString(originStr)
-        if (originCoords) {
-          allWaypoints.push({ coords: originCoords, name: null })
-        } else {
-          allWaypoints.push({ coords: null, name: originStr })
-        }
-      }
-      
-      // Parse destinations (split by " to:" pattern)
+      // Parse daddr which may have multiple destinations
       if (daddrStr) {
-        // Split by "to:" but be careful with spaces
-        const destParts = daddrStr.split(/\s+to:/)
-        console.log('Destination parts:', destParts)
+        const destinations = daddrStr.split(' to:').map(d => d.trim())
+        const allPoints = originStr ? [originStr, ...destinations] : destinations
         
-        for (const part of destParts) {
-          const trimmed = part.trim()
-          if (!trimmed) continue
-          
-          const coords = parseCoordinateString(trimmed)
+        const coordinates = []
+        const needsGeocoding = []
+        
+        for (const point of allPoints) {
+          const coords = parseCoordinateString(point)
           if (coords) {
-            allWaypoints.push({ coords, name: null })
+            coordinates.push(coords)
           } else {
-            allWaypoints.push({ coords: null, name: trimmed })
-          }
-        }
-      }
-      
-      console.log('All waypoints:', allWaypoints)
-      
-      // If we have waypoints that need geocoding
-      const needsGeocoding = allWaypoints.some(w => w.coords === null)
-      const hasCoords = allWaypoints.filter(w => w.coords !== null)
-      
-      if (allWaypoints.length >= 2) {
-        // Check if all have coordinates
-        if (!needsGeocoding) {
-          return { 
-            coordinates: allWaypoints.map(w => w.coords),
-            isMultiStop: allWaypoints.length > 2
+            needsGeocoding.push(point)
           }
         }
         
-        // Need to geocode some waypoints
+        if (coordinates.length >= 2 && needsGeocoding.length === 0) {
+          return { coordinates }
+        }
+        
+        if (coordinates.length >= 1) {
+          return { 
+            coordinates, 
+            needsGeocoding: true,
+            placesToGeocode: needsGeocoding
+          }
+        }
+        
         return {
           needsGeocoding: true,
-          waypoints: allWaypoints,
-          isMultiStop: allWaypoints.length > 2
+          origin: originStr,
+          destination: destinations[destinations.length - 1],
+          viaPoints: destinations.slice(0, -1)
         }
-      }
-      
-      // Single destination
-      if (allWaypoints.length === 1) {
-        const wp = allWaypoints[0]
-        if (wp.coords) {
-          return { coordinates: [wp.coords], needsOrigin: true }
-        }
-        return { needsGeocoding: true, destination: wp.name }
       }
     }
 
-    // Format 1: /dir/origin/destination (most common from sharing)
-    // Example: /dir/42.3528330,-71.0755902/Campion+Center,+319+Concord+Rd,+Weston,+MA+02493
-    const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@?]+)/)
+    // Format 1: /dir/ format
+    const dirMatch = decodedUrl.match(/\/dir\/([^/]+)\/([^/@]+)/)
     if (dirMatch) {
       const originStr = dirMatch[1].replace(/\+/g, ' ')
       const destStr = dirMatch[2].replace(/\+/g, ' ')
@@ -220,15 +309,11 @@ export function parseGoogleMapsUrl(url) {
       const originCoords = parseCoordinateString(originStr)
       const destCoords = parseCoordinateString(destStr)
       
-      // Both are coordinates
       if (originCoords && destCoords) {
-        console.log('Both are coordinates')
         return { coordinates: [originCoords, destCoords] }
       }
       
-      // Origin is coordinates, destination needs geocoding
       if (originCoords && !destCoords) {
-        console.log('Origin is coords, dest needs geocoding')
         return {
           originCoordinates: originCoords,
           needsGeocoding: true,
@@ -236,9 +321,7 @@ export function parseGoogleMapsUrl(url) {
         }
       }
       
-      // Destination is coordinates, origin needs geocoding
       if (!originCoords && destCoords) {
-        console.log('Dest is coords, origin needs geocoding')
         return {
           destinationCoordinates: destCoords,
           needsGeocoding: true,
@@ -246,8 +329,6 @@ export function parseGoogleMapsUrl(url) {
         }
       }
       
-      // Both need geocoding
-      console.log('Both need geocoding')
       return {
         needsGeocoding: true,
         origin: originStr,
@@ -255,13 +336,12 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 2: @lat,lng in path (viewing a location)
+    // Format 2: @lat,lng in path
     const atMatch = decodedUrl.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)
     if (atMatch) {
       const lat = parseFloat(atMatch[1])
       const lng = parseFloat(atMatch[2])
       if (isValidCoordinate(lat, lng)) {
-        console.log('Found @lat,lng format')
         return { 
           coordinates: [[lng, lat]],
           needsOrigin: true
@@ -269,7 +349,7 @@ export function parseGoogleMapsUrl(url) {
       }
     }
 
-    // Format 3: !3d and !4d markers (embedded in data parameter)
+    // Format 3: !3d and !4d markers
     const dMatches = decodedUrl.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/g)
     if (dMatches && dMatches.length > 0) {
       const waypoints = []
@@ -284,7 +364,6 @@ export function parseGoogleMapsUrl(url) {
         }
       }
       if (waypoints.length >= 2) {
-        console.log('Found !3d!4d format with', waypoints.length, 'waypoints')
         return { coordinates: waypoints }
       }
       if (waypoints.length === 1) {
@@ -296,7 +375,6 @@ export function parseGoogleMapsUrl(url) {
     const placeMatch = decodedUrl.match(/\/place\/([^/@]+)/)
     if (placeMatch) {
       const placeName = placeMatch[1].replace(/\+/g, ' ')
-      console.log('Found /place/ format:', placeName)
       return {
         needsGeocoding: true,
         destination: placeName
@@ -342,18 +420,13 @@ export function parseGoogleMapsUrl(url) {
 
 /**
  * Parse coordinate string in various formats
- * Supports: "lat,lng" or "lat, lng" or "lat lng"
  */
 function parseCoordinateString(str) {
   if (!str) return null
   
-  // Clean up the string
   const cleaned = str.trim()
   
-  // Try comma-separated (most common)
   let parts = cleaned.split(',')
-  
-  // Try space-separated if comma didn't work
   if (parts.length < 2) {
     parts = cleaned.split(/\s+/)
   }
@@ -363,7 +436,7 @@ function parseCoordinateString(str) {
     const lng = parseFloat(parts[1].trim())
     
     if (isValidCoordinate(lat, lng)) {
-      return [lng, lat] // Return as [lng, lat] for Mapbox
+      return [lng, lat]
     }
   }
   
@@ -417,5 +490,7 @@ export default {
   getRouteWithWaypoints,
   parseGoogleMapsUrl,
   expandShortUrl,
-  getRoadAhead
+  getRoadAhead,
+  extractRoadRefs,
+  getRoadAtMile,
 }
