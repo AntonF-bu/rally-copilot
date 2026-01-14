@@ -366,7 +366,11 @@ function applyUrbanZones(zones, censusSegments, totalMiles) {
       
       // If next zone starts before urban end, trim it
       if (result.length > 0 && result[0].startMile < urbanEndMile) {
+        // Update ALL start properties to keep them in sync
+        const newStartMeters = urbanEndMile * 1609.34
         result[0].startMile = urbanEndMile
+        result[0].start = newStartMeters
+        result[0].startDistance = newStartMeters
       }
       
       // Insert urban zone at start
@@ -425,11 +429,24 @@ function createZone(startMile, endMile, character, reason) {
  * Reassign zone labels to flow events based on our classification
  */
 export function reassignEventZones(events, zones) {
+  // Log the zones we're using for debugging
+  console.log(`   Reassigning zones using ${zones.length} zones:`)
+  zones.slice(0, 5).forEach(z => {
+    const start = z.startMile ?? (z.startDistance / 1609.34) ?? 0
+    const end = z.endMile ?? (z.endDistance / 1609.34) ?? 0
+    console.log(`      ${z.character}: ${start.toFixed(1)}-${end.toFixed(1)}mi`)
+  })
+  
   return events.map(event => {
     const eventMile = event.mile ?? event.triggerMile ?? 0
     
     // Find which zone this event falls into
-    const zone = zones.find(z => eventMile >= z.startMile && eventMile < z.endMile)
+    // Check both startMile/endMile AND startDistance/endDistance for compatibility
+    const zone = zones.find(z => {
+      const zStart = z.startMile ?? (z.startDistance / 1609.34) ?? 0
+      const zEnd = z.endMile ?? (z.endDistance / 1609.34) ?? 0
+      return eventMile >= zStart && eventMile < zEnd
+    })
     
     return {
       ...event,
