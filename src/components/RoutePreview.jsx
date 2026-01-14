@@ -12,14 +12,15 @@ import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from
 import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
 import { dumpHighwayData } from '../services/highwayDataDebug'
 import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlowAnalyzer'
-import { curateCalloutsWithLLM } from '../services/llmCalloutCurator'
+import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
+import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v25
-// NEW: LLM Callout Curator (AI sees the road)
+// Route Preview - v26
+// NEW: Hybrid Callout System (Rule-based + LLM Polish)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -301,83 +302,137 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         window.__roadFlowData = flowResult
         console.log('💡 Access road flow data: window.__roadFlowData')
         
-        // Step 4: LLM Callout Curation - AI "sees" the road and decides
-        if (flowResult.events.length > 0 && hasLLMApiKey()) {
+        // Step 4: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
+        if (flowResult.events.length > 0) {
           updateStage('aiCurves', 'loading')
-          console.log('🧠 Running LLM Callout Curator...')
+          console.log('📋 Running Hybrid Callout System...')
           
           try {
-            // LLM sees all the road data and makes intelligent decisions
-            const curationResult = await curateCalloutsWithLLM(
-              flowResult,
-              { totalMiles: routeData.distance / 1609.34 },
-              getLLMApiKey()
+            // ========================================
+            // STAGE 1: Rule-Based Filtering (always runs)
+            // ========================================
+            console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
+            const ruleBasedResult = filterEventsToCallouts(
+              flowResult.events,
+              { totalMiles: routeData.distance / 1609.34 }
             )
             
-            if (curationResult && curationResult.callouts.length > 0) {
-              console.log(`🧠 LLM Analysis: ${curationResult.analysis}`)
+            console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
+            console.log(`   By zone: Urban=${ruleBasedResult.stats.byZone.urban}, Highway=${ruleBasedResult.stats.byZone.transit}, Technical=${ruleBasedResult.stats.byZone.technical}`)
+            console.log(`   Sequences: ${ruleBasedResult.sequences.length}`)
+            console.log(`   Transitions: ${ruleBasedResult.transitions.length}`)
+            console.log(`   Wake-ups: ${ruleBasedResult.wakeUps.length}`)
+            
+            // Store rule-based result for debugging
+            window.__ruleBasedCallouts = ruleBasedResult
+            console.log('💡 Access rule-based callouts: window.__ruleBasedCallouts')
+            
+            // ========================================
+            // STAGE 2: LLM Polish (optional, can fail safely)
+            // ========================================
+            let finalResult = ruleBasedResult
+            
+            if (hasLLMApiKey()) {
+              console.log('\n✨ STAGE 2: LLM Polish')
+              try {
+                finalResult = await polishCalloutsWithLLM(
+                  ruleBasedResult,
+                  { totalMiles: routeData.distance / 1609.34 },
+                  getLLMApiKey()
+                )
+                
+                if (finalResult.llmPolished) {
+                  console.log('✨ LLM polish applied successfully')
+                } else {
+                  console.log('ℹ️ Using rule-based callouts (LLM polish skipped or failed)')
+                }
+              } catch (polishErr) {
+                console.warn('⚠️ LLM polish failed, using rule-based:', polishErr.message)
+                finalResult = ruleBasedResult
+              }
+            } else {
+              console.log('ℹ️ No API key - using rule-based callouts only')
+            }
+            
+            // ========================================
+            // Format and store final callouts
+            // ========================================
+            if (finalResult.callouts.length > 0) {
+              console.log(`\n✅ HYBRID SYSTEM COMPLETE: ${finalResult.callouts.length} callouts`)
+              console.log(`   Analysis: ${finalResult.analysis}`)
               
-              // Format LLM callouts for display
-              const formattedCallouts = curationResult.callouts.map(c => ({
+              // Format callouts for display
+              const formattedCallouts = finalResult.callouts.map(c => ({
                 id: c.id,
                 position: c.position,
                 triggerDistance: c.triggerDistance,
-                triggerMile: c.triggerMile,
+                triggerMile: c.triggerMile || c.mile,
                 text: c.text,
                 shortText: c.text.substring(0, 35),
                 type: c.type,
-                priority: c.severity,
+                priority: c.priority || 'medium',
                 reason: c.reason,
-                isLLMCurated: true
+                zone: c.zone,
+                angle: c.angle,
+                direction: c.direction,
+                isHybridCallout: true,
+                isLLMPolished: finalResult.llmPolished || false
               }))
               
-              console.log(`✅ LLM Curated callouts: ${formattedCallouts.length}`)
-              formattedCallouts.forEach(c => {
-                console.log(`   📍 Mile ${c.triggerMile.toFixed(1)}: "${c.text}" [${c.type}]`)
-                console.log(`      Reason: ${c.reason}`)
+              // Log sample callouts
+              console.log('\n📍 Sample callouts:')
+              formattedCallouts.slice(0, 10).forEach(c => {
+                console.log(`   Mile ${c.triggerMile?.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]`)
               })
+              if (formattedCallouts.length > 10) {
+                console.log(`   ... and ${formattedCallouts.length - 10} more`)
+              }
               
               setCuratedCallouts(formattedCallouts)
               setAgentResult({
                 summary: {
-                  summary: curationResult.analysis,
-                  rhythm: 'LLM Callout Curator v1.0',
+                  summary: finalResult.analysis,
+                  rhythm: 'Hybrid Callout System v1.0',
                   difficulty: 'auto'
                 },
                 reasoning: [
-                  `Analyzed ${flowResult.events.length} road events`,
-                  `LLM curated to ${formattedCallouts.length} callouts`
+                  `Road Flow detected ${flowResult.events.length} events`,
+                  `Rule-based filter: ${ruleBasedResult.callouts.length} callouts`,
+                  `Final output: ${formattedCallouts.length} callouts`,
+                  finalResult.llmPolished ? 'LLM polish applied' : 'Rule-based text used'
                 ],
                 confidence: 95
               })
               setCurveEnhanced(true)
               
-              // Store in global store
+              // Store in global store for navigation
               useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
-              window.__llmCuration = curationResult
-              console.log('💡 Access LLM curation: window.__llmCuration')
+              window.__hybridCallouts = finalResult
+              console.log('💡 Access hybrid callouts: window.__hybridCallouts')
               
             } else {
-              console.warn('⚠️ LLM curation returned no callouts, falling back to rules')
-              // Fallback to rule-based
-              const fallbackCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
-              const formattedCallouts = fallbackCallouts.map(c => ({
-                id: c.id,
-                position: c.position,
-                triggerDistance: c.triggerDistance,
-                triggerMile: c.triggerMile,
-                text: c.text,
-                shortText: c.text.substring(0, 35),
-                type: c.type,
-                priority: c.severity,
-                isFlowBased: true
-              }))
-              setCuratedCallouts(formattedCallouts)
-              useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+              console.warn('⚠️ Hybrid system returned no callouts!')
             }
             
-          } catch (genErr) {
-            console.warn('⚠️ LLM curation failed:', genErr)
+          } catch (hybridErr) {
+            console.error('⚠️ Hybrid callout system error:', hybridErr)
+            
+            // Ultimate fallback: use simple rule-based from roadFlowAnalyzer
+            console.log('⚠️ Using emergency fallback callout generator')
+            const fallbackCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
+            const formattedCallouts = fallbackCallouts.map(c => ({
+              id: c.id,
+              position: c.position,
+              triggerDistance: c.triggerDistance,
+              triggerMile: c.triggerMile,
+              text: c.text,
+              shortText: c.text.substring(0, 35),
+              type: c.type,
+              priority: c.severity,
+              isFlowBased: true
+            }))
+            setCuratedCallouts(formattedCallouts)
+            useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
           }
           updateStage('aiCurves', 'complete')
         }
