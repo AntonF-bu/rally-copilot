@@ -1,25 +1,26 @@
 // ================================
-// Zone Classifier v2.1
+// Zone Classifier v2.2
 // 
-// Classification based on TIGHTNESS SCORE (angle ÷ curve length)
-// This captures how a curve FEELS at speed:
-// - URBAN: Very tight (>300) = sharp intersection corners
-// - HIGHWAY: Sweeping (<100) = gentle highway bends
-// - TECHNICAL: Winding (100-300) = backroad curves
-//
-// Formula: Tightness = Angle (degrees) ÷ Length (miles)
-//
-// Three factors:
-// 1. Tightness Score (PRIMARY) - angle relative to curve length
-// 2. Average Angle (SECONDARY) - for edge cases
+// Classification based on:
+// 1. CURVE DENSITY (PRIMARY) - curves per mile
+// 2. TIGHTNESS SCORE (SECONDARY) - angle ÷ curve length
 // 3. Census (VALIDATOR)
+//
+// Key insight: Technical sections have HIGH curve density
+// - Technical: 5+ curves per mile (lots of turns packed together)
+// - Highway: <3 curves per mile (sparse gentle bends)
+// - Urban: High density + very tight angles (intersections)
 // ================================
 
 /**
  * Configuration
  */
 const CONFIG = {
-  // Tightness Score thresholds (degrees per mile)
+  // CURVE DENSITY thresholds (curves per mile) - PRIMARY
+  technicalMinDensity: 4,     // 4+ curves/mile = definitely technical
+  highwayMaxDensity: 2.5,     // <2.5 curves/mile = highway cruising
+  
+  // Tightness Score thresholds (degrees per mile) - SECONDARY
   urbanMinTightness: 300,      // Very sharp corners (intersections)
   technicalMinTightness: 100,  // Winding backroads
   // Below 100 = Highway sweepers
@@ -30,7 +31,7 @@ const CONFIG = {
   
   // Analysis window
   windowSizeMiles: 0.5,        // Analyze in half-mile windows
-  minCurvesForClassification: 2,  // Need at least 2 curves to classify
+  minCurvesForClassification: 1,  // Even 1 curve can help classify
   
   // Urban override at route edges
   maxUrbanMiles: 1.5,          // Urban zones only at start/end
@@ -50,7 +51,7 @@ const CONFIG = {
 export function classifyZonesV2(flowEvents, totalDistanceMeters, censusSegments = []) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🎯 Zone Classifier v2.1 (Tightness Score)')
+  console.log('🎯 Zone Classifier v2.2 (Density + Tightness)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
   
   // Step 1: Extract curve data with tightness score
@@ -139,7 +140,7 @@ function categorizeShape(event) {
 }
 
 /**
- * Analyze route in windows and classify each by tightness
+ * Analyze route in windows and classify each by density + tightness
  */
 function analyzeWindows(curves, totalMiles) {
   const windows = []
@@ -147,9 +148,13 @@ function analyzeWindows(curves, totalMiles) {
   
   for (let startMile = 0; startMile < totalMiles; startMile += windowSize / 2) {
     const endMile = Math.min(startMile + windowSize, totalMiles)
+    const windowLength = endMile - startMile
     
     // Get curves in this window
     const windowCurves = curves.filter(c => c.mile >= startMile && c.mile < endMile)
+    
+    // Calculate curve density (curves per mile)
+    const density = windowCurves.length / windowLength
     
     if (windowCurves.length < CONFIG.minCurvesForClassification) {
       // Not enough curves - likely highway
@@ -157,10 +162,11 @@ function analyzeWindows(curves, totalMiles) {
         startMile,
         endMile,
         character: 'transit',
+        density: density,
         avgTightness: 0,
         avgAngle: 0,
         curveCount: windowCurves.length,
-        reason: 'sparse curves'
+        reason: `sparse (${density.toFixed(1)}/mi)`
       })
       continue
     }
@@ -169,13 +175,14 @@ function analyzeWindows(curves, totalMiles) {
     const avgTightness = windowCurves.reduce((sum, c) => sum + c.tightness, 0) / windowCurves.length
     const avgAngle = windowCurves.reduce((sum, c) => sum + c.angle, 0) / windowCurves.length
     
-    // Classify based on tightness score
-    const classification = classifyByTightness(avgTightness, avgAngle, windowCurves)
+    // Classify based on DENSITY first, then tightness
+    const classification = classifyByDensityAndTightness(density, avgTightness, avgAngle, windowCurves)
     
     windows.push({
       startMile,
       endMile,
       character: classification.character,
+      density: density,
       avgTightness: Math.round(avgTightness),
       avgAngle: Math.round(avgAngle),
       curveCount: windowCurves.length,
@@ -187,39 +194,66 @@ function analyzeWindows(curves, totalMiles) {
 }
 
 /**
- * Classify a window based on tightness score
+ * Classify a window based on DENSITY (primary) + tightness (secondary)
  * 
+ * Density = curves per mile
+ * - HIGH density (4+/mi): TECHNICAL - lots of turns packed together
+ * - LOW density (<2.5/mi): HIGHWAY - sparse gentle bends
+ * - MEDIUM density: Use tightness to decide
+ *
  * Tightness = Angle / Length (degrees per mile)
  * - > 300: URBAN (sharp intersection corners)
  * - 100-300: TECHNICAL (winding backroads)
  * - < 100: HIGHWAY (gentle sweepers)
  */
-function classifyByTightness(avgTightness, avgAngle, curves) {
-  // Log sample tightness values for debugging
-  const sampleCurves = curves.slice(0, 3).map(c => `${c.angle}°/${c.lengthMiles.toFixed(2)}mi=${c.tightness}`).join(', ')
+function classifyByDensityAndTightness(density, avgTightness, avgAngle, curves) {
+  // HIGH DENSITY = TECHNICAL (regardless of tightness)
+  // This is the key insight: lots of curves packed together = active driving
+  if (density >= CONFIG.technicalMinDensity) {
+    // But check if it's urban (very tight intersection-style turns)
+    if (avgTightness >= CONFIG.urbanMinTightness && avgAngle >= CONFIG.urbanMinAngle) {
+      return {
+        character: 'urban',
+        reason: `dense (${density.toFixed(1)}/mi) + tight (T${Math.round(avgTightness)})`
+      }
+    }
+    return {
+      character: 'technical',
+      reason: `dense (${density.toFixed(1)}/mi)`
+    }
+  }
   
-  // URBAN: Very tight corners (tightness > 300)
-  // Also check angle > 70° as sanity check for intersections
+  // LOW DENSITY = HIGHWAY (sparse curves = cruising)
+  if (density <= CONFIG.highwayMaxDensity) {
+    return {
+      character: 'transit',
+      reason: `sparse (${density.toFixed(1)}/mi)`
+    }
+  }
+  
+  // MEDIUM DENSITY (2.5-4 curves/mi) - use tightness to decide
+  
+  // If very tight, might be urban
   if (avgTightness >= CONFIG.urbanMinTightness && avgAngle >= CONFIG.urbanMinAngle) {
     return {
       character: 'urban',
-      reason: `tightness ${Math.round(avgTightness)} (urban corners)`
+      reason: `tight corners (T${Math.round(avgTightness)})`
     }
   }
   
-  // HIGHWAY: Gentle sweepers (tightness < 100)
-  if (avgTightness < CONFIG.technicalMinTightness) {
-    return {
-      character: 'transit',
-      reason: `tightness ${Math.round(avgTightness)} (sweepers)`
-    }
-  }
-  
-  // TECHNICAL: Winding roads (tightness 100-300)
+  // If tight-ish, technical
   if (avgTightness >= CONFIG.technicalMinTightness) {
     return {
       character: 'technical',
-      reason: `tightness ${Math.round(avgTightness)} (winding)`
+      reason: `winding (${density.toFixed(1)}/mi, T${Math.round(avgTightness)})`
+    }
+  }
+  
+  // If gentle tightness, highway
+  if (avgTightness < CONFIG.technicalMinTightness) {
+    return {
+      character: 'transit',
+      reason: `gentle (${density.toFixed(1)}/mi, T${Math.round(avgTightness)})`
     }
   }
   
@@ -227,7 +261,7 @@ function classifyByTightness(avgTightness, avgAngle, curves) {
   if (avgAngle < CONFIG.highwayMaxAngle) {
     return {
       character: 'transit',
-      reason: `avg angle ${Math.round(avgAngle)}° (gentle)`
+      reason: `gentle angle ${Math.round(avgAngle)}°`
     }
   }
   
@@ -250,6 +284,7 @@ function buildZonesFromWindows(windows, totalMiles) {
     startMile: 0,
     character: windows[0].character,
     reasons: [windows[0].reason],
+    densities: [windows[0].density],
     tightnesses: [windows[0].avgTightness],
     angles: [windows[0].avgAngle]
   }
@@ -263,19 +298,21 @@ function buildZonesFromWindows(windows, totalMiles) {
         currentZone.startMile,
         window.startMile,
         currentZone.character,
-        summarizeReasons(currentZone.reasons, currentZone.tightnesses, currentZone.angles)
+        summarizeReasons(currentZone.reasons, currentZone.densities, currentZone.tightnesses, currentZone.angles)
       ))
       
       currentZone = {
         startMile: window.startMile,
         character: window.character,
         reasons: [window.reason],
+        densities: [window.density],
         tightnesses: [window.avgTightness],
         angles: [window.avgAngle]
       }
     } else {
       // Same zone - accumulate
       currentZone.reasons.push(window.reason)
+      currentZone.densities.push(window.density)
       currentZone.tightnesses.push(window.avgTightness)
       currentZone.angles.push(window.avgAngle)
     }
@@ -286,7 +323,7 @@ function buildZonesFromWindows(windows, totalMiles) {
     currentZone.startMile,
     totalMiles,
     currentZone.character,
-    summarizeReasons(currentZone.reasons, currentZone.tightnesses, currentZone.angles)
+    summarizeReasons(currentZone.reasons, currentZone.densities, currentZone.tightnesses, currentZone.angles)
   ))
   
   return zones
@@ -295,14 +332,18 @@ function buildZonesFromWindows(windows, totalMiles) {
 /**
  * Summarize reasons for a zone
  */
-function summarizeReasons(reasons, tightnesses, angles) {
+function summarizeReasons(reasons, densities, tightnesses, angles) {
+  const validDensities = densities.filter(d => d > 0)
   const validTightnesses = tightnesses.filter(t => t > 0)
   const validAngles = angles.filter(a => a > 0)
   
-  if (validTightnesses.length === 0 && validAngles.length === 0) {
+  if (validDensities.length === 0 && validTightnesses.length === 0 && validAngles.length === 0) {
     return reasons[0] || 'classified'
   }
   
+  const avgDensity = validDensities.length > 0 
+    ? validDensities.reduce((a, b) => a + b, 0) / validDensities.length
+    : 0
   const avgTightness = validTightnesses.length > 0 
     ? Math.round(validTightnesses.reduce((a, b) => a + b, 0) / validTightnesses.length)
     : 0
@@ -310,10 +351,10 @@ function summarizeReasons(reasons, tightnesses, angles) {
     ? Math.round(validAngles.reduce((a, b) => a + b, 0) / validAngles.length)
     : 0
   
-  if (avgTightness > 0) {
-    return `tightness ${avgTightness}, avg ${avgAngle}°`
+  if (avgDensity > 0) {
+    return `${avgDensity.toFixed(1)}/mi, T${avgTightness}, avg ${avgAngle}°`
   }
-  return `avg ${avgAngle}°`
+  return `T${avgTightness}, avg ${avgAngle}°`
 }
 
 /**
