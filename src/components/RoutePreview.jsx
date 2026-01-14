@@ -15,17 +15,17 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyZonesV2, convertToZoneFormat } from '../services/zoneClassifierV2'
+// RESTORED: Use the working curvePatternZoneClassifier instead of zoneClassifierV2
+import { classifyByPattern, convertToZoneFormat, reassignEventZones } from '../services/curvePatternZoneClassifier'
 import { smoothZonesWithLLM, validateZones } from '../services/llmZoneSmoother'
-import { reassignEventZones } from '../services/curvePatternZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v31
-// NEW: LLM Zone Smoother to fix illogical zone sequences
-// NEW: Zone Classifier v2.0 (Driving Feel: angle + shape + census)
+// Route Preview - v32
+// RESTORED: Curve Pattern Zone Classifier (clusters 3+ curves = technical)
+// The v2.x window-based classifiers were getting diluted on long routes
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -264,12 +264,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones based on DRIVING FEEL (angle + shape + census)
-      console.log('\n🎯 Classifying zones by driving feel...')
-      const patternZones = classifyZonesV2(
+      // Step 3: Classify zones using CURVE PATTERN CLUSTERING (3+ curves in 0.5mi = technical)
+      // This works better than window-based density which gets diluted on long routes
+      console.log('\n🎯 Classifying zones by curve patterns...')
+      const patternZones = classifyByPattern(
         flowResult.events,
         routeData.distance,
-        censusSegments  // Census for validation
+        censusSegments  // Census for urban at edges
       )
       
       // Step 3b: Validate zones for issues
