@@ -15,14 +15,15 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyByPattern, convertToZoneFormat, reassignEventZones } from '../services/curvePatternZoneClassifier'
+import { classifyZonesV2, convertToZoneFormat } from '../services/zoneClassifierV2'
+import { reassignEventZones } from '../services/curvePatternZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v29
-// NEW: Curve Pattern Zone Classifier (simpler, more robust)
+// Route Preview - v30
+// NEW: Zone Classifier v2.0 (Driving Feel: angle + shape + census)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -261,16 +262,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones based on CURVE PATTERNS (simple cluster detection)
-      console.log('\n🎯 Classifying zones by curve patterns...')
-      const patternZones = classifyByPattern(
+      // Step 3: Classify zones based on DRIVING FEEL (angle + shape + census)
+      console.log('\n🎯 Classifying zones by driving feel...')
+      const patternZones = classifyZonesV2(
         flowResult.events,
         routeData.distance,
-        censusSegments  // Pass census as fallback for urban detection
+        censusSegments  // Census for validation
       )
       
-      // Convert to standard zone format
-      const activeZones = convertToZoneFormat(patternZones)
+      // Zones already in standard format from v2
+      const activeZones = patternZones
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -278,7 +279,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - curve pattern detection is our source of truth now
+      // Skip LLM zone validation - driving feel classifier is our source of truth
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
