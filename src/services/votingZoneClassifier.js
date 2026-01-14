@@ -1,0 +1,523 @@
+// ================================
+// Voting Zone Classifier v1.0
+// 
+// Multiple signals vote on zone classification
+// No single point of failure - consensus wins
+//
+// Lessons learned baked in:
+// - ONE canonical format throughout
+// - Multiple window sizes (0.5mi clusters, 2mi sustained)
+// - Log the WHY with reasons array
+// - Minimum zone length to avoid fragmentation
+// - Fail safe to transit
+// ================================
+
+/**
+ * Point weights for each signal
+ * Tunable based on real-world testing
+ */
+const WEIGHTS = {
+  // Pro-Technical signals
+  curveCluster: 4,        // 3+ curves in 0.5mi - strong signal
+  sustainedCurves: 3,     // 4+ curves in 2mi - good signal
+  dangerCurve: 3,         // Single curve ≥50° nearby
+  highAngleAvg: 2,        // Average angle ≥25° in window
+  tightCurves: 2,         // Multiple tight (<0.1mi) curves
+  
+  // Pro-Transit signals
+  longGap: 4,             // 2mi+ with no significant curves
+  censusSaysRural: 1,     // Census rural (weak signal alone)
+  sparseWindow: 2,        // <2 curves in 2mi window
+  
+  // Pro-Urban signals (only at route start/end)
+  censusSaysUrban: 2,     // Census urban at route edges
+}
+
+/**
+ * Detection thresholds
+ */
+const THRESHOLDS = {
+  // Curve detection
+  minAngleToCount: 12,         // Ignore tiny angles
+  dangerAngle: 50,             // Danger curve threshold
+  highAngleAvg: 25,            // "High angle" average threshold
+  
+  // Cluster detection (dense sections)
+  clusterWindowMiles: 0.5,
+  clusterMinCurves: 3,
+  clusterMinAvgAngle: 18,
+  
+  // Sustained detection (spread sections)  
+  sustainedWindowMiles: 2.0,
+  sustainedMinCurves: 4,
+  sustainedMinAvgAngle: 20,
+  
+  // Gap detection
+  gapThresholdMiles: 2.0,      // Gap this long = transit signal
+  
+  // Zone cleanup
+  minZoneLengthMiles: 1.0,     // Minimum zone length
+  analysisWindowMiles: 0.5,    // Sliding window for analysis
+  
+  // Urban limits
+  maxUrbanMiles: 1.0,          // Urban only at route edges
+}
+
+/**
+ * THE canonical zone format - used everywhere
+ */
+function createZone(startMile, endMile, character, score, reasons) {
+  return {
+    startMile,
+    endMile,
+    character,
+    score: { ...score },
+    reasons: [...reasons],
+    // Computed helpers
+    lengthMiles: endMile - startMile,
+  }
+}
+
+/**
+ * Main entry point
+ */
+export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = []) {
+  const totalMiles = totalDistanceMeters / 1609.34
+  
+  console.log('🗳️ Voting Zone Classifier v1.0')
+  console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
+  
+  // Step 1: Extract meaningful curves
+  const curves = extractCurves(flowEvents)
+  console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
+  
+  // Step 2: Build voting windows along the route
+  const windows = buildVotingWindows(curves, totalMiles, censusSegments)
+  console.log(`   Analysis windows: ${windows.length}`)
+  
+  // Step 3: Score each window
+  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles))
+  
+  // Step 4: Determine character for each window
+  const classifiedWindows = scoredWindows.map(classifyWindow)
+  
+  // Step 5: Merge adjacent windows with same character into zones
+  const rawZones = mergeWindowsToZones(classifiedWindows)
+  console.log(`   Raw zones: ${rawZones.length}`)
+  
+  // Step 6: Clean up tiny zones
+  const cleanedZones = cleanupZones(rawZones, totalMiles)
+  console.log(`   After cleanup: ${cleanedZones.length}`)
+  
+  // Step 7: Apply urban at route edges if Census supports it
+  const finalZones = applyUrbanEdges(cleanedZones, censusSegments, totalMiles)
+  
+  // Log results
+  console.log(`   Final zones:`)
+  finalZones.forEach((z, i) => {
+    const reasonStr = z.reasons.slice(0, 3).join(', ')
+    console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.lengthMiles.toFixed(1)}mi) [T:${z.score.technical} H:${z.score.transit}] - ${reasonStr}`)
+  })
+  
+  return finalZones
+}
+
+/**
+ * Extract curves from flow events
+ */
+function extractCurves(flowEvents) {
+  return flowEvents
+    .filter(e => e.angle >= THRESHOLDS.minAngleToCount)
+    .map(e => ({
+      mile: e.mile,
+      angle: e.angle,
+      length: e.length || 0,
+      direction: e.direction,
+      type: e.type,
+      shape: e.shape
+    }))
+    .sort((a, b) => a.mile - b.mile)
+}
+
+/**
+ * Build sliding windows along the route
+ */
+function buildVotingWindows(curves, totalMiles, censusSegments) {
+  const windows = []
+  const windowSize = THRESHOLDS.analysisWindowMiles
+  const step = windowSize / 2  // 50% overlap for smoother transitions
+  
+  for (let start = 0; start < totalMiles; start += step) {
+    const end = Math.min(start + windowSize, totalMiles)
+    windows.push({
+      startMile: start,
+      endMile: end,
+      midMile: (start + end) / 2,
+    })
+  }
+  
+  return windows
+}
+
+/**
+ * Score a window with all voting signals
+ */
+function scoreWindow(window, allCurves, censusSegments, totalMiles) {
+  const { startMile, endMile, midMile } = window
+  const score = { technical: 0, transit: 0, urban: 0 }
+  const reasons = []
+  
+  // Get curves in this window
+  const curvesInWindow = allCurves.filter(c => c.mile >= startMile && c.mile < endMile)
+  
+  // Get curves in extended windows for cluster/sustained detection
+  const clusterEnd = startMile + THRESHOLDS.clusterWindowMiles
+  const sustainedEnd = startMile + THRESHOLDS.sustainedWindowMiles
+  
+  const curvesInClusterWindow = allCurves.filter(c => c.mile >= startMile && c.mile < clusterEnd)
+  const curvesInSustainedWindow = allCurves.filter(c => c.mile >= startMile && c.mile < sustainedEnd)
+  
+  // === TECHNICAL SIGNALS ===
+  
+  // Signal 1: Curve cluster (3+ in 0.5mi)
+  if (curvesInClusterWindow.length >= THRESHOLDS.clusterMinCurves) {
+    const avgAngle = curvesInClusterWindow.reduce((s, c) => s + c.angle, 0) / curvesInClusterWindow.length
+    if (avgAngle >= THRESHOLDS.clusterMinAvgAngle) {
+      score.technical += WEIGHTS.curveCluster
+      reasons.push(`cluster: ${curvesInClusterWindow.length} curves, avg ${avgAngle.toFixed(0)}°`)
+    }
+  }
+  
+  // Signal 2: Sustained curves (4+ in 2mi)
+  if (curvesInSustainedWindow.length >= THRESHOLDS.sustainedMinCurves) {
+    const avgAngle = curvesInSustainedWindow.reduce((s, c) => s + c.angle, 0) / curvesInSustainedWindow.length
+    if (avgAngle >= THRESHOLDS.sustainedMinAvgAngle) {
+      score.technical += WEIGHTS.sustainedCurves
+      reasons.push(`sustained: ${curvesInSustainedWindow.length} curves in ${THRESHOLDS.sustainedWindowMiles}mi, avg ${avgAngle.toFixed(0)}°`)
+    }
+  }
+  
+  // Signal 3: Danger curve nearby
+  const dangerCurves = curvesInSustainedWindow.filter(c => c.angle >= THRESHOLDS.dangerAngle)
+  if (dangerCurves.length > 0) {
+    score.technical += WEIGHTS.dangerCurve
+    reasons.push(`danger: ${dangerCurves.length} curve(s) ≥${THRESHOLDS.dangerAngle}° nearby`)
+  }
+  
+  // Signal 4: High average angle in window
+  if (curvesInWindow.length >= 2) {
+    const avgAngle = curvesInWindow.reduce((s, c) => s + c.angle, 0) / curvesInWindow.length
+    if (avgAngle >= THRESHOLDS.highAngleAvg) {
+      score.technical += WEIGHTS.highAngleAvg
+      reasons.push(`high avg: ${avgAngle.toFixed(0)}° in window`)
+    }
+  }
+  
+  // Signal 5: Tight curves (multiple short-radius curves)
+  const tightCurves = curvesInWindow.filter(c => c.shape === 'tight' || (c.length && c.length < 0.1))
+  if (tightCurves.length >= 2) {
+    score.technical += WEIGHTS.tightCurves
+    reasons.push(`tight: ${tightCurves.length} tight curves`)
+  }
+  
+  // === TRANSIT SIGNALS ===
+  
+  // Signal 6: Long gap (check if we're in a gap)
+  const gapInfo = findGapAtMile(midMile, allCurves)
+  if (gapInfo && gapInfo.length >= THRESHOLDS.gapThresholdMiles) {
+    score.transit += WEIGHTS.longGap
+    reasons.push(`gap: ${gapInfo.length.toFixed(1)}mi without curves`)
+  }
+  
+  // Signal 7: Sparse window (very few curves in 2mi)
+  if (curvesInSustainedWindow.length < 2) {
+    score.transit += WEIGHTS.sparseWindow
+    reasons.push(`sparse: only ${curvesInSustainedWindow.length} curve(s) in ${THRESHOLDS.sustainedWindowMiles}mi`)
+  }
+  
+  // Signal 8: Census says rural (weak transit signal)
+  const censusChar = getCensusCharacterAtMile(midMile, censusSegments)
+  if (censusChar === 'rural') {
+    score.transit += WEIGHTS.censusSaysRural
+    reasons.push(`census: rural`)
+  }
+  
+  // === URBAN SIGNALS (only at edges) ===
+  
+  // Signal 9: Census says urban at route edges
+  if (censusChar === 'urban') {
+    if (midMile < THRESHOLDS.maxUrbanMiles || midMile > totalMiles - THRESHOLDS.maxUrbanMiles) {
+      score.urban += WEIGHTS.censusSaysUrban
+      reasons.push(`census: urban at route edge`)
+    }
+  }
+  
+  return {
+    ...window,
+    score,
+    reasons,
+    curvesInWindow: curvesInWindow.length,
+  }
+}
+
+/**
+ * Find if a mile position is within a gap between curves
+ */
+function findGapAtMile(mile, allCurves) {
+  if (allCurves.length === 0) return { length: Infinity }
+  
+  // Find the curve before and after this mile
+  let prevCurve = null
+  let nextCurve = null
+  
+  for (const curve of allCurves) {
+    if (curve.mile <= mile) {
+      prevCurve = curve
+    } else if (!nextCurve) {
+      nextCurve = curve
+      break
+    }
+  }
+  
+  // Calculate gap
+  const gapStart = prevCurve ? prevCurve.mile : 0
+  const gapEnd = nextCurve ? nextCurve.mile : mile + 10  // Assume gap continues
+  
+  if (mile >= gapStart && mile <= gapEnd) {
+    return { start: gapStart, end: gapEnd, length: gapEnd - gapStart }
+  }
+  
+  return null
+}
+
+/**
+ * Get Census character at a specific mile
+ */
+function getCensusCharacterAtMile(mile, censusSegments) {
+  if (!censusSegments.length) return null
+  
+  const meters = mile * 1609.34
+  const segment = censusSegments.find(s => {
+    const start = s.startDistance ?? s.start ?? 0
+    const end = s.endDistance ?? s.end ?? 0
+    return meters >= start && meters < end
+  })
+  
+  return segment?.character || null
+}
+
+/**
+ * Classify a window based on scores
+ */
+function classifyWindow(window) {
+  const { score } = window
+  
+  // Urban only wins if it's at route edge AND has points
+  // (handled by only giving urban points at edges)
+  if (score.urban > 0 && score.urban >= score.technical && score.urban >= score.transit) {
+    return { ...window, character: 'urban' }
+  }
+  
+  // Technical vs Transit - higher score wins
+  if (score.technical > score.transit) {
+    return { ...window, character: 'technical' }
+  }
+  
+  // Transit wins or tie (fail safe to transit)
+  return { ...window, character: 'transit' }
+}
+
+/**
+ * Merge adjacent windows with same character into zones
+ */
+function mergeWindowsToZones(windows) {
+  if (windows.length === 0) return []
+  
+  const zones = []
+  let currentZone = {
+    startMile: windows[0].startMile,
+    endMile: windows[0].endMile,
+    character: windows[0].character,
+    score: { ...windows[0].score },
+    reasons: [...windows[0].reasons],
+  }
+  
+  for (let i = 1; i < windows.length; i++) {
+    const w = windows[i]
+    
+    if (w.character === currentZone.character) {
+      // Extend current zone
+      currentZone.endMile = w.endMile
+      // Accumulate scores
+      currentZone.score.technical += w.score.technical
+      currentZone.score.transit += w.score.transit
+      currentZone.score.urban += w.score.urban
+      // Add unique reasons
+      w.reasons.forEach(r => {
+        if (!currentZone.reasons.includes(r)) {
+          currentZone.reasons.push(r)
+        }
+      })
+    } else {
+      // Save current zone and start new one
+      zones.push(createZone(
+        currentZone.startMile,
+        currentZone.endMile,
+        currentZone.character,
+        currentZone.score,
+        currentZone.reasons
+      ))
+      
+      currentZone = {
+        startMile: w.startMile,
+        endMile: w.endMile,
+        character: w.character,
+        score: { ...w.score },
+        reasons: [...w.reasons],
+      }
+    }
+  }
+  
+  // Don't forget the last zone
+  zones.push(createZone(
+    currentZone.startMile,
+    currentZone.endMile,
+    currentZone.character,
+    currentZone.score,
+    currentZone.reasons
+  ))
+  
+  return zones
+}
+
+/**
+ * Clean up tiny zones by absorbing them into neighbors
+ */
+function cleanupZones(zones, totalMiles) {
+  if (zones.length <= 1) return zones
+  
+  const minLength = THRESHOLDS.minZoneLengthMiles
+  let result = [...zones]
+  let changed = true
+  
+  // Iterate until no more changes
+  while (changed) {
+    changed = false
+    const newResult = []
+    
+    for (let i = 0; i < result.length; i++) {
+      const zone = result[i]
+      
+      // If zone is too small, absorb into neighbor
+      if (zone.lengthMiles < minLength && result.length > 1) {
+        const prevZone = newResult[newResult.length - 1]
+        const nextZone = result[i + 1]
+        
+        // Prefer absorbing into same-type neighbor, else larger neighbor
+        if (prevZone && prevZone.character === zone.character) {
+          // Extend previous zone
+          prevZone.endMile = zone.endMile
+          prevZone.lengthMiles = prevZone.endMile - prevZone.startMile
+          prevZone.reasons.push(`absorbed ${zone.lengthMiles.toFixed(1)}mi ${zone.character}`)
+          changed = true
+          continue
+        } else if (nextZone && nextZone.character === zone.character) {
+          // Extend next zone backwards
+          nextZone.startMile = zone.startMile
+          nextZone.lengthMiles = nextZone.endMile - nextZone.startMile
+          nextZone.reasons.push(`absorbed ${zone.lengthMiles.toFixed(1)}mi ${zone.character}`)
+          changed = true
+          continue
+        } else if (prevZone) {
+          // Absorb into previous (different type)
+          prevZone.endMile = zone.endMile
+          prevZone.lengthMiles = prevZone.endMile - prevZone.startMile
+          prevZone.reasons.push(`absorbed ${zone.lengthMiles.toFixed(1)}mi ${zone.character}`)
+          changed = true
+          continue
+        }
+      }
+      
+      newResult.push(zone)
+    }
+    
+    result = newResult
+  }
+  
+  return result
+}
+
+/**
+ * Apply urban zones at route edges if Census supports it
+ */
+function applyUrbanEdges(zones, censusSegments, totalMiles) {
+  if (!censusSegments.length || zones.length === 0) return zones
+  
+  const result = [...zones]
+  const maxUrban = THRESHOLDS.maxUrbanMiles
+  
+  // Check start
+  const startCensus = getCensusCharacterAtMile(0.1, censusSegments)
+  if (startCensus === 'urban' && result[0].character !== 'urban') {
+    const urbanEnd = Math.min(maxUrban, result[0].endMile)
+    
+    if (urbanEnd > 0.2) {
+      // Split first zone if needed
+      if (result[0].startMile < urbanEnd && result[0].endMile > urbanEnd) {
+        const remainder = { ...result[0], startMile: urbanEnd, lengthMiles: result[0].endMile - urbanEnd }
+        result[0] = createZone(0, urbanEnd, 'urban', { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, ['census: urban at start'])
+        result.splice(1, 0, remainder)
+      }
+    }
+  }
+  
+  // Check end
+  const endCensus = getCensusCharacterAtMile(totalMiles - 0.1, censusSegments)
+  if (endCensus === 'urban' && result[result.length - 1].character !== 'urban') {
+    const urbanStart = Math.max(totalMiles - maxUrban, result[result.length - 1].startMile)
+    
+    if (totalMiles - urbanStart > 0.2) {
+      const lastIdx = result.length - 1
+      if (result[lastIdx].startMile < urbanStart && result[lastIdx].endMile > urbanStart) {
+        const remainder = { ...result[lastIdx], endMile: urbanStart, lengthMiles: urbanStart - result[lastIdx].startMile }
+        result[lastIdx] = remainder
+        result.push(createZone(urbanStart, totalMiles, 'urban', { technical: 0, transit: 0, urban: WEIGHTS.censusSaysUrban }, ['census: urban at end']))
+      }
+    }
+  }
+  
+  return result
+}
+
+/**
+ * Reassign zones to events - uses THE canonical format
+ */
+export function reassignEventZones(events, zones) {
+  return events.map(event => {
+    const eventMile = event.mile ?? event.triggerMile ?? 0
+    
+    // Find which zone this event falls into
+    const zone = zones.find(z => eventMile >= z.startMile && eventMile < z.endMile)
+    
+    return {
+      ...event,
+      zone: zone?.character || 'transit',
+      zoneReason: zone?.reasons?.[0] || 'default'
+    }
+  })
+}
+
+/**
+ * Convert to standard format for compatibility with existing code
+ * Adds startDistance/endDistance in meters
+ */
+export function convertToStandardFormat(zones) {
+  return zones.map(z => ({
+    ...z,
+    // Add meter-based distances for compatibility
+    start: z.startMile * 1609.34,
+    end: z.endMile * 1609.34,
+    startDistance: z.startMile * 1609.34,
+    endDistance: z.endMile * 1609.34,
+  }))
+}
