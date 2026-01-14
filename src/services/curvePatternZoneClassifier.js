@@ -1,17 +1,13 @@
 // ================================
-// Curve Pattern Zone Classifier v1.1
+// Curve Pattern Zone Classifier v1.0
 // 
 // Simple, robust zone classification based on PATTERNS of curves
 // NOT density averages or LLM decisions
 // 
 // Philosophy: 
-// - Technical = clusters of curves OR sustained winding activity
+// - Technical = clusters of 3+ curves within 0.5 miles with meaningful angles
 // - Highway/Transit = everything else (long straights, sparse curves)
 // - Urban = start/end of route (from Census, short segments only)
-//
-// TWO detection methods (catches both Northampton AND Weston):
-// 1. CLUSTER: 3+ curves within 0.5 miles with avg angle >= 18°
-// 2. SUSTAINED: 4+ curves within 2 miles with avg angle >= 25°
 //
 // This is intentionally SIMPLE and deterministic.
 // ================================
@@ -23,23 +19,18 @@ const CONFIG = {
   // What counts as a "curve"
   minAngleToCount: 12,           // Ignore tiny angle changes below this
   
-  // METHOD 1: CLUSTER detection (dense sections like Northampton)
+  // What makes a "cluster" (technical section)
   clusterLookAheadMiles: 0.5,    // Look this far ahead to find clustered curves
   minCurvesForCluster: 3,        // Need at least this many curves in the window
   minAvgAngleForCluster: 18,     // Average angle must be meaningful
   
-  // METHOD 2: SUSTAINED ACTIVITY detection (spread sections like Weston)
-  sustainedLookAheadMiles: 2.0,  // Look further ahead for spread-out curves
-  minCurvesForSustained: 4,      // Need more curves over longer distance
-  minAvgAngleForSustained: 25,   // Higher angle threshold for sustained
-  
-  // Danger curve override - ONLY extreme turns trigger technical
-  dangerAngle: 70,               // Very severe curves only
-  dangerBufferMiles: 0.1,        // Buffer around danger curve
+  // Danger curve override (single curve can trigger technical)
+  dangerAngle: 50,               // Any curve >= this angle triggers technical zone
+  dangerBufferMiles: 0.15,       // Buffer around danger curve
   
   // Zone cleanup
-  mergeGapMiles: 0.5,            // Merge technical zones that are close (increased)
-  minTechnicalLengthMiles: 0.4,  // Don't create tiny technical zones
+  mergeGapMiles: 0.3,            // Merge technical zones that are close
+  minTechnicalLengthMiles: 0.25, // Don't create tiny technical zones
   
   // Urban detection (from Census)
   maxUrbanMiles: 1.5,            // Urban zones only at start/end, max this length
@@ -56,9 +47,8 @@ const CONFIG = {
 export function classifyByPattern(flowEvents, totalDistanceMeters, censusSegments = []) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🎯 Curve Pattern Zone Classifier v1.1 (Cluster + Sustained)')
+  console.log('🎯 Curve Pattern Zone Classifier v1.0')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
-  console.log(`   Total distance (meters): ${totalDistanceMeters}`)
   
   // Step 1: Extract meaningful curves
   const curves = extractMeaningfulCurves(flowEvents)
@@ -116,25 +106,17 @@ function extractMeaningfulCurves(events) {
 }
 
 /**
- * Find technical zones by looking for curve clusters AND sustained activity
+ * Find technical zones by looking for curve clusters
  */
 function findTechnicalZones(curves, totalMiles) {
-  const zones = []
-  
-  // Method 1: Find danger curve zones (single severe curves)
+  // First: Find danger curve zones (single severe curves)
   const dangerZones = findDangerCurveZones(curves)
-  console.log(`   Danger zones: ${dangerZones.length}`)
   
-  // Method 2: Find CLUSTER-based zones (dense, like Northampton)
+  // Second: Find cluster-based zones
   const clusterZones = findClusterZones(curves)
-  console.log(`   Cluster zones: ${clusterZones.length}`)
   
-  // Method 3: Find SUSTAINED ACTIVITY zones (spread out, like Weston)
-  const sustainedZones = findSustainedActivityZones(curves)
-  console.log(`   Sustained activity zones: ${sustainedZones.length}`)
-  
-  // Combine all methods and merge overlapping
-  const allZones = [...dangerZones, ...clusterZones, ...sustainedZones]
+  // Combine and merge
+  const allZones = [...dangerZones, ...clusterZones]
   const merged = mergeOverlappingZones(allZones, totalMiles)
   
   // Filter out tiny zones
@@ -429,24 +411,11 @@ function createZone(startMile, endMile, character, reason) {
  * Reassign zone labels to flow events based on our classification
  */
 export function reassignEventZones(events, zones) {
-  // Log the zones we're using for debugging
-  console.log(`   Reassigning zones using ${zones.length} zones:`)
-  zones.slice(0, 5).forEach(z => {
-    const start = z.startMile ?? (z.startDistance / 1609.34) ?? 0
-    const end = z.endMile ?? (z.endDistance / 1609.34) ?? 0
-    console.log(`      ${z.character}: ${start.toFixed(1)}-${end.toFixed(1)}mi`)
-  })
-  
   return events.map(event => {
     const eventMile = event.mile ?? event.triggerMile ?? 0
     
     // Find which zone this event falls into
-    // Check both startMile/endMile AND startDistance/endDistance for compatibility
-    const zone = zones.find(z => {
-      const zStart = z.startMile ?? (z.startDistance / 1609.34) ?? 0
-      const zEnd = z.endMile ?? (z.endDistance / 1609.34) ?? 0
-      return eventMile >= zStart && eventMile < zEnd
-    })
+    const zone = zones.find(z => eventMile >= z.startMile && eventMile < z.endMile)
     
     return {
       ...event,
