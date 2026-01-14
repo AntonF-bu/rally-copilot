@@ -15,7 +15,7 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyWithVoting, reassignEventZones, convertToStandardFormat } from '../services/votingZoneClassifier'
+import { classifyByRoadName, convertToStandardFormat } from '../services/simpleZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
