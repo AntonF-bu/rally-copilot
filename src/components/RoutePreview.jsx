@@ -57,7 +57,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [curatedCallouts, setCuratedCallouts] = useState([])
   const [agentResult, setAgentResult] = useState(null)
   const [agentProgress, setAgentProgress] = useState(null)
-  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(false)
+  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true) // Collapsed by default
   
   // Highway bends - LOCAL state for UI (raw bends, before curation)
   const [highwayBends, setHighwayBendsLocal] = useState([])
@@ -1202,15 +1202,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           <span className="text-white/50 text-sm">sharp</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="ml-1 opacity-40"><path d="M6 9l6 6 6-6"/></svg>
         </button>
-
-        {/* Severity bar */}
-        <div className="h-1 mx-3 mb-2 rounded-full overflow-hidden bg-white/10">
-          <div className="h-full flex">
-            <div style={{ width: `${(severityBreakdown.easy / routeStats.curves) * 100}%`, background: '#22c55e' }} />
-            <div style={{ width: `${(severityBreakdown.medium / routeStats.curves) * 100}%`, background: '#ffd500' }} />
-            <div style={{ width: `${(severityBreakdown.hard / routeStats.curves) * 100}%`, background: '#ff3366' }} />
-          </div>
-        </div>
       </div>
 
       {/* ELEVATION - Right side mini widget */}
@@ -1363,114 +1354,71 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI CO-DRIVER AGENT STATUS - Collapsible */}
+        {/* AI CO-DRIVER - Compact widget */}
         {curveEnhanced && agentResult && (
-          <div className="mb-3 flex flex-col gap-2 p-3 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 rounded-lg border border-emerald-500/20">
-            {/* Header row - clickable to collapse */}
+          <div className="mb-2">
             <button 
               onClick={() => setAiSectionCollapsed(!aiSectionCollapsed)}
-              className="flex items-center justify-between w-full text-left"
+              className="flex items-center gap-2 px-2.5 py-1.5 bg-black/70 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50 transition-all"
             >
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-                  <span className="text-[11px] text-emerald-400 font-semibold">
-                    AI Co-Driver
-                  </span>
-                </div>
-                <span className="text-[10px] text-white/50">
-                  {agentResult.confidence}% confident
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[9px] text-white/40">{curatedCallouts.length} callouts</span>
-                <svg 
-                  width="12" 
-                  height="12" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  strokeWidth="2"
-                  className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}
-                >
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </div>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+              <span className="text-[10px] text-emerald-400 font-semibold">AI Co-Driver</span>
+              <span className="text-[9px] text-white/40">{curatedCallouts.length} callouts</span>
+              <svg 
+                width="10" 
+                height="10" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2"
+                className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}
+              >
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
             </button>
             
-            {/* Collapsible content */}
+            {/* Expanded content */}
             {!aiSectionCollapsed && (
-              <>
-                {/* Route Summary */}
-                {agentResult.summary && (
-                  <div className="text-[10px] text-white/70 leading-relaxed">
-                    {agentResult.summary.summary}
-                  </div>
-                )}
+              <div className="mt-2 p-2.5 bg-black/80 rounded-lg border border-emerald-500/20 max-w-md">
+                {/* Analysis */}
+                <div className="text-[10px] text-white/70 leading-relaxed mb-2">
+                  {agentResult.summary?.summary || agentResult.analysis || 'Route analyzed'}
+                </div>
                 
-                {/* Rhythm visualization */}
-                {agentResult.summary?.rhythm && (
-                  <div className="text-[9px] text-cyan-400/80 font-mono">
-                    {agentResult.summary.rhythm}
-                  </div>
-                )}
-                
-                {/* Callout pills - highway blue, technical/urban severity colors */}
-                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
+                {/* Callout pills */}
+                <div className="flex flex-wrap gap-1">
                   {curatedCallouts.map((callout, i) => {
-                    // Highway uses blue, Technical/Urban use severity colors
-                    let color
-                    const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
-                    if (isHighway) {
-                      color = '#3b82f6' // Blue for highway
-                    } else {
-                      // Technical/Urban use severity-based colors
-                      const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
-                      if (angle >= 70) {
-                        color = '#ef4444' // Red
-                      } else if (angle >= 45) {
-                        color = '#f97316' // Orange
-                      } else {
-                        color = '#22c55e' // Green
-                      }
-                    }
+                    const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
+                    let color = '#22c55e'
+                    if (angle >= 70) color = '#ef4444'
+                    else if (angle >= 45) color = '#f97316'
                     
-                    // Extract short version
                     const text = callout.text || ''
                     const dirMatch = text.match(/\b(left|right)\b/i)
                     const angleMatch = text.match(/(\d+)/)
                     const shortText = dirMatch && angleMatch 
                       ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
-                      : callout.type === 'wake_up' 
-                        ? '!' 
-                        : callout.type === 'sequence'
-                          ? text.substring(0, 10)
-                          : text.substring(0, 6)
+                      : callout.type === 'sequence' ? text.substring(0, 8) : text.substring(0, 6)
                     
                     return (
                       <button
                         key={callout.id || i}
-                        onClick={(e) => {
-                          e.stopPropagation()
+                        onClick={() => {
                           setSelectedCurve({ ...callout, isCuratedCallout: true })
                           if (mapRef.current && callout.position) {
                             mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                           }
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
-                        style={{ 
-                          background: isHighway ? `${color}30` : color, 
-                          color: isHighway ? color : '#fff',
-                          border: `1.5px solid ${color}`
-                        }}
-                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}\n${callout.reason || ''}`}
+                        className="px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                        style={{ background: color, color: '#fff' }}
+                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}`}
                       >
                         {shortText}
                       </button>
                     )
                   })}
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
