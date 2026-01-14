@@ -255,7 +255,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           const llmResponse = await validateZonesWithLLM(
             analysis.segments,
             routeData,
-            getLLMApiKey()
+            getLLMApiKey(),
+            curves || []  // Pass curves for accurate zone classification
           )
           
           setLlmResult(llmResponse)
@@ -676,7 +677,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           const llmResponse = await validateZonesWithLLM(
             routeCharacter.segments,
             routeData,
-            getLLMApiKey()
+            getLLMApiKey(),
+            routeData.curves || []  // Pass curves for accurate zone classification
           )
           
           setLlmResult(llmResponse)
