@@ -66,7 +66,7 @@ export async function validateZonesWithLLM(segments, routeData, apiKey, curves =
           { role: 'system', content: getSystemPrompt() },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.2,  // Low for consistency
+        temperature: 0,  // Zero for fully deterministic responses
         max_tokens: 4000   // Increased to prevent truncation
       })
     })
@@ -141,7 +141,13 @@ CRITICAL RULES:
    - 0-1 curves per mile = likely HIGHWAY/TRANSIT
    - High curve count ALWAYS overrides POI-based reasoning
 
-4. SANDWICH RULE
+4. SEGMENT LENGTH MATTERS
+   - Long segments (10+ miles) are ALMOST ALWAYS highways - even with 1-2 curves/mile
+   - Technical sections are SHORT (typically 2-10 miles) and DENSE (3+ curves/mile)
+   - A 27 mile segment with 1 curve/mile is highway cruising, NOT technical driving
+   - NEVER change a segment > 10 miles from transit to technical unless curve density is 3+/mi
+
+5. SANDWICH RULE
    - Short segments (<2 miles) between two identical zones should match
    - Example: HIGHWAY → short TECHNICAL → HIGHWAY = probably all HIGHWAY
    - BUT: Keep genuine technical sections that have high curve density
