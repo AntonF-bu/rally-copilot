@@ -27,8 +27,13 @@ export function hasLLMApiKey() {
 /**
  * Main function: Validate and enhance zone classifications
  * Returns both original and enhanced segments for comparison
+ * 
+ * @param {Array} segments - Route segments with character classifications
+ * @param {Object} routeData - Route data including distance
+ * @param {string} apiKey - OpenAI API key
+ * @param {Array} curves - Optional array of detected curves with { distance, angle, direction }
  */
-export async function validateZonesWithLLM(segments, routeData, apiKey) {
+export async function validateZonesWithLLM(segments, routeData, apiKey, curves = []) {
   if (!apiKey) {
     console.warn('⚠️ No OpenAI API key - skipping LLM zone validation')
     return { enhanced: segments, original: segments, changes: [] }
@@ -42,8 +47,8 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
   const startTime = Date.now()
 
   try {
-    // Build comprehensive prompt with ALL available data
-    const prompt = buildComprehensivePrompt(segments, routeData)
+    // Build comprehensive prompt with ALL available data including curves
+    const prompt = buildComprehensivePrompt(segments, routeData, curves)
     
     // Log prompt size for debugging
     console.log(`📝 Prompt size: ${prompt.length} chars`)
@@ -130,10 +135,11 @@ CRITICAL RULES:
    - Only classify as URBAN if the road itself has urban characteristics
    - POIs (gas stations, parking lots) exist everywhere - ignore them
 
-3. CURVE DENSITY IS KEY FOR TECHNICAL
-   - Many curves (2+ per mile) with angles 20°+ = TECHNICAL
-   - This applies even if the area has some commercial buildings
-   - Winding roads approaching a town = TECHNICAL, not URBAN
+3. CURVE DENSITY IS THE PRIMARY INDICATOR
+   - Look at the CURVES column in the data - this is hard evidence!
+   - 2+ curves per mile with angles 20°+ = TECHNICAL (regardless of nearby POIs)
+   - 0-1 curves per mile = likely HIGHWAY/TRANSIT
+   - High curve count ALWAYS overrides POI-based reasoning
 
 4. SANDWICH RULE
    - Short segments (<2 miles) between two identical zones should match
@@ -144,6 +150,7 @@ CRITICAL RULES:
    - ONLY for true city CENTER driving
    - Grid street patterns with traffic lights
    - NOT just because there are businesses nearby
+   - Low curve count AND low speed limit AND urban road class
 
 6. WHEN TO KEEP URBAN:
    - First segment of route (leaving origin city) - usually correct
@@ -164,54 +171,89 @@ If all segments are correct, return {"d": []}.
 
 EXAMPLES:
 
-Segment 0 (miles 0-0.5): Currently URBAN, route starts in Boston
-✓ KEEP as URBAN - routes start in cities, this is correct
+Segment 0 (miles 0-0.5): Currently URBAN, 2 curves, route starts in Boston
+✓ KEEP as URBAN - routes start in cities, low curve count, this is correct
 
-Segment 9 (miles 79-91): Currently TECHNICAL, 40+ curves detected, ends near Amherst
-✓ KEEP as TECHNICAL - high curve count indicates winding backroads
+Segment 9 (miles 79-91): Currently TECHNICAL, 45 curves (3.9/mi), max 120°, ends near Amherst
+✓ KEEP as TECHNICAL - high curve count is definitive evidence of winding roads
 
-Segment 4 (miles 27-28): Currently TECHNICAL, only 1 curve, between two TRANSIT segments
-→ CHANGE to TRANSIT - sandwiched, low curve count
+Segment 9 (miles 79-91): Currently URBAN, 45 curves (3.9/mi), max 120°
+→ CHANGE to TECHNICAL - 45 curves proves this is winding backroads, not urban
 
-Remember: Only return segments that need to CHANGE. Don't touch segments that are already correct!`
+Segment 4 (miles 27-28): Currently TECHNICAL, 0 curves, between two TRANSIT segments
+→ CHANGE to TRANSIT - no curves + sandwiched = highway
+
+Remember: CURVE DATA IS TRUTH. High curve counts = TECHNICAL, regardless of what's nearby!`
 }
 
 /**
- * Build compact prompt with essential data only
+ * Build compact prompt with essential data including curve counts
  */
-function buildComprehensivePrompt(segments, routeData) {
+function buildComprehensivePrompt(segments, routeData, curves = []) {
   const totalDistanceMiles = ((routeData?.distance || 0) / 1609.34).toFixed(1)
   
-  // Build compact segment list
+  // Pre-calculate curve stats per segment
+  const segmentCurveStats = segments.map((seg, i) => {
+    const startMi = seg.startDistance / 1609.34
+    const endMi = seg.endDistance / 1609.34
+    const lengthMi = endMi - startMi
+    
+    // Find curves in this segment
+    const segmentCurves = curves.filter(c => {
+      const curveMile = (c.distance || 0) / 1609.34
+      return curveMile >= startMi && curveMile <= endMi
+    })
+    
+    const curveCount = segmentCurves.length
+    const curvesPerMile = lengthMi > 0 ? (curveCount / lengthMi).toFixed(1) : '0.0'
+    const maxAngle = segmentCurves.length > 0 
+      ? Math.max(...segmentCurves.map(c => Math.abs(c.angle || 0)))
+      : 0
+    const avgAngle = segmentCurves.length > 0
+      ? Math.round(segmentCurves.reduce((sum, c) => sum + Math.abs(c.angle || 0), 0) / segmentCurves.length)
+      : 0
+    
+    return { curveCount, curvesPerMile, maxAngle, avgAngle }
+  })
+  
+  // Build compact segment list with curve data
   const segmentList = segments.map((seg, i) => {
     const prevSeg = segments[i - 1]
     const nextSeg = segments[i + 1]
     const lengthMi = ((seg.endDistance - seg.startDistance) / 1609.34).toFixed(1)
     
-    const roadNames = seg.details?.roadNames?.join(', ') || 'unknown'
+    const roadNames = seg.details?.roadNames?.slice(0, 2).join(', ') || 'unknown'
     const roadClasses = seg.details?.roadClasses?.join(', ') || 'unknown'
     const avgSpeed = Math.round(seg.details?.avgSpeedLimit || 0)
     
-    // Flag sandwiched segments
+    // Curve stats for this segment
+    const curveStats = segmentCurveStats[i]
+    const curveInfo = `${curveStats.curveCount} curves (${curveStats.curvesPerMile}/mi, max ${curveStats.maxAngle}°)`
+    
+    // Flag important segments
     let flag = ''
     if (i === 0) flag = '[START]'
     else if (i === segments.length - 1) flag = '[END]'
     else if (prevSeg?.character === 'transit' && nextSeg?.character === 'transit' && seg.character !== 'transit') {
-      flag = '[SANDWICHED!]'
+      flag = '[SANDWICHED]'
     }
     
-    const prev = prevSeg ? prevSeg.character : '-'
-    const next = nextSeg ? nextSeg.character : '-'
+    // High curve density flag
+    if (parseFloat(curveStats.curvesPerMile) >= 2) {
+      flag += '[HIGH-CURVES!]'
+    }
     
-    return `${i}: ${seg.character} ${lengthMi}mi | roads:${roadNames} | class:${roadClasses} | ${avgSpeed}mph | prev:${prev} next:${next} ${flag}`
+    return `${i}: ${seg.character.toUpperCase()} ${lengthMi}mi | ${curveInfo} | ${avgSpeed}mph | ${roadClasses} ${flag}`
   }).join('\n')
 
-  return `Route: ${totalDistanceMiles}mi, ${segments.length} segments
+  return `Route: ${totalDistanceMiles}mi, ${segments.length} segments, ${curves.length} total curves detected
 
-SEGMENTS:
+SEGMENTS (with curve data):
 ${segmentList}
 
-Return ONLY segments that need to CHANGE using compact format:
+IMPORTANT: Curve data is TRUTH. High curve counts (2+/mi) = TECHNICAL road character.
+
+Return ONLY segments that need to CHANGE:
 {"d":[{"i":INDEX,"n":"highway|technical|urban","r":"reason"}]}`
 }
 
