@@ -15,17 +15,14 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-// RESTORED: Use the working curvePatternZoneClassifier instead of zoneClassifierV2
 import { classifyByPattern, convertToZoneFormat, reassignEventZones } from '../services/curvePatternZoneClassifier'
-import { smoothZonesWithLLM, validateZones } from '../services/llmZoneSmoother'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v32
-// RESTORED: Curve Pattern Zone Classifier (clusters 3+ curves = technical)
-// The v2.x window-based classifiers were getting diluted on long routes
+// Route Preview - v29
+// NEW: Curve Pattern Zone Classifier (simpler, more robust)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -264,34 +261,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones using CURVE PATTERN CLUSTERING (3+ curves in 0.5mi = technical)
-      // This works better than window-based density which gets diluted on long routes
+      // Step 3: Classify zones based on CURVE PATTERNS (simple cluster detection)
       console.log('\n🎯 Classifying zones by curve patterns...')
       const patternZones = classifyByPattern(
         flowResult.events,
         routeData.distance,
-        censusSegments  // Census for urban at edges
+        censusSegments  // Pass census as fallback for urban detection
       )
       
-      // Step 3b: Validate zones for issues
-      const zoneIssues = validateZones(patternZones)
-      if (zoneIssues.length > 0) {
-        console.log('⚠️ Zone issues detected:')
-        zoneIssues.forEach(issue => console.log(`   - ${issue}`))
-      }
-      
-      // Step 3c: LLM Zone Smoothing (fix illogical sequences)
-      console.log('\n⚡ Smoothing zones with LLM...')
-      let activeZones
-      try {
-        activeZones = await smoothZonesWithLLM(patternZones, {
-          totalMiles: routeData.distance / 1609.34
-        })
-        console.log(`   Zones after smoothing: ${activeZones.length} (was ${patternZones.length})`)
-      } catch (error) {
-        console.error('LLM smoothing failed, using raw zones:', error)
-        activeZones = patternZones
-      }
+      // Convert to standard zone format
+      const activeZones = convertToZoneFormat(patternZones)
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -299,7 +278,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Zone smoothing complete
+      // Skip LLM zone validation - curve pattern detection is our source of truth now
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
