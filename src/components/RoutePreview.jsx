@@ -284,17 +284,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Step 4: Classify zones using VOTING system with road refs
       // ========================================
       console.log('\n🗳️ Classifying zones with voting system...')
-      const zones = classifyByRoadName(roadSegments, totalMiles)
-      const standardZones = convertToStandardFormat(zones, routeData.distance)
-
+      
       // Calculate totalMiles from routeData.distance (which is in meters)
       const totalMiles = routeData.distance / 1609.34
-
+      
       // Then call the classifier
-      const zones = classifyByRoadName(roadSegments, totalMiles)
+      const votedZones = classifyByRoadName(roadSegments, totalMiles)
       
       // Convert to standard zone format (adds startDistance/endDistance)
-      const activeZones = convertToStandardFormat(votedZones)
+      const activeZones = convertToStandardFormat(votedZones, routeData.distance)
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -777,8 +775,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [copilotProgress, setCopilotProgress] = useState(0)
   const [copilotReady, setCopilotReady] = useState(false)
   const [copilotStatus, setCopilotStatus] = useState('')
-
-  // === PART 1 ENDS HERE - Continue with handleStart in Part 2 ===
 
   // HANDLE START - WITH LLM INTEGRATION
   // ================================
