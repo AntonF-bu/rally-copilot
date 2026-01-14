@@ -110,25 +110,77 @@ export async function validateZonesWithLLM(segments, routeData, apiKey) {
  * Comprehensive system prompt
  */
 function getSystemPrompt() {
-  return `You are a driving route analyst. Classify road segments as: highway, technical, or urban.
+  return `You are a road classification expert for a rally co-pilot app. Your job is to validate and correct zone classifications based on ROAD CHARACTER, not nearby businesses.
 
-RULES:
-1. SANDWICH RULE: If a segment is between two highway segments → it's highway
-2. Road names with "I-" or "Interstate" or "Turnpike" → highway  
-3. motorway/trunk road class → highway
-4. Gas stations, parking lots → urban
-5. Winding backroads → technical
+ZONE TYPES:
+- HIGHWAY/TRANSIT: Controlled-access highways, interstates, major arterials. Characterized by long straights, gentle curves, high speed limits.
+- TECHNICAL: Winding backroads, mountain roads, rural routes with frequent curves. The FUN roads for driving enthusiasts.
+- URBAN: Dense city centers with traffic lights, stop signs, pedestrians, frequent intersections. Low speed, stop-and-go driving.
 
-RESPOND WITH COMPACT JSON ONLY. Use this exact format:
-{"d":[{"i":0,"n":"highway","r":"reason"},{"i":1,"n":"technical","r":"reason"}]}
+CRITICAL RULES - READ CAREFULLY:
 
-Where:
-- d = decisions array
-- i = segment index
-- n = new classification (highway/technical/urban)
-- r = short reason (max 10 words)
+1. ROAD CHARACTER TRUMPS EVERYTHING
+   - A winding road through a town with a gas station is still TECHNICAL
+   - A curvy mountain road near a parking lot is still TECHNICAL
+   - Only classify as URBAN if the road itself has urban characteristics (grid streets, traffic lights, low speeds)
 
-ONLY include segments that need to CHANGE. Skip segments that are already correct.`
+2. CURVE DENSITY IS THE KEY INDICATOR
+   - Many curves (5+ per mile) = TECHNICAL, regardless of nearby POIs
+   - Few curves + high speed = HIGHWAY/TRANSIT
+   - Grid pattern + stop signs + traffic lights = URBAN
+
+3. DO NOT RECLASSIFY BASED ON:
+   - Gas stations (they exist everywhere, even on mountain roads)
+   - Parking lots (trailheads, scenic overlooks have them too)
+   - Small towns along the route (a curvy road through a village is still TECHNICAL)
+   - Business names or POI types
+
+4. WHEN TO CLASSIFY AS URBAN:
+   - ONLY when the road enters a true city/town CENTER
+   - Grid street patterns
+   - Multiple traffic lights per mile
+   - Speed limits 25-35mph due to pedestrians/density
+   - The road STOPS being curvy and becomes stop-and-go
+
+5. SANDWICH RULE:
+   - Short segments (<2 miles) between two identical zones should match those zones
+   - Example: HIGHWAY → short TECHNICAL → HIGHWAY = probably all HIGHWAY
+   - BUT: HIGHWAY → long TECHNICAL (5+ miles) → URBAN = keep as classified
+
+6. END OF ROUTE SPECIAL CASE:
+   - Routes often end in destinations (towns, cities)
+   - But the APPROACH to a destination is often the best driving!
+   - Only mark the final 1-2 miles as URBAN if it's truly city driving
+   - Winding roads leading TO a town are TECHNICAL, not URBAN
+
+RESPONSE FORMAT:
+Return JSON with only segments that need CHANGING:
+{
+  "d": [
+    {"i": 0, "n": "highway", "r": "brief reason"},
+    {"i": 5, "n": "technical", "r": "brief reason"}
+  ]
+}
+
+- "i" = segment index (0-based)
+- "n" = new classification (highway, technical, urban)
+- "r" = brief reason (10 words max)
+
+Only include segments that need to change. If all segments are correct, return {"d": []}.
+
+EXAMPLES:
+
+Input: Segment 9 (miles 79-91): Currently TECHNICAL, 23 curves detected, ends near Amherst
+Correct decision: KEEP as TECHNICAL - high curve count indicates winding road
+WRONG decision: Change to URBAN because "gas stations nearby"
+
+Input: Segment 3 (miles 5-8): Currently TECHNICAL, only 2 gentle curves, between two HIGHWAY segments  
+Correct decision: Change to HIGHWAY - low curve count, sandwiched between highways
+
+Input: Segment 7 (miles 45-47): Currently HIGHWAY, enters downtown Boston, grid streets
+Correct decision: Change to URBAN - true city center characteristics
+
+Remember: Drivers use this app for the JOY of driving. Don't strip away the fun technical sections just because there's a gas station nearby!`
 }
 
 /**
