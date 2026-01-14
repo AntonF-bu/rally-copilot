@@ -165,65 +165,15 @@ function ruleBasedSmoothing(zones) {
   // Step 1: Ensure zones are continuous (no gaps)
   const continuous = ensureContinuousZones(zones)
   
-  // Step 2: Merge short zones and fix ping-pong patterns
-  const result = []
-  let i = 0
+  // Step 2: Aggressively merge transit sections between technical zones
+  // This is the key insight: a short transit section between two technical zones
+  // is just a "breather" in what's really a continuous technical section
+  let result = mergeTransitBetweenTechnical(continuous)
   
-  while (i < continuous.length) {
-    const current = { ...continuous[i] }
-    const currentLength = current.endMile - current.startMile
-    
-    // Look ahead for patterns to merge
-    while (i + 1 < continuous.length) {
-      const next = continuous[i + 1]
-      const nextLength = next.endMile - next.startMile
-      
-      // Pattern 1: SAME → SHORT_DIFFERENT (<0.8mi) → SAME
-      // Absorb the short different zone
-      if (nextLength < 0.8 && i + 2 < continuous.length) {
-        const afterNext = continuous[i + 2]
-        
-        if (afterNext.character === current.character) {
-          console.log(`   Absorbing short ${next.character} zone (${nextLength.toFixed(2)}mi) between ${current.character} zones`)
-          current.endMile = afterNext.endMile
-          current.end = afterNext.endMile * 1609.34
-          current.endDistance = afterNext.endMile * 1609.34
-          current.reason = (current.reason || '') + ' (merged)'
-          i += 2 // Skip the absorbed zones
-          continue
-        }
-      }
-      
-      // Pattern 2: Very short zone (<0.4mi) - absorb into current
-      if (nextLength < 0.4) {
-        console.log(`   Absorbing very short ${next.character} zone (${nextLength.toFixed(2)}mi) into ${current.character}`)
-        current.endMile = next.endMile
-        current.end = next.endMile * 1609.34
-        current.endDistance = next.endMile * 1609.34
-        current.reason = (current.reason || '') + ' (absorbed short)'
-        i++
-        continue
-      }
-      
-      break
-    }
-    
-    // Pattern 3: Current zone is very short (<0.3mi) - extend previous zone instead
-    if (currentLength < 0.3 && result.length > 0) {
-      const prev = result[result.length - 1]
-      prev.endMile = current.endMile
-      prev.end = current.endMile * 1609.34
-      prev.endDistance = current.endMile * 1609.34
-      console.log(`   Extended previous ${prev.character} zone to absorb short ${current.character} zone`)
-      i++
-      continue
-    }
-    
-    result.push(current)
-    i++
-  }
+  // Step 3: Merge remaining short zones
+  result = mergeShortZones(result)
   
-  // Step 3: Final pass - merge consecutive same-type zones
+  // Step 4: Final pass - merge consecutive same-type zones
   const merged = []
   for (const zone of result) {
     if (merged.length > 0 && merged[merged.length - 1].character === zone.character) {
@@ -237,6 +187,101 @@ function ruleBasedSmoothing(zones) {
   }
   
   return merged.length > 0 ? merged : zones
+}
+
+/**
+ * Merge transit zones that are sandwiched between technical zones
+ * These are just "breathers" in what's really continuous technical driving
+ */
+function mergeTransitBetweenTechnical(zones) {
+  if (zones.length < 3) return zones
+  
+  const result = []
+  let i = 0
+  
+  while (i < zones.length) {
+    const current = { ...zones[i] }
+    
+    // Look for pattern: TECHNICAL → TRANSIT → TECHNICAL
+    // Or even: TECHNICAL → TRANSIT → TRANSIT → TECHNICAL
+    if (current.character === 'technical' && i + 1 < zones.length) {
+      let j = i + 1
+      let totalTransitLength = 0
+      
+      // Count consecutive transit zones
+      while (j < zones.length && zones[j].character === 'transit') {
+        totalTransitLength += zones[j].endMile - zones[j].startMile
+        j++
+      }
+      
+      // If there's a technical zone after the transit section(s)
+      // and the total transit length is <= 2.5 miles, absorb it all
+      if (j < zones.length && zones[j].character === 'technical' && totalTransitLength <= 2.5) {
+        console.log(`   Absorbing ${(j - i - 1)} transit zone(s) (${totalTransitLength.toFixed(1)}mi total) between technical zones`)
+        // Extend current technical zone to include all transit and the next technical
+        current.endMile = zones[j].endMile
+        current.end = zones[j].endMile * 1609.34
+        current.endDistance = zones[j].endMile * 1609.34
+        current.reason = (current.reason || '') + ' (merged transit gap)'
+        i = j + 1 // Skip past the absorbed zones
+        result.push(current)
+        continue
+      }
+    }
+    
+    result.push(current)
+    i++
+  }
+  
+  return result
+}
+
+/**
+ * Merge short zones into neighbors
+ */
+function mergeShortZones(zones) {
+  const result = []
+  let i = 0
+  
+  while (i < zones.length) {
+    const current = { ...zones[i] }
+    const currentLength = current.endMile - current.startMile
+    
+    // Look ahead for patterns to merge
+    while (i + 1 < zones.length) {
+      const next = zones[i + 1]
+      const nextLength = next.endMile - next.startMile
+      
+      // Pattern: Very short zone (<0.5mi) - absorb into current
+      if (nextLength < 0.5) {
+        console.log(`   Absorbing very short ${next.character} zone (${nextLength.toFixed(2)}mi) into ${current.character}`)
+        current.endMile = next.endMile
+        current.end = next.endMile * 1609.34
+        current.endDistance = next.endMile * 1609.34
+        current.reason = (current.reason || '') + ' (absorbed short)'
+        i++
+        continue
+      }
+      
+      break
+    }
+    
+    // Pattern: Current zone is very short (<0.4mi) - extend previous zone instead
+    if (currentLength < 0.4 && result.length > 0) {
+      const prev = result[result.length - 1]
+      prev.endMile = current.endMile
+      prev.end = current.endMile * 1609.34
+      prev.endDistance = current.endMile * 1609.34
+      console.log(`   Extended previous ${prev.character} zone to absorb short ${current.character} zone`)
+      i++
+      continue
+    }
+    
+    result.push(current)
+    i++
+  }
+  
+  return result
 }
 
 /**
