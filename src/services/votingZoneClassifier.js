@@ -30,7 +30,7 @@ const WEIGHTS = {
   sparseWindow: 2,        // <2 curves in 2mi window
   
   // Pro-Urban signals (only at route start/end)
-  censusSaysUrban: 2,     // Census urban at route edges
+  censusSaysUrban: 10,    // Census urban at route edges - STRONG override
 }
 
 /**
@@ -56,7 +56,7 @@ const THRESHOLDS = {
   gapThresholdMiles: 2.0,      // Gap this long = transit signal
   
   // Zone cleanup
-  minZoneLengthMiles: 1.0,     // Minimum zone length
+  minZoneLengthMiles: 0.5,     // Minimum zone length (reduced from 1.0)
   analysisWindowMiles: 0.5,    // Sliding window for analysis
   
   // Urban limits
@@ -350,9 +350,9 @@ function getCensusCharacterAtMile(mile, censusSegments) {
 function classifyWindow(window) {
   const { score } = window
   
-  // Urban only wins if it's at route edge AND has points
-  // (handled by only giving urban points at edges)
-  if (score.urban > 0 && score.urban >= score.technical && score.urban >= score.transit) {
+  // Urban wins if it has points (only given at route edges when Census says urban)
+  // Urban overrides technical because dense urban 90° turns != rally technical
+  if (score.urban > 0) {
     return { ...window, character: 'urban' }
   }
   
