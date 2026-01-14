@@ -284,12 +284,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Step 4: Classify zones using VOTING system with road refs
       // ========================================
       console.log('\n🗳️ Classifying zones with voting system...')
-      const votedZones = classifyWithVoting(
-        flowResult.events,
-        routeData.distance,
-        censusSegments,   // Pass census for urban detection at edges
-        roadSegments      // NEW: Pass road refs for highway detection!
-      )
+      const zones = classifyByRoadName(roadSegments, totalMiles)
+      const standardZones = convertToStandardFormat(zones, routeData.distance)
       
       // Convert to standard zone format (adds startDistance/endDistance)
       const activeZones = convertToStandardFormat(votedZones)
