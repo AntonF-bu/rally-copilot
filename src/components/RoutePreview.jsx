@@ -3,7 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { useSpeech, generateCallout } from '../hooks/useSpeech'
-import { getRoute } from '../services/routeService'
+import { getRoute, extractRoadRefs } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
@@ -21,8 +21,9 @@ import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v33
-// NEW: Voting Zone Classifier - multiple signals vote on zones
+// Route Preview - v34
+// NEW: Road ref integration from Mapbox Directions API
+// Uses step.ref (I-90, US-9, MA-66) for zone classification
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -60,7 +61,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [curatedCallouts, setCuratedCallouts] = useState([])
   const [agentResult, setAgentResult] = useState(null)
   const [agentProgress, setAgentProgress] = useState(null)
-  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true) // Collapsed by default
+  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true)
   
   // Highway bends - LOCAL state for UI (raw bends, before curation)
   const [highwayBends, setHighwayBendsLocal] = useState([])
@@ -114,7 +115,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   // Helper to set highway bends BOTH locally and in store
   const setHighwayBends = useCallback((bends) => {
     setHighwayBendsLocal(bends)
-    // Only call store action if it exists (store.js must have setHighwayBends)
     if (setStoreHighwayBends) {
       setStoreHighwayBends(bends)
       console.log(`🛣️ Preview: Stored ${bends.length} highway bends in global store`)
@@ -225,7 +225,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData?.coordinates, fetchElevationData])
 
-  // Fetch route character analysis
+  // ================================
+  // FETCH ROUTE CHARACTER - v34 with Road Refs
+  // ================================
   const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
     if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
     characterFetchedRef.current = true
@@ -239,21 +241,38 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     try {
       // ========================================
-      // NEW FLOW: Curve-Density-First Zone Classification
+      // Step 1: Get Census-based zones (for urban detection)
       // ========================================
-      
-      // Step 1: Get Census-based zones as a FALLBACK (for urban detection)
       updateStage('zones', 'loading')
       const censusAnalysis = await analyzeRouteCharacter(coordinates, curves || [])
       const censusSegments = censusAnalysis.segments || []
       console.log('📊 Census zones (fallback):', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
       
-      // Step 2: Run Road Flow Analyzer with UNIFORM sampling (for zone classification)
-      // Use a simple "all transit" zone list to get consistent sampling
+      // ========================================
+      // Step 2: Extract road refs from Mapbox legs data - NEW!
+      // ========================================
+      let roadSegments = []
+      if (routeData?.legs && routeData.legs.length > 0) {
+        console.log('\n🛣️ Extracting road refs from route legs...')
+        roadSegments = extractRoadRefs(routeData.legs, routeData.distance)
+        
+        // Log road ref summary
+        const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
+        const usHighways = roadSegments.filter(s => s.roadClass === 'us_highway')
+        const stateRoutes = roadSegments.filter(s => s.roadClass === 'state_route')
+        const localRoads = roadSegments.filter(s => s.roadClass === 'local')
+        console.log(`   Road coverage: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local`)
+      } else {
+        console.log('⚠️ No legs data available for road ref extraction')
+      }
+      
+      // ========================================
+      // Step 3: Run Road Flow Analyzer with uniform sampling
+      // ========================================
       const uniformZones = [{
         start: 0,
         end: routeData.distance,
-        character: 'transit'  // Use transit sampling (50m) for initial pass
+        character: 'transit'
       }]
       
       console.log('\n🌊 Running Road Flow Analyzer (uniform sampling for zone classification)...')
@@ -261,12 +280,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones using VOTING system (multiple signals vote)
+      // ========================================
+      // Step 4: Classify zones using VOTING system with road refs
+      // ========================================
       console.log('\n🗳️ Classifying zones with voting system...')
       const votedZones = classifyWithVoting(
         flowResult.events,
         routeData.distance,
-        censusSegments  // Pass census for urban detection at edges
+        censusSegments,   // Pass census for urban detection at edges
+        roadSegments      // NEW: Pass road refs for highway detection!
       )
       
       // Convert to standard zone format (adds startDistance/endDistance)
@@ -282,7 +304,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
-      // Step 4: Analyze highway bends (using pattern-based zones)
+      // ========================================
+      // Step 5: Analyze highway bends (using pattern-based zones)
+      // ========================================
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
         updateStage('highway', 'loading')
@@ -298,12 +322,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         const debugData = dumpHighwayData(rawBends, activeZones, routeData)
         window.__highwayDebugData = debugData
         
-        // Step 5: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
+        // ========================================
+        // Step 6: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
+        // ========================================
         if (flowResult.events.length > 0) {
           updateStage('aiCurves', 'loading')
           console.log('📋 Running Hybrid Callout System...')
           
-          // IMPORTANT: Reassign zones to events using our new density-based classification
+          // IMPORTANT: Reassign zones to events using our new classification
           const eventsWithCorrectZones = reassignEventZones(flowResult.events, activeZones)
           console.log(`📍 Reassigned zones to ${eventsWithCorrectZones.length} events`)
           
@@ -313,13 +339,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           
           try {
             // ========================================
-            // STAGE 1: Rule-Based Filtering (always runs)
+            // STAGE 6a: Rule-Based Filtering (always runs)
             // ========================================
             console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
             const ruleBasedResult = filterEventsToCallouts(
-              eventsWithCorrectZones,  // Use events with correct zones
+              eventsWithCorrectZones,
               { totalMiles: routeData.distance / 1609.34 },
-              activeZones  // Pass zones for exit detection
+              activeZones
             )
             
             console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
@@ -333,7 +359,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             console.log('💡 Access rule-based callouts: window.__ruleBasedCallouts')
             
             // ========================================
-            // STAGE 2: LLM Polish (optional, can fail safely)
+            // STAGE 6b: LLM Polish (optional, can fail safely)
             // ========================================
             let finalResult = ruleBasedResult
             
@@ -385,7 +411,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               }))
               
               // ========================================
-              // STAGE 3: Speed-Based Grouping
+              // STAGE 6c: Speed-Based Grouping
               // ========================================
               console.log('\n🎯 STAGE 3: Speed-Based Grouping')
               const groupedSets = generateGroupedCalloutSets(
@@ -408,10 +434,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 console.log(`   Mile ${mile.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]${grouped}`)
               })
               
-              // Use STANDARD set for preview display (most common use case)
+              // Use STANDARD set for preview display
               const displayCallouts = groupedSets.standard
               
-              // Debug: Log technical zone callouts to verify grouping
+              // Debug: Log technical zone callouts
               const techCallouts = displayCallouts.filter(c => c.zone === 'technical')
               console.log(`\n🔍 Technical callouts for display: ${techCallouts.length}`)
               techCallouts.slice(0, 15).forEach(c => {
@@ -423,7 +449,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               setAgentResult({
                 summary: {
                   summary: finalResult.analysis,
-                  rhythm: 'Hybrid Callout System v1.1 (with grouping)',
+                  rhythm: 'Hybrid Callout System v1.2 (with road refs)',
                   difficulty: 'auto'
                 },
                 reasoning: [
@@ -438,7 +464,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               
               // Store BOTH sets in global store for navigation runtime selection
               useStore.getState().setCuratedHighwayCallouts(displayCallouts)
-              useStore.getState().setGroupedCalloutSets?.(groupedSets) // If store supports it
+              useStore.getState().setGroupedCalloutSets?.(groupedSets)
               window.__hybridCallouts = finalResult
               
             } else {
@@ -485,7 +511,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (routeData?.coordinates?.length > 0 && (!routeData.curves || routeData.curves.length === 0)) {
       console.log('🔍 RoutePreview: No curves in routeData, detecting...')
       
-      // Start preview loading
       if (hasLLMApiKey()) {
         setIsPreviewLoading(true)
         setPreviewLoadingStages({ route: 'complete', curves: 'loading' })
@@ -494,10 +519,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const curves = detectCurves(routeData.coordinates)
       console.log(`🔍 RoutePreview: Detected ${curves.length} curves`)
       
-      // Update stages
       setPreviewLoadingStages(prev => ({ ...prev, curves: 'complete' }))
       
-      // Update routeData with curves
       useStore.getState().setRouteData({
         ...routeData,
         curves
@@ -541,16 +564,29 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [showHighwayBends])
 
+  // Fetch demo route - NOW INCLUDES LEGS
   const fetchDemoRoute = async () => {
     setIsLoadingRoute(true)
     try {
       const route = await getRoute(DEMO_START, DEMO_END)
       if (route?.coordinates?.length > 10) {
         const curves = detectCurves(route.coordinates)
-        setRouteData({ name: "Boston to Weston Demo", coordinates: route.coordinates, curves, distance: route.distance, duration: route.duration })
-      } else { setLoadError('Could not load demo route') }
-    } catch { setLoadError('Failed to fetch route') } 
-    finally { setIsLoadingRoute(false) }
+        setRouteData({ 
+          name: "Boston to Weston Demo", 
+          coordinates: route.coordinates, 
+          curves, 
+          distance: route.distance, 
+          duration: route.duration,
+          legs: route.legs  // NEW: Include legs for road ref extraction
+        })
+      } else { 
+        setLoadError('Could not load demo route') 
+      }
+    } catch { 
+      setLoadError('Failed to fetch route') 
+    } finally { 
+      setIsLoadingRoute(false) 
+    }
   }
 
   const handleReverseRoute = () => {
@@ -562,7 +598,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         ...curve,
         direction: curve.direction === 'LEFT' ? 'RIGHT' : 'LEFT',
         distanceFromStart: (routeData.distance || 15000) - (curve.distanceFromStart || 0)
-      })).reverse()
+      })).reverse(),
+      legs: routeData.legs  // Keep legs (though they won't be accurate for reversed route)
     }
     setRouteData(reversed)
     elevationFetchedRef.current = false
@@ -572,7 +609,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     setElevationData([])
     setLlmEnhanced(false)
     setCurveEnhanced(false)
-    setCurveEnhancementResult(null)
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
@@ -740,7 +776,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [copilotReady, setCopilotReady] = useState(false)
   const [copilotStatus, setCopilotStatus] = useState('')
 
-  // ================================
+  // === PART 1 ENDS HERE - Continue with handleStart in Part 2 ===
+
   // HANDLE START - WITH LLM INTEGRATION
   // ================================
   const handleStart = async () => { 
@@ -764,7 +801,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             routeCharacter.segments,
             routeData,
             getLLMApiKey(),
-            routeData.curves || []  // Pass curves for accurate zone classification
+            routeData.curves || []
           )
           
           setLlmResult(llmResponse)
@@ -808,55 +845,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // ========================================
       // PHASE 2: Curve Enhancement (skip if already done in preview)
       // ========================================
-      if (hasLLMApiKey() && !curveEnhanced && shouldEnhanceCurves({ curves: routeData?.curves, highwayBends })) {
-        setCopilotProgress(25)
-        setCopilotStatus('🤖 AI enhancing curves...')
-        console.log('🤖 Starting LLM curve enhancement...')
-        
-        try {
-          const curveResult = await enhanceCurvesWithLLM({
-            curves: routeData?.curves || [],
-            highwayBends: highwayBends,
-            zones: routeCharacter.segments,
-            routeData
-          }, getLLMApiKey())
-          
-          setCurveEnhancementResult(curveResult)
-          
-          if (curveResult.changes?.length > 0) {
-            console.log(`🤖 Curve enhancement made ${curveResult.changes.length} changes`)
-            curveResult.changes.forEach(c => console.log(`   - ${c}`))
-            
-            setCurveEnhanced(true)
-            
-            if (curveResult.curves) {
-              useStore.getState().setRouteData({
-                ...routeData,
-                curves: curveResult.curves
-              })
-            }
-            
-            if (curveResult.highwayBends) {
-              setHighwayBends(curveResult.highwayBends)
-            }
-            
-            if (curveResult.calloutVariants && Object.keys(curveResult.calloutVariants).length > 0) {
-              useStore.getState().setCalloutVariants(curveResult.calloutVariants)
-            }
-          } else {
-            console.log('🤖 Curve enhancement: no changes needed')
-          }
-        } catch (curveErr) {
-          console.warn('⚠️ LLM curve enhancement failed:', curveErr)
-        }
-        
-        setCopilotProgress(35)
-      } else {
-        if (curveEnhanced) {
-          console.log('ℹ️ Curves already enhanced during preview')
-        }
-        setCopilotProgress(35)
-      }
+      setCopilotProgress(35)
       
       // ========================================
       // PHASE 3: Voice Preloading
@@ -1023,7 +1012,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [buildSleeveSegments])
 
-  // Helper: Check if a distance is within a transit zone
   // Add curve markers - DISABLED: curated callouts handle all zones now
   const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
@@ -1075,8 +1063,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const angleMatch = text.match(/(\d+)/);
       
       if (dirMatch && angleMatch) {
-        const dir = dirMatch[1][0].toUpperCase()  // L or R
-        return `${dir}${angleMatch[1]}`  // e.g., "L45" or "R78"
+        const dir = dirMatch[1][0].toUpperCase()
+        return `${dir}${angleMatch[1]}`
       }
       
       if (angleMatch) return angleMatch[1]
@@ -1215,6 +1203,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current?.setStyle(MAP_STYLES[next])
   }
 
+  // ================================
+  // LOADING / ERROR STATES
+  // ================================
   if (isLoadingRoute) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center"><div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>
   if (loadError) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4"><p className="text-red-400">{loadError}</p><button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button></div>
   
@@ -1243,6 +1234,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   // Check if route has highway sections
   const hasHighwaySections = routeCharacter.segments?.some(s => s.character === 'transit')
 
+  // ================================
+  // MAIN RENDER
+  // ================================
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
@@ -1508,40 +1502,34 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     if (angle >= 70) color = '#ef4444'
                     else if (angle >= 45) color = '#f97316'
                     
-                    // Check if this is a grouped callout
                     const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
                     
                     const text = callout.text || ''
                     let shortText = ''
                     
                     if (isGrouped) {
-                      // For grouped callouts, show pattern-based short text
                       if (text.toLowerCase().includes('hairpin')) {
                         shortText = text.includes('DOUBLE') ? '2xHP' : 'HP'
-                        color = '#ef4444' // Always red for hairpins
+                        color = '#ef4444'
                       } else if (text.toLowerCase().includes('chicane')) {
                         shortText = 'CHI'
-                        color = '#f97316' // Orange for chicanes
+                        color = '#f97316'
                       } else if (text.toLowerCase().includes('esses')) {
                         shortText = 'ESS'
                         color = '#f97316'
                       } else if (text.includes('HARD')) {
-                        // e.g., "Left into HARD RIGHT 68°"
                         const hardMatch = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
                         shortText = hardMatch ? `H${hardMatch[1][0]}${hardMatch[2]}` : 'HRD'
                         color = '#ef4444'
                       } else if (text.match(/\d+\s*(left|right)s/i)) {
-                        // e.g., "3 rights, max 25°"
                         const countMatch = text.match(/(\d+)\s*(left|right)s/i)
                         shortText = countMatch ? `${countMatch[1]}${countMatch[2][0].toUpperCase()}` : text.substring(0, 4)
                       } else if (text.toLowerCase().includes('tightens')) {
                         shortText = 'TGT'
                       } else {
-                        // Fallback for other grouped
                         shortText = `G${callout.groupedFrom.length}`
                       }
                     } else {
-                      // Individual callout - extract direction and angle
                       const dirMatch = text.match(/\b(left|right)\b/i)
                       const angleMatch = text.match(/(\d+)/)
                       shortText = dirMatch && angleMatch 
@@ -1666,6 +1654,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     </div>
   )
 }
+
+// ================================
+// HELPER COMPONENTS
+// ================================
 
 // Mini elevation widget
 function MiniElevation({ data, color }) {
