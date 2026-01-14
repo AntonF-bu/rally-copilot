@@ -15,14 +15,14 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { classifyZonesByCurveDensity, convertToZoneFormat, reassignEventZones } from '../services/curveDensityZoneClassifier'
+import { classifyWithVoting, reassignEventZones, convertToStandardFormat } from '../services/votingZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v28
-// NEW: Curve-Density-First Zone Classification
+// Route Preview - v33
+// NEW: Voting Zone Classifier - multiple signals vote on zones
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -261,17 +261,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       window.__roadFlowData = flowResult
       console.log('💡 Access road flow data: window.__roadFlowData')
       
-      // Step 3: Classify zones based on CURVE DENSITY (primary method)
-      console.log('\n🎯 Classifying zones by curve density...')
-      const densityZones = classifyZonesByCurveDensity(
-        coordinates,
+      // Step 3: Classify zones using VOTING system (multiple signals vote)
+      console.log('\n🗳️ Classifying zones with voting system...')
+      const votedZones = classifyWithVoting(
         flowResult.events,
         routeData.distance,
-        censusSegments  // Pass census as fallback for urban detection
+        censusSegments  // Pass census for urban detection at edges
       )
       
-      // Convert to standard zone format
-      const activeZones = convertToZoneFormat(densityZones)
+      // Convert to standard zone format (adds startDistance/endDistance)
+      const activeZones = convertToStandardFormat(votedZones)
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
@@ -279,11 +278,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - curve density is our source of truth now
+      // Skip LLM zone validation - curve pattern detection is our source of truth now
       updateStage('aiZones', 'complete')
       setIsLoadingAI(false)
       
-      // Step 4: Analyze highway bends (using curve-density zones)
+      // Step 4: Analyze highway bends (using pattern-based zones)
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
         updateStage('highway', 'loading')
