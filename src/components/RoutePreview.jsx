@@ -14,13 +14,14 @@ import { dumpHighwayData } from '../services/highwayDataDebug'
 import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlowAnalyzer'
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
+import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v26
-// NEW: Hybrid Callout System (Rule-based + LLM Polish)
+// Route Preview - v27
+// NEW: Speed-Based Callout Grouping (Fast/Standard sets)
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -380,36 +381,53 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 isLLMPolished: finalResult.llmPolished || false
               }))
               
-              // Log sample callouts
-              console.log('\n📍 Sample callouts:')
-              formattedCallouts.slice(0, 10).forEach(c => {
-                console.log(`   Mile ${c.triggerMile?.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]`)
-              })
-              if (formattedCallouts.length > 10) {
-                console.log(`   ... and ${formattedCallouts.length - 10} more`)
-              }
+              // ========================================
+              // STAGE 3: Speed-Based Grouping
+              // ========================================
+              console.log('\n🎯 STAGE 3: Speed-Based Grouping')
+              const groupedSets = generateGroupedCalloutSets(
+                formattedCallouts,
+                { totalMiles: routeData.distance / 1609.34 }
+              )
               
-              setCuratedCallouts(formattedCallouts)
+              console.log(`   Fast set: ${groupedSets.fast.length} callouts (${groupedSets.stats.fastReduction}% reduction)`)
+              console.log(`   Standard set: ${groupedSets.standard.length} callouts (${groupedSets.stats.standardReduction}% reduction)`)
+              
+              // Store grouped sets for runtime selection
+              window.__groupedCallouts = groupedSets
+              console.log('💡 Access grouped callouts: window.__groupedCallouts')
+              
+              // Log sample grouped callouts
+              console.log('\n📍 Standard set sample:')
+              groupedSets.standard.slice(0, 10).forEach(c => {
+                const grouped = c.groupedFrom ? ` [grouped ${c.groupedFrom.length}]` : ''
+                console.log(`   Mile ${c.mile?.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]${grouped}`)
+              })
+              
+              // Use STANDARD set for preview display (most common use case)
+              const displayCallouts = groupedSets.standard
+              
+              setCuratedCallouts(displayCallouts)
               setAgentResult({
                 summary: {
                   summary: finalResult.analysis,
-                  rhythm: 'Hybrid Callout System v1.0',
+                  rhythm: 'Hybrid Callout System v1.1 (with grouping)',
                   difficulty: 'auto'
                 },
                 reasoning: [
                   `Road Flow detected ${flowResult.events.length} events`,
                   `Rule-based filter: ${ruleBasedResult.callouts.length} callouts`,
-                  `Final output: ${formattedCallouts.length} callouts`,
+                  `After grouping: Fast=${groupedSets.fast.length}, Standard=${groupedSets.standard.length}`,
                   finalResult.llmPolished ? 'LLM polish applied' : 'Rule-based text used'
                 ],
                 confidence: 95
               })
               setCurveEnhanced(true)
               
-              // Store in global store for navigation
-              useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+              // Store BOTH sets in global store for navigation runtime selection
+              useStore.getState().setCuratedHighwayCallouts(displayCallouts)
+              useStore.getState().setGroupedCalloutSets?.(groupedSets) // If store supports it
               window.__hybridCallouts = finalResult
-              console.log('💡 Access hybrid callouts: window.__hybridCallouts')
               
             } else {
               console.warn('⚠️ Hybrid system returned no callouts!')
