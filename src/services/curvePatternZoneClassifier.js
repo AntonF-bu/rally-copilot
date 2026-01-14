@@ -93,7 +93,8 @@ function extractMeaningfulCurves(events) {
       return angle >= CONFIG.minAngleToCount
     })
     .map(e => ({
-      mile: e.mile ?? e.triggerMile ?? 0,
+      // Road Flow uses apexMile, startMile, endMile - prefer apexMile
+      mile: e.apexMile ?? e.mile ?? e.triggerMile ?? e.startMile ?? 0,
       angle: e.totalAngle ?? e.angle ?? 0,
       direction: e.direction || 'unknown',
       type: e.type || 'curve'
@@ -362,12 +363,19 @@ export function reassignEventZones(events, zones) {
  * Convert to standard zone format (for compatibility)
  */
 export function convertToZoneFormat(zones) {
-  return zones.map(z => ({
-    start: z.start ?? z.startDistance,
-    end: z.end ?? z.endDistance,
-    character: z.character,
-    reason: z.reason
-  }))
+  console.log('   Converting zones to standard format...')
+  return zones.map((z, i) => {
+    const converted = {
+      start: z.start ?? z.startDistance ?? (z.startMile * 1609.34),
+      end: z.end ?? z.endDistance ?? (z.endMile * 1609.34),
+      startMile: z.startMile,
+      endMile: z.endMile,
+      character: z.character,
+      reason: z.reason
+    }
+    console.log(`      Zone ${i + 1}: ${converted.character} [${converted.startMile?.toFixed(1)}-${converted.endMile?.toFixed(1)}mi] = ${converted.start?.toFixed(0)}-${converted.end?.toFixed(0)}m`)
+    return converted
+  })
 }
 
 export default {
