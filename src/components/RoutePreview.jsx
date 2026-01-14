@@ -400,8 +400,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               // Log sample grouped callouts
               console.log('\n📍 Standard set sample:')
               groupedSets.standard.slice(0, 10).forEach(c => {
+                const mile = c.triggerMile ?? c.mile ?? 0
                 const grouped = c.groupedFrom ? ` [grouped ${c.groupedFrom.length}]` : ''
-                console.log(`   Mile ${c.mile?.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]${grouped}`)
+                console.log(`   Mile ${mile.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]${grouped}`)
               })
               
               // Use STANDARD set for preview display (most common use case)
