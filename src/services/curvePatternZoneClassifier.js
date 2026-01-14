@@ -24,13 +24,14 @@ const CONFIG = {
   minCurvesForCluster: 3,        // Need at least this many curves in the window
   minAvgAngleForCluster: 18,     // Average angle must be meaningful
   
-  // Danger curve override (single curve can trigger technical)
-  dangerAngle: 50,               // Any curve >= this angle triggers technical zone
-  dangerBufferMiles: 0.15,       // Buffer around danger curve
+  // Danger curve override - ONLY extreme turns trigger technical
+  // (single highway exit ramps shouldn't make a section technical)
+  dangerAngle: 70,               // Very severe curves only (was 50)
+  dangerBufferMiles: 0.1,        // Smaller buffer (was 0.15)
   
   // Zone cleanup
   mergeGapMiles: 0.3,            // Merge technical zones that are close
-  minTechnicalLengthMiles: 0.25, // Don't create tiny technical zones
+  minTechnicalLengthMiles: 0.4,  // Don't create tiny technical zones (was 0.25)
   
   // Urban detection (from Census)
   maxUrbanMiles: 1.5,            // Urban zones only at start/end, max this length
@@ -265,6 +266,7 @@ function buildZoneList(technicalZones, totalMiles) {
 
 /**
  * Apply urban zones from Census data (only at route start/end)
+ * Urban OVERRIDES technical at route start/end since city turns != rally technical
  */
 function applyUrbanZones(zones, censusSegments, totalMiles) {
   if (!censusSegments.length) return zones
@@ -279,21 +281,29 @@ function applyUrbanZones(zones, censusSegments, totalMiles) {
       CONFIG.maxUrbanMiles
     )
     
-    // Only apply if first zone is transit
-    if (result[0].character === 'transit' && result[0].startMile === 0) {
-      if (urbanEndMile < result[0].endMile) {
-        // Split the first zone
-        const originalEnd = result[0].endMile
-        result[0].endMile = urbanEndMile
-        result[0].character = 'urban'
-        result[0].reason = 'route start (census)'
-        
-        result.splice(1, 0, createZone(urbanEndMile, originalEnd, 'transit', 'after urban start'))
-      } else {
-        // Entire first zone becomes urban
-        result[0].character = 'urban'
-        result[0].reason = 'route start (census)'
+    // Urban OVERRIDES technical at route start (city turns != rally technical)
+    // Only skip if it's genuinely transit/highway
+    if (result[0].startMile === 0 && urbanEndMile > 0.1) {
+      console.log(`   Applying urban override at route start: 0-${urbanEndMile.toFixed(1)}mi`)
+      
+      // Find all zones that fall within urban range and merge them
+      let insertIdx = 0
+      while (insertIdx < result.length && result[insertIdx].endMile <= urbanEndMile) {
+        insertIdx++
       }
+      
+      if (insertIdx > 0) {
+        // Remove zones fully within urban range
+        result.splice(0, insertIdx)
+      }
+      
+      // If next zone starts before urban end, trim it
+      if (result.length > 0 && result[0].startMile < urbanEndMile) {
+        result[0].startMile = urbanEndMile
+      }
+      
+      // Insert urban zone at start
+      result.unshift(createZone(0, urbanEndMile, 'urban', 'route start (census)'))
     }
   }
   
@@ -305,21 +315,23 @@ function applyUrbanZones(zones, censusSegments, totalMiles) {
       totalMiles - CONFIG.maxUrbanMiles
     )
     
-    const lastIdx = result.length - 1
-    if (result[lastIdx].character === 'transit' && Math.abs(result[lastIdx].endMile - totalMiles) < 0.1) {
-      if (urbanStartMile > result[lastIdx].startMile) {
-        // Split the last zone
-        const originalStart = result[lastIdx].startMile
-        result[lastIdx].startMile = urbanStartMile
-        result[lastIdx].character = 'urban'
-        result[lastIdx].reason = 'route end (census)'
-        
-        result.splice(lastIdx, 0, createZone(originalStart, urbanStartMile, 'transit', 'before urban end'))
-      } else {
-        // Entire last zone becomes urban
-        result[lastIdx].character = 'urban'
-        result[lastIdx].reason = 'route end (census)'
+    if (urbanStartMile < totalMiles - 0.1) {
+      console.log(`   Applying urban override at route end: ${urbanStartMile.toFixed(1)}-${totalMiles.toFixed(1)}mi`)
+      
+      const lastIdx = result.length - 1
+      
+      // Find zones that overlap with urban end range
+      while (result.length > 0 && result[result.length - 1].startMile >= urbanStartMile) {
+        result.pop()
       }
+      
+      // If last remaining zone extends past urban start, trim it
+      if (result.length > 0 && result[result.length - 1].endMile > urbanStartMile) {
+        result[result.length - 1].endMile = urbanStartMile
+      }
+      
+      // Add urban zone at end
+      result.push(createZone(urbanStartMile, totalMiles, 'urban', 'route end (census)'))
     }
   }
   
