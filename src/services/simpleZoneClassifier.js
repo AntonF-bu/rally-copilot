@@ -270,10 +270,27 @@ export function convertToStandardFormat(zones, totalDistanceMeters) {
  * Reassign zone labels to events based on classified zones
  */
 export function reassignEventZones(events, zones) {
-  if (!zones || zones.length === 0) return events
-  if (!events || events.length === 0) return events
+  if (!zones || zones.length === 0) {
+    console.log('📍 reassignEventZones: No zones provided')
+    return events
+  }
+  if (!events || events.length === 0) {
+    console.log('📍 reassignEventZones: No events provided')
+    return events
+  }
+  
+  // Debug: log zone ranges
+  console.log('📍 reassignEventZones: Zone ranges (meters):')
+  zones.forEach((z, i) => {
+    console.log(`   ${i + 1}. ${z.character}: ${z.start?.toFixed(0) || 'N/A'}-${z.end?.toFixed(0) || 'N/A'}m`)
+  })
+  
+  // Debug: log sample event
+  const sampleEvent = events[Math.floor(events.length / 2)]
+  console.log(`📍 Sample event: mile=${sampleEvent.mile}, distance=${sampleEvent.distance}`)
   
   let reassigned = 0
+  let notFound = 0
   
   const updatedEvents = events.map(event => {
     // Get event position in meters
@@ -282,7 +299,10 @@ export function reassignEventZones(events, zones) {
     // Find which zone this event falls into
     const zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
     
-    if (!zone) return event
+    if (!zone) {
+      notFound++
+      return event
+    }
     
     if (event.zone !== zone.character) {
       reassigned++
@@ -295,7 +315,7 @@ export function reassignEventZones(events, zones) {
     }
   })
   
-  console.log(`📍 Reassigned zones to ${reassigned} of ${events.length} events`)
+  console.log(`📍 Reassigned zones: ${reassigned} changed, ${notFound} not found, ${events.length} total`)
   return updatedEvents
 }
 
