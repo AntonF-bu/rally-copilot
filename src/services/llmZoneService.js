@@ -200,7 +200,9 @@ function buildComprehensivePrompt(segments, routeData, curves = []) {
     
     // Find curves in this segment
     const segmentCurves = curves.filter(c => {
-      const curveMile = (c.distance || 0) / 1609.34
+      // Handle both distance and distanceFromStart properties
+      const curveDistanceMeters = c.distance || c.distanceFromStart || 0
+      const curveMile = curveDistanceMeters / 1609.34
       return curveMile >= startMi && curveMile <= endMi
     })
     
