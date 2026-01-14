@@ -1,270 +1,287 @@
 // ================================
-// Simple Zone Classifier v2.0
+// Simple Zone Classifier v3.0
 // 
-// Primary: Road names are AUTHORITATIVE
-// - "I 90" = highway/transit (always)
-// - "Center Street" = technical (always)
-// - State routes = check curves
-//
-// Secondary: Curve analysis fills gaps
-// - Gaps < 0.5mi = inherit from previous zone
-// - Gaps with dense curves = technical
-// - Otherwise = transit
-//
-// ADDED: reassignEventZones for RoutePreview compatibility
+// Core insight: Road names tell you everything, gaps tell you transitions
+// 
+// Rules:
+// 1. Road names are AUTHORITATIVE (I-90 = transit, West Street = technical)
+// 2. Gaps after highways = OFF-RAMPS = TECHNICAL (always!)
+// 3. Gaps after technical = still TECHNICAL
+// 4. State routes: check curve density to decide
+// 5. Urban only at route edges (from census)
 // ================================
-
-/**
- * Configuration
- */
-const CONFIG = {
-  // Gap handling
-  maxGapToInherit: 0.5,        // Gaps smaller than this inherit from previous zone
-  
-  // Curve analysis for state routes and gaps
-  curveLookAheadMiles: 1.0,    // Window to analyze curves
-  minCurvesForTechnical: 3,    // Need this many curves in window
-  minAvgAngleForTechnical: 18, // Average angle must be meaningful
-  minAngleToCount: 12,         // Ignore tiny angles
-  
-  // Urban detection
-  maxUrbanMiles: 1.0,          // Urban zones only at route edges, max this length
-  
-  // Zone cleanup
-  minZoneLengthMiles: 0.3,     // Don't create tiny zones
-}
 
 /**
  * Classify road type from ref and name
  * Returns: 'interstate' | 'us_highway' | 'state_route' | 'local' | 'unknown'
  */
-function classifyRoad(ref, name) {
-  const refUpper = (ref || '').toUpperCase()
-  const nameUpper = (name || '').toUpperCase()
+function classifyRoadType(ref, name) {
+  const refUpper = (ref || '').toUpperCase().trim()
+  const nameUpper = (name || '').toUpperCase().trim()
   
   // Interstate: I-90, I 90, I90
   if (refUpper.match(/^I[\s-]?\d+/)) {
     return 'interstate'
   }
   
-  // US Highway: US-9, US 9, US9
-  if (refUpper.match(/^US[\s-]?\d+/)) {
+  // US Highway: US-9, US 9, US9, U.S. 9
+  if (refUpper.match(/^U\.?S\.?[\s-]?\d+/)) {
     return 'us_highway'
   }
   
-  // State Route: MA-9, MA 9, NY-17
-  if (refUpper.match(/^[A-Z]{2}[\s-]?\d+/)) {
+  // State Route: MA-9, MA 9, NY-17, Route 66
+  if (refUpper.match(/^[A-Z]{2}[\s-]?\d+/) || refUpper.match(/^(ROUTE|RT\.?|RTE\.?)[\s-]?\d+/i)) {
     return 'state_route'
   }
   
-  // Turnpikes/Parkways = highway-like
+  // Highway-like names
   if (nameUpper.includes('TURNPIKE') || 
       nameUpper.includes('PARKWAY') || 
       nameUpper.includes('EXPRESSWAY') ||
       nameUpper.includes('FREEWAY') ||
-      nameUpper.includes('THRUWAY')) {
+      nameUpper.includes('THRUWAY') ||
+      nameUpper.includes('INTERSTATE')) {
     return 'us_highway'
   }
   
-  // If has a name but no ref, it's local
-  if (name && !ref) {
+  // Has a name = local road
+  if (name && name.length > 0) {
     return 'local'
   }
   
+  // No ref, no name = unknown (probably ramp or connector)
   return 'unknown'
 }
 
 /**
- * Check if a mile range has dense curves (technical characteristics)
+ * Check if road class is highway-like
  */
-function hasDenseCurves(startMile, endMile, curves) {
-  if (!curves || curves.length === 0) return false
+function isHighwayClass(roadClass) {
+  return roadClass === 'interstate' || roadClass === 'us_highway'
+}
+
+/**
+ * Analyze curves in a mile range to determine if it's technical
+ * Used for state routes and ambiguous sections
+ */
+function analyzeCurvesInRange(curves, startMile, endMile) {
+  if (!curves || curves.length === 0) {
+    return { curveCount: 0, curvesPerMile: 0, avgAngle: 0, maxAngle: 0, hasDanger: false }
+  }
   
   const curvesInRange = curves.filter(c => {
-    const mile = c.mile ?? c.apexMile ?? 0
-    const angle = c.angle ?? c.totalAngle ?? 0
-    return mile >= startMile && mile <= endMile && angle >= CONFIG.minAngleToCount
+    const mile = c.mile ?? c.triggerMile ?? (c.distance / 1609.34) ?? 0
+    return mile >= startMile && mile < endMile
   })
   
-  if (curvesInRange.length < CONFIG.minCurvesForTechnical) {
-    return false
-  }
+  const length = endMile - startMile
+  const curveCount = curvesInRange.length
+  const curvesPerMile = length > 0 ? curveCount / length : 0
   
-  const avgAngle = curvesInRange.reduce((sum, c) => sum + (c.angle ?? c.totalAngle ?? 0), 0) / curvesInRange.length
-  return avgAngle >= CONFIG.minAvgAngleForTechnical
+  const angles = curvesInRange.map(c => c.angle ?? c.totalAngle ?? 0)
+  const avgAngle = angles.length > 0 ? angles.reduce((a, b) => a + b, 0) / angles.length : 0
+  const maxAngle = angles.length > 0 ? Math.max(...angles) : 0
+  const hasDanger = maxAngle >= 45
+  
+  return { curveCount, curvesPerMile, avgAngle, maxAngle, hasDanger }
 }
 
 /**
- * Get zone character for state routes based on curves
+ * Determine zone for a state route based on curve characteristics
  */
 function classifyStateRoute(startMile, endMile, curves) {
-  // Look at curves in this segment + a bit beyond
-  const lookEnd = endMile + CONFIG.curveLookAheadMiles
+  const stats = analyzeCurvesInRange(curves, startMile, endMile)
   
-  if (hasDenseCurves(startMile, lookEnd, curves)) {
-    return 'technical'
+  // If very few curves and gentle = highway-like state route
+  if (stats.curvesPerMile < 1.5 && stats.avgAngle < 25 && !stats.hasDanger) {
+    return 'transit'
   }
   
-  // No dense curves = treat as transit (boring state highway)
-  return 'transit'
+  // Otherwise = fun twisty state route
+  return 'technical'
 }
 
 /**
- * Determine zone character from road classification
+ * Classify a gap based on what's before and after it
+ * 
+ * Key insight: Gap after highway = OFF-RAMP = always technical!
  */
-function roadToZone(roadClass, startMile, endMile, curves) {
-  switch (roadClass) {
-    case 'interstate':
-      return 'transit'    // Interstates are ALWAYS transit
-    case 'us_highway':
-      return 'transit'    // US highways are almost always transit
-    case 'state_route':
-      return classifyStateRoute(startMile, endMile, curves)
-    case 'local':
-      return 'technical'  // Local roads = technical
-    case 'unknown':
-      // Unknown roads - check curves
-      return hasDenseCurves(startMile, endMile, curves) ? 'technical' : 'transit'
-    default:
-      return 'transit'    // Default safe
+function classifyGap(prevSegment, nextSegment, gapStart, gapEnd, curves) {
+  const prevClass = prevSegment?.roadClass || 'unknown'
+  const nextClass = nextSegment?.roadClass || 'unknown'
+  const prevZone = prevSegment?.zone || 'technical'
+  const nextZone = nextSegment?.zone || 'technical'
+  
+  const gapLength = gapEnd - gapStart
+  
+  // Coming OFF a highway → OFF-RAMP → TECHNICAL
+  if (isHighwayClass(prevClass)) {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (off-ramp from ${prevClass})`)
+    return { zone: 'technical', reason: 'off-ramp' }
   }
+  
+  // Going ONTO a highway → ON-RAMP → TECHNICAL  
+  if (isHighwayClass(nextClass)) {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (on-ramp to ${nextClass})`)
+    return { zone: 'technical', reason: 'on-ramp' }
+  }
+  
+  // Between two technical zones → TECHNICAL
+  if (prevZone === 'technical' && nextZone === 'technical') {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (between technical zones)`)
+    return { zone: 'technical', reason: 'inherited' }
+  }
+  
+  // Between two transit zones → TRANSIT
+  if (prevZone === 'transit' && nextZone === 'transit') {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TRANSIT (between transit zones)`)
+    return { zone: 'transit', reason: 'inherited' }
+  }
+  
+  // Mixed - default to technical (safer to over-warn)
+  console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (default for mixed transition)`)
+  return { zone: 'technical', reason: 'default' }
 }
 
 /**
  * Main entry: Classify zones from road segments
  * 
  * @param {Array} roadSegments - From extractRoadRefs() in routeService
- *   Each segment: { startMile, endMile, ref, name, roadClass }
- * @param {number} totalMiles - Total route length
- * @param {Array} curves - Optional curve data for gap filling (from flow events or curve detection)
- * @returns {Array} Zones: [{ startMile, endMile, character, road }]
+ * @param {number} totalMiles - Total route length in miles
+ * @param {Array} curves - Optional curve data for state route analysis
+ * @returns {Array} Zones: [{ startMile, endMile, character, road, reason }]
  */
 export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
-  console.log('🛣️ Simple Zone Classifier v2.0')
+  console.log('🛣️ Simple Zone Classifier v3.0')
   console.log(`   Road segments: ${roadSegments?.length || 0}`)
   console.log(`   Total miles: ${totalMiles?.toFixed(1)}`)
-  console.log(`   Curves for gap analysis: ${curves?.length || 0}`)
+  console.log(`   Curves for analysis: ${curves?.length || 0}`)
   
   if (!roadSegments || roadSegments.length === 0) {
-    console.log('   ⚠️ No road segments - using curve analysis only')
-    const character = hasDenseCurves(0, totalMiles, curves) ? 'technical' : 'transit'
+    console.log('   ⚠️ No road segments - defaulting to technical')
     return [{
       startMile: 0,
       endMile: totalMiles,
-      character,
-      road: 'unknown'
+      character: 'technical',
+      road: 'unknown',
+      reason: 'no road data'
     }]
   }
   
-  // Log what we got
+  // Log input segments
   console.log('   Road segments:')
   roadSegments.forEach(seg => {
     const roadName = seg.ref || seg.name || 'unnamed'
     console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})`)
   })
   
-  // Step 1: Convert each road segment to a zone with curve analysis for state routes
-  const rawZones = roadSegments.map(seg => {
-    const character = roadToZone(seg.roadClass, seg.startMile, seg.endMile, curves)
+  // ========================================
+  // STEP 1: Classify each road segment
+  // ========================================
+  const classifiedSegments = roadSegments.map(seg => {
+    const roadClass = seg.roadClass || classifyRoadType(seg.ref, seg.name)
+    let zone
+    let reason
+    
+    switch (roadClass) {
+      case 'interstate':
+        zone = 'transit'
+        reason = 'interstate'
+        break
+      case 'us_highway':
+        zone = 'transit'
+        reason = 'US highway'
+        break
+      case 'state_route':
+        // State routes need curve analysis
+        zone = classifyStateRoute(seg.startMile, seg.endMile, curves)
+        reason = zone === 'transit' ? 'state route (highway-like)' : 'state route (twisty)'
+        break
+      case 'local':
+        zone = 'technical'
+        reason = 'local road'
+        break
+      default:
+        zone = 'technical'
+        reason = 'unknown road type'
+    }
+    
     return {
-      startMile: seg.startMile,
-      endMile: seg.endMile,
-      character,
-      road: seg.ref || seg.name || 'unnamed',
-      roadClass: seg.roadClass
+      ...seg,
+      roadClass,
+      zone,
+      reason
     }
   })
   
-  // Step 2: Fill gaps between segments
-  const zonesWithGaps = fillGaps(rawZones, totalMiles, curves)
-  
-  // Step 3: Merge adjacent zones with same character
-  const mergedZones = mergeAdjacentZones(zonesWithGaps)
-  
-  // Step 4: Clean up tiny zones
-  const cleanedZones = cleanupTinyZones(mergedZones)
-  
-  // Step 5: Apply urban at route edges
-  const finalZones = applyUrbanEdges(cleanedZones, totalMiles)
-  
-  // Log results
-  console.log('   Final zones:')
-  finalZones.forEach((z, i) => {
-    console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.road})`)
-  })
-  
-  return finalZones
-}
-
-/**
- * Fill gaps between road segments
- */
-function fillGaps(zones, totalMiles, curves) {
-  if (zones.length === 0) return zones
-  
-  const result = []
+  // ========================================
+  // STEP 2: Build complete zone coverage (fill gaps)
+  // ========================================
+  const zones = []
   let currentMile = 0
   
-  // Sort zones by start mile
-  const sorted = [...zones].sort((a, b) => a.startMile - b.startMile)
-  
-  for (const zone of sorted) {
-    // Check for gap before this zone
-    if (zone.startMile > currentMile + 0.01) {
-      const gapStart = currentMile
-      const gapEnd = zone.startMile
-      const gapLength = gapEnd - gapStart
-      
-      let gapCharacter
-      let gapReason
-      
-      if (gapLength <= CONFIG.maxGapToInherit && result.length > 0) {
-        // Small gap - inherit from previous zone
-        gapCharacter = result[result.length - 1].character
-        gapReason = 'inherited from previous'
-      } else if (result.length > 0 && zone.character === result[result.length - 1].character) {
-        // Gap between same-type zones - inherit
-        gapCharacter = zone.character
-        gapReason = 'same neighbors'
-      } else {
-        // Use curve analysis
-        gapCharacter = hasDenseCurves(gapStart, gapEnd, curves) ? 'technical' : 'transit'
-        gapReason = gapCharacter === 'technical' ? 'dense curves in gap' : 'no curves in gap'
-      }
-      
-      console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: ${gapCharacter.toUpperCase()} (${gapReason})`)
-      
-      result.push({
-        startMile: gapStart,
-        endMile: gapEnd,
-        character: gapCharacter,
-        road: 'gap',
-        roadClass: 'gap'
+  for (let i = 0; i < classifiedSegments.length; i++) {
+    const seg = classifiedSegments[i]
+    const prevSeg = i > 0 ? classifiedSegments[i - 1] : null
+    
+    // Check for gap before this segment
+    if (seg.startMile > currentMile + 0.01) {
+      // There's a gap - classify it
+      const gapResult = classifyGap(prevSeg, seg, currentMile, seg.startMile, curves)
+      zones.push({
+        startMile: currentMile,
+        endMile: seg.startMile,
+        character: gapResult.zone,
+        road: `[gap: ${gapResult.reason}]`,
+        reason: gapResult.reason,
+        isGap: true
       })
     }
     
-    result.push(zone)
-    currentMile = zone.endMile
+    // Add this segment
+    zones.push({
+      startMile: seg.startMile,
+      endMile: seg.endMile,
+      character: seg.zone,
+      road: seg.ref || seg.name || 'unnamed',
+      reason: seg.reason,
+      roadClass: seg.roadClass
+    })
+    
+    currentMile = seg.endMile
   }
   
-  // Check for gap at end
+  // Check for gap at end of route
   if (currentMile < totalMiles - 0.01) {
-    const gapStart = currentMile
-    const gapEnd = totalMiles
-    const gapCharacter = hasDenseCurves(gapStart, gapEnd, curves) ? 'technical' : 'transit'
-    
-    console.log(`   📍 End gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: ${gapCharacter.toUpperCase()}`)
-    
-    result.push({
-      startMile: gapStart,
-      endMile: gapEnd,
-      character: gapCharacter,
-      road: 'end',
-      roadClass: 'unknown'
+    const lastSeg = classifiedSegments[classifiedSegments.length - 1]
+    // End gap - inherit from last segment, unless it was highway (then it's an off-ramp scenario)
+    const endZone = isHighwayClass(lastSeg?.roadClass) ? 'technical' : (lastSeg?.zone || 'technical')
+    console.log(`   📍 End gap ${currentMile.toFixed(1)}-${totalMiles.toFixed(1)}mi: ${endZone.toUpperCase()}`)
+    zones.push({
+      startMile: currentMile,
+      endMile: totalMiles,
+      character: endZone,
+      road: '[end of route]',
+      reason: 'end gap',
+      isGap: true
     })
   }
   
-  return result
+  // ========================================
+  // STEP 3: Merge adjacent zones with same character
+  // ========================================
+  const mergedZones = mergeAdjacentZones(zones)
+  
+  // ========================================
+  // STEP 4: Log final result
+  // ========================================
+  console.log('   Final zones:')
+  mergedZones.forEach((z, i) => {
+    const length = (z.endMile - z.startMile).toFixed(1)
+    console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.road}) [${length}mi]`)
+  })
+  
+  return mergedZones
 }
 
 /**
@@ -282,10 +299,11 @@ function mergeAdjacentZones(zones) {
     if (next.character === current.character) {
       // Extend current zone
       current.endMile = next.endMile
-      // Keep the more significant road name (prefer refs over gap markers)
-      if (next.road !== 'gap' && next.road !== 'end' && (current.road === 'gap' || current.road === 'end')) {
+      // Keep the more descriptive road name (prefer actual names over gap markers)
+      if (!current.road.startsWith('[') && next.road.startsWith('[')) {
+        // Keep current road name
+      } else if (current.road.startsWith('[') && !next.road.startsWith('[')) {
         current.road = next.road
-        current.roadClass = next.roadClass
       }
     } else {
       // Save current, start new
@@ -299,89 +317,83 @@ function mergeAdjacentZones(zones) {
 }
 
 /**
- * Clean up tiny zones by merging with neighbors
- */
-function cleanupTinyZones(zones) {
-  if (zones.length <= 1) return zones
-  
-  const result = []
-  
-  for (let i = 0; i < zones.length; i++) {
-    const zone = zones[i]
-    const length = zone.endMile - zone.startMile
-    
-    if (length < CONFIG.minZoneLengthMiles) {
-      // Zone is too small
-      if (result.length > 0) {
-        // Merge with previous
-        result[result.length - 1].endMile = zone.endMile
-      } else if (i < zones.length - 1) {
-        // Merge with next
-        zones[i + 1].startMile = zone.startMile
-      } else {
-        // Only zone, keep it
-        result.push(zone)
-      }
-    } else {
-      result.push(zone)
-    }
-  }
-  
-  return result
-}
-
-/**
- * Apply urban zone at route edges if appropriate
- */
-function applyUrbanEdges(zones, totalMiles) {
-  if (zones.length === 0) return zones
-  
-  const result = [...zones]
-  const first = result[0]
-  
-  // If route starts with local/technical roads, call it urban for first mile
-  if (first.roadClass === 'local' && first.startMile === 0 && first.character === 'technical') {
-    const urbanEnd = Math.min(CONFIG.maxUrbanMiles, first.endMile)
-    
-    if (urbanEnd < first.endMile) {
-      // Split: urban + rest of first zone
-      result.splice(0, 1,
-        {
-          startMile: 0,
-          endMile: urbanEnd,
-          character: 'urban',
-          road: first.road,
-          roadClass: first.roadClass
-        },
-        {
-          ...first,
-          startMile: urbanEnd
-        }
-      )
-    } else {
-      // Entire first zone is urban
-      result[0] = { ...first, character: 'urban' }
-    }
-  }
-  
-  return result
-}
-
-/**
  * Convert zones to standard format for the rest of the app
+ * Includes both mile and meter values for compatibility
  */
 export function convertToStandardFormat(zones, totalDistanceMeters) {
   return zones.map(z => ({
+    // Meter values (for distance calculations)
     start: z.startMile * 1609.34,
     end: z.endMile * 1609.34,
     startDistance: z.startMile * 1609.34,
     endDistance: z.endMile * 1609.34,
+    // Mile values (for display and mile-based lookups)
     startMile: z.startMile,
     endMile: z.endMile,
+    // Zone info
     character: z.character,
     lengthMiles: z.endMile - z.startMile,
-    road: z.road
+    road: z.road,
+    reason: z.reason
   }))
+}
+
+/**
+ * Reassign zone labels to events based on classified zones
+ * Call this after zone classification to update all event.zone values
+ * 
+ * @param {Array} events - Events from Road Flow Analyzer (have .distance in meters or .mile)
+ * @param {Array} zones - Classified zones (from convertToStandardFormat, have .start/.end in meters)
+ * @returns {Array} Events with corrected zone assignments
+ */
+export function reassignEventZones(events, zones) {
+  if (!zones || zones.length === 0) return events
+  if (!events || events.length === 0) return events
+  
+  let reassigned = 0
+  
+  const updatedEvents = events.map(event => {
+    // Get event position in meters
+    const eventDistance = event.distance ?? (event.mile * 1609.34) ?? 0
+    
+    // Find which zone this event falls into
+    const zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
+    
+    if (!zone) {
+      // Event outside all zones - keep original or default to technical
+      return event
+    }
+    
+    if (event.zone !== zone.character) {
+      reassigned++
+    }
+    
+    return {
+      ...event,
+      zone: zone.character,
+      zoneType: zone.character  // Some code uses zoneType
+    }
+  })
+  
+  console.log(`📍 Reassigned zones to ${reassigned} of ${events.length} events`)
+  return updatedEvents
+}
+
+/**
+ * Extract curve-like events for analysis
+ * Converts Road Flow events to simple curve format for state route classification
+ */
+export function extractCurvesFromEvents(events) {
+  if (!events || events.length === 0) return []
+  
+  return events
+    .filter(e => (e.angle ?? e.totalAngle ?? 0) >= 10)  // Only meaningful curves
+    .map(e => ({
+      mile: e.mile ?? (e.distance / 1609.34) ?? 0,
+      angle: e.angle ?? e.totalAngle ?? 0,
+      direction: e.direction || 'unknown',
+      type: e.type || 'curve'
+    }))
 }
 
 /**
@@ -392,63 +404,17 @@ export function getZoneAtMile(mile, zones) {
 }
 
 /**
- * Reassign zone character to flow events based on classified zones
- * This is needed for RoutePreview to update event zones after classification
- * 
- * @param {Array} events - Events from Road Flow Analyzer (with mile, angle, direction)
- * @param {Array} zones - Classified zones from classifyByRoadName or convertToStandardFormat
- * @returns {Array} Events with updated zone assignments
+ * Get zone at a specific distance (meters)
  */
-export function reassignEventZones(events, zones) {
-  if (!events || !events.length) return events
-  if (!zones || !zones.length) return events
-  
-  let reassigned = 0
-  
-  const updatedEvents = events.map(event => {
-    // Get mile position from event (different properties depending on source)
-    const mile = event.mile ?? event.triggerMile ?? event.apexMile ?? 
-                 (event.distance ? event.distance / 1609.34 : 0)
-    
-    // Find which zone this event falls into
-    const zone = zones.find(z => {
-      const start = z.startMile ?? (z.start / 1609.34) ?? (z.startDistance / 1609.34) ?? 0
-      const end = z.endMile ?? (z.end / 1609.34) ?? (z.endDistance / 1609.34) ?? 0
-      return mile >= start && mile < end
-    })
-    
-    const newZone = zone?.character || 'transit'
-    
-    if (event.zone !== newZone) {
-      reassigned++
-      return { ...event, zone: newZone }
-    }
-    
-    return event
-  })
-  
-  console.log(`📍 Reassigned zones to ${reassigned} of ${events.length} events`)
-  return updatedEvents
-}
-
-/**
- * Extract curves from flow events for gap analysis
- * Normalizes different event formats
- */
-export function extractCurvesFromEvents(flowEvents) {
-  if (!flowEvents || !flowEvents.length) return []
-  
-  return flowEvents.map(e => ({
-    mile: e.mile ?? e.apexMile ?? e.startMile ?? (e.distance ? e.distance / 1609.34 : 0),
-    angle: e.angle ?? e.totalAngle ?? 0,
-    direction: e.direction || 'UNKNOWN'
-  })).filter(c => c.angle >= CONFIG.minAngleToCount)
+export function getZoneAtDistance(distance, zones) {
+  return zones.find(z => distance >= z.start && distance < z.end) || null
 }
 
 export default {
   classifyByRoadName,
   convertToStandardFormat,
-  getZoneAtMile,
   reassignEventZones,
-  extractCurvesFromEvents
+  extractCurvesFromEvents,
+  getZoneAtMile,
+  getZoneAtDistance
 }
