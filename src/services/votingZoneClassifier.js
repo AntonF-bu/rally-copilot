@@ -31,6 +31,13 @@ const WEIGHTS = {
   
   // Pro-Urban signals (only at route start/end)
   censusSaysUrban: 10,    // Census urban at route edges - STRONG override
+  
+  // Road class signals (from Mapbox) - STRONG signals
+  roadClassMotorway: 8,   // motorway/trunk = definitely highway/transit
+  roadClassPrimary: 4,    // primary = likely highway
+  roadClassSecondary: -2, // secondary = could be technical (negative = pro-technical)
+  roadClassTertiary: -4,  // tertiary/residential = likely technical
+  roadClassResidential: -3, // residential in urban areas
 }
 
 /**
@@ -80,23 +87,32 @@ function createZone(startMile, endMile, character, score, reasons) {
 
 /**
  * Main entry point
+ * Now accepts coordinates and mapboxToken for road class lookups
  */
-export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = []) {
+export async function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🗳️ Voting Zone Classifier v1.0')
+  console.log('🗳️ Voting Zone Classifier v1.1 (with road class)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
   
   // Step 1: Extract meaningful curves
   const curves = extractCurves(flowEvents)
   console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
   
+  // Step 1b: Fetch road class data (if we have coordinates and token)
+  let roadClasses = new Map()
+  if (coordinates && coordinates.length > 0 && mapboxToken) {
+    roadClasses = await fetchRoadClasses(coordinates, totalMiles, mapboxToken)
+  } else {
+    console.log('   ⚠️ Road class lookup skipped (no coords/token)')
+  }
+  
   // Step 2: Build voting windows along the route
   const windows = buildVotingWindows(curves, totalMiles, censusSegments)
   console.log(`   Analysis windows: ${windows.length}`)
   
-  // Step 3: Score each window
-  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles))
+  // Step 3: Score each window (now with road classes)
+  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles, roadClasses))
   
   // Step 4: Determine character for each window
   const classifiedWindows = scoredWindows.map(classifyWindow)
@@ -178,6 +194,76 @@ function extractCurves(flowEvents) {
 }
 
 /**
+ * Fetch road class data from Mapbox for sample points along route
+ * Returns a Map of mile -> roadClass
+ */
+async function fetchRoadClasses(coordinates, totalMiles, mapboxToken) {
+  const roadClasses = new Map()
+  
+  if (!mapboxToken || !coordinates || coordinates.length < 2) {
+    console.log('   ⚠️ No Mapbox token or coordinates for road class lookup')
+    return roadClasses
+  }
+  
+  // Sample every 2 miles (to limit API calls)
+  const sampleInterval = 2 // miles
+  const numSamples = Math.ceil(totalMiles / sampleInterval) + 1
+  const coordsPerMile = coordinates.length / totalMiles
+  
+  console.log(`   🛣️ Fetching road classes for ${numSamples} sample points...`)
+  
+  // Batch requests to avoid rate limiting
+  const batchSize = 10
+  const batches = []
+  
+  for (let i = 0; i < numSamples; i++) {
+    const mile = i * sampleInterval
+    const coordIndex = Math.min(Math.floor(mile * coordsPerMile), coordinates.length - 1)
+    const coord = coordinates[coordIndex]
+    
+    if (coord && coord.length >= 2) {
+      batches.push({ mile, lng: coord[0], lat: coord[1] })
+    }
+  }
+  
+  // Process in batches
+  for (let b = 0; b < batches.length; b += batchSize) {
+    const batch = batches.slice(b, b + batchSize)
+    
+    await Promise.all(batch.map(async ({ mile, lng, lat }) => {
+      try {
+        const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json?layers=road&limit=1&access_token=${mapboxToken}`
+        const response = await fetch(url)
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.features && data.features.length > 0) {
+            const props = data.features[0].properties
+            const roadClass = props.class || 'unknown'
+            roadClasses.set(mile, roadClass)
+          }
+        }
+      } catch (err) {
+        // Silently fail for individual points
+      }
+    }))
+    
+    // Small delay between batches
+    if (b + batchSize < batches.length) {
+      await new Promise(r => setTimeout(r, 100))
+    }
+  }
+  
+  console.log(`   ✅ Road class data: ${roadClasses.size} samples`)
+  if (roadClasses.size > 0) {
+    const sample = Array.from(roadClasses.entries()).slice(0, 5)
+    console.log(`   Sample: ${sample.map(([m, c]) => `${m}mi:${c}`).join(', ')}`)
+  }
+  
+  return roadClasses
+}
+
+/**
  * Build sliding windows along the route
  */
 function buildVotingWindows(curves, totalMiles, censusSegments) {
@@ -200,7 +286,7 @@ function buildVotingWindows(curves, totalMiles, censusSegments) {
 /**
  * Score a window with all voting signals
  */
-function scoreWindow(window, allCurves, censusSegments, totalMiles) {
+function scoreWindow(window, allCurves, censusSegments, totalMiles, roadClasses = new Map()) {
   const { startMile, endMile, midMile } = window
   const score = { technical: 0, transit: 0, urban: 0 }
   const reasons = []
@@ -214,6 +300,52 @@ function scoreWindow(window, allCurves, censusSegments, totalMiles) {
   
   const curvesInClusterWindow = allCurves.filter(c => c.mile >= startMile && c.mile < clusterEnd)
   const curvesInSustainedWindow = allCurves.filter(c => c.mile >= startMile && c.mile < sustainedEnd)
+  
+  // === ROAD CLASS SIGNALS (strongest!) ===
+  
+  // Find the nearest road class sample for this window
+  let nearestRoadClass = null
+  let nearestDist = Infinity
+  
+  for (const [mile, roadClass] of roadClasses) {
+    const dist = Math.abs(mile - midMile)
+    if (dist < nearestDist) {
+      nearestDist = dist
+      nearestRoadClass = roadClass
+    }
+  }
+  
+  if (nearestRoadClass && nearestDist < 3) { // Within 3 miles of sample
+    switch (nearestRoadClass) {
+      case 'motorway':
+      case 'motorway_link':
+      case 'trunk':
+      case 'trunk_link':
+        score.transit += WEIGHTS.roadClassMotorway
+        reasons.push(`road: ${nearestRoadClass}`)
+        break
+      case 'primary':
+      case 'primary_link':
+        score.transit += WEIGHTS.roadClassPrimary
+        reasons.push(`road: ${nearestRoadClass}`)
+        break
+      case 'secondary':
+      case 'secondary_link':
+        score.technical += Math.abs(WEIGHTS.roadClassSecondary)
+        reasons.push(`road: ${nearestRoadClass}`)
+        break
+      case 'tertiary':
+      case 'tertiary_link':
+        score.technical += Math.abs(WEIGHTS.roadClassTertiary)
+        reasons.push(`road: ${nearestRoadClass}`)
+        break
+      case 'residential':
+      case 'service':
+        score.technical += Math.abs(WEIGHTS.roadClassResidential)
+        reasons.push(`road: ${nearestRoadClass}`)
+        break
+    }
+  }
   
   // === TECHNICAL SIGNALS ===
   
