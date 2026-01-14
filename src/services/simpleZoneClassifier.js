@@ -306,9 +306,27 @@ export function getZoneAtDistance(distance, zones) {
   return zones.find(z => distance >= z.start && distance < z.end) || null
 }
 
+/**
+ * Extract curve-like events for analysis (legacy compatibility)
+ * Not used by v4 classifier but may be needed by other components
+ */
+export function extractCurvesFromEvents(events) {
+  if (!events || events.length === 0) return []
+  
+  return events
+    .filter(e => (e.angle ?? e.totalAngle ?? 0) >= 10)
+    .map(e => ({
+      mile: e.mile ?? (e.distance / 1609.34) ?? 0,
+      angle: e.angle ?? e.totalAngle ?? 0,
+      direction: e.direction || 'unknown',
+      type: e.type || 'curve'
+    }))
+}
+
 export default {
   classifyByRoadName,
   convertToStandardFormat,
   reassignEventZones,
-  getZoneAtDistance
+  getZoneAtDistance,
+  extractCurvesFromEvents
 }
