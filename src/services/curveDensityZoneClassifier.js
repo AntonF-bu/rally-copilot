@@ -1,5 +1,5 @@
 // ================================
-// Curve-Density Zone Classifier v1.0
+// Curve-Density Zone Classifier v1.1
 // 
 // PRIMARY: Use curve density to classify zones
 // SECONDARY: Use Census data only as tie-breaker
@@ -13,18 +13,19 @@
  * Based on curves per mile and curve severity
  */
 const ZONE_THRESHOLDS = {
-  // Technical: High curve density with significant angles
+  // Technical: High curve density OR significant angles
   technical: {
-    minCurvesPerMile: 2.5,      // 2.5+ curves/mile = technical
-    minAvgAngle: 15,            // Average angle should be meaningful
-    orDangerCount: 2,           // OR 2+ danger curves in segment = technical
-    orMaxAngle: 60              // OR any curve 60°+ = technical segment
+    minCurvesPerMile: 2.0,      // 2+ curves/mile = likely technical
+    minAvgAngle: 12,            // Average angle should be meaningful (lowered from 15)
+    orDangerCount: 1,           // OR 1+ danger curves in window = technical (lowered from 2)
+    orMaxAngle: 45,             // OR any curve 45°+ = technical segment (lowered from 60)
+    orSignificantCount: 2       // OR 2+ significant curves in 0.5mi window
   },
   
   // Highway/Transit: Low curve density, gentle curves
   highway: {
-    maxCurvesPerMile: 1.5,      // Less than 1.5 curves/mile
-    maxAvgAngle: 25,            // Gentle sweepers only
+    maxCurvesPerMile: 1.0,      // Less than 1 curve/mile (lowered from 1.5)
+    maxAvgAngle: 20,            // Gentle sweepers only (lowered from 25)
   },
   
   // Urban: First/last segments in populated areas
@@ -49,7 +50,7 @@ const MIN_SEGMENT_LENGTH = 0.3
  * @returns {Array} Classified zone segments
  */
 export function classifyZonesByCurveDensity(coordinates, flowEvents, totalDistance, censusSegments = []) {
-  console.log('🎯 Curve-Density Zone Classifier v1.0')
+  console.log('🎯 Curve-Density Zone Classifier v1.1')
   
   const totalMiles = totalDistance / 1609.34
   
@@ -58,13 +59,28 @@ export function classifyZonesByCurveDensity(coordinates, flowEvents, totalDistan
   const windows = createAnalysisWindows(flowEvents, totalMiles, windowSize)
   
   console.log(`   Total distance: ${totalMiles.toFixed(1)} miles`)
+  console.log(`   Total events: ${flowEvents.length}`)
   console.log(`   Analysis windows: ${windows.length}`)
+  
+  // Debug: Show some window stats
+  const windowsWithCurves = windows.filter(w => w.curveCount > 0)
+  const windowsWithDanger = windows.filter(w => w.dangerCount > 0)
+  const windowsWithSignificant = windows.filter(w => w.significantCount >= 2)
+  console.log(`   Windows with curves: ${windowsWithCurves.length}`)
+  console.log(`   Windows with danger curves: ${windowsWithDanger.length}`)
+  console.log(`   Windows with 2+ significant: ${windowsWithSignificant.length}`)
   
   // Step 2: Classify each window based on curve density
   const classifiedWindows = windows.map(w => classifyWindow(w))
   
+  // Debug: Count classifications
+  const technicalWindows = classifiedWindows.filter(w => w.character === 'technical')
+  const transitWindows = classifiedWindows.filter(w => w.character === 'transit')
+  console.log(`   Classified: ${technicalWindows.length} technical, ${transitWindows.length} transit`)
+  
   // Step 3: Merge adjacent windows with same classification
   const rawSegments = mergeAdjacentWindows(classifiedWindows)
+  console.log(`   After merging: ${rawSegments.length} segments`)
   
   // Step 4: Apply urban detection for first/last segments
   const withUrban = applyUrbanDetection(rawSegments, censusSegments, totalMiles)
@@ -77,7 +93,7 @@ export function classifyZonesByCurveDensity(coordinates, flowEvents, totalDistan
   
   console.log(`   Final segments: ${output.length}`)
   output.forEach((s, i) => {
-    console.log(`   ${i + 1}. [${s.startMile.toFixed(1)} - ${s.endMile.toFixed(1)} mi] ${s.character.toUpperCase()} (${(s.endMile - s.startMile).toFixed(1)} mi)`)
+    console.log(`   ${i + 1}. [${s.startMile.toFixed(1)} - ${s.endMile.toFixed(1)} mi] ${s.character.toUpperCase()} (${(s.endMile - s.startMile).toFixed(1)} mi) - ${s.reason || 'merged'}`)
   })
   
   return output
@@ -133,34 +149,40 @@ function classifyWindow(window) {
   const t = ZONE_THRESHOLDS
   
   // Technical classification (highest priority)
-  // High curve density
-  if (curvesPerMile >= t.technical.minCurvesPerMile && avgAngle >= t.technical.minAvgAngle) {
-    return { ...window, character: 'technical', reason: `${curvesPerMile.toFixed(1)} curves/mi, avg ${avgAngle.toFixed(0)}°` }
-  }
   
-  // Multiple danger curves
+  // Any danger curve = technical
   if (dangerCount >= t.technical.orDangerCount) {
-    return { ...window, character: 'technical', reason: `${dangerCount} danger curves` }
+    return { ...window, character: 'technical', reason: `${dangerCount} danger curve(s)` }
   }
   
-  // Any very sharp curve
+  // Any very sharp curve = technical
   if (maxAngle >= t.technical.orMaxAngle) {
     return { ...window, character: 'technical', reason: `max angle ${maxAngle}°` }
   }
   
-  // Multiple significant curves in short distance
-  if (significantCount >= 3 && window.length <= 0.5) {
-    return { ...window, character: 'technical', reason: `${significantCount} significant curves in ${window.length.toFixed(1)}mi` }
+  // Multiple significant curves = technical
+  if (significantCount >= t.technical.orSignificantCount) {
+    return { ...window, character: 'technical', reason: `${significantCount} significant curves` }
   }
   
-  // Highway classification
+  // High curve density with meaningful angles = technical
+  if (curvesPerMile >= t.technical.minCurvesPerMile && avgAngle >= t.technical.minAvgAngle) {
+    return { ...window, character: 'technical', reason: `${curvesPerMile.toFixed(1)} curves/mi, avg ${avgAngle.toFixed(0)}°` }
+  }
+  
+  // Highway classification - must have LOW curve density AND gentle angles
   if (curvesPerMile <= t.highway.maxCurvesPerMile && avgAngle <= t.highway.maxAvgAngle) {
     return { ...window, character: 'transit', reason: `${curvesPerMile.toFixed(1)} curves/mi, avg ${avgAngle.toFixed(0)}°` }
   }
   
-  // Default: transit (highway driving)
-  // In-between cases default to highway - safer for callout timing
-  return { ...window, character: 'transit', reason: 'default' }
+  // In-between cases: if we have curves but not super dense, still call it technical
+  // Better to be conservative and give technical callouts than miss curves
+  if (curvesPerMile > 0) {
+    return { ...window, character: 'technical', reason: `${curvesPerMile.toFixed(1)} curves/mi (in-between)` }
+  }
+  
+  // Default: transit (no curves)
+  return { ...window, character: 'transit', reason: 'no curves' }
 }
 
 /**
@@ -308,11 +330,13 @@ function formatSegments(segments, totalDistance) {
 
 /**
  * Utility: Convert segments to the format expected by other services
+ * NOTE: This function receives output from formatSegments which already has startDistance/endDistance
  */
 export function convertToZoneFormat(densitySegments) {
   return densitySegments.map(seg => ({
-    start: seg.startDistance,
-    end: seg.endDistance,
+    // Use startDistance/endDistance if available, otherwise calculate from miles
+    start: seg.startDistance ?? (seg.startMile * 1609.34),
+    end: seg.endDistance ?? (seg.endMile * 1609.34),
     startMile: seg.startMile,
     endMile: seg.endMile,
     character: seg.character,
