@@ -1,13 +1,17 @@
 // ================================
-// Curve Pattern Zone Classifier v1.0
+// Curve Pattern Zone Classifier v1.1
 // 
 // Simple, robust zone classification based on PATTERNS of curves
 // NOT density averages or LLM decisions
 // 
 // Philosophy: 
-// - Technical = clusters of 3+ curves within 0.5 miles with meaningful angles
+// - Technical = clusters of curves OR sustained winding activity
 // - Highway/Transit = everything else (long straights, sparse curves)
 // - Urban = start/end of route (from Census, short segments only)
+//
+// TWO detection methods (catches both Northampton AND Weston):
+// 1. CLUSTER: 3+ curves within 0.5 miles with avg angle >= 18°
+// 2. SUSTAINED: 4+ curves within 2 miles with avg angle >= 25°
 //
 // This is intentionally SIMPLE and deterministic.
 // ================================
@@ -19,19 +23,23 @@ const CONFIG = {
   // What counts as a "curve"
   minAngleToCount: 12,           // Ignore tiny angle changes below this
   
-  // What makes a "cluster" (technical section)
+  // METHOD 1: CLUSTER detection (dense sections like Northampton)
   clusterLookAheadMiles: 0.5,    // Look this far ahead to find clustered curves
   minCurvesForCluster: 3,        // Need at least this many curves in the window
   minAvgAngleForCluster: 18,     // Average angle must be meaningful
   
+  // METHOD 2: SUSTAINED ACTIVITY detection (spread sections like Weston)
+  sustainedLookAheadMiles: 2.0,  // Look further ahead for spread-out curves
+  minCurvesForSustained: 4,      // Need more curves over longer distance
+  minAvgAngleForSustained: 25,   // Higher angle threshold for sustained
+  
   // Danger curve override - ONLY extreme turns trigger technical
-  // (single highway exit ramps shouldn't make a section technical)
-  dangerAngle: 70,               // Very severe curves only (was 50)
-  dangerBufferMiles: 0.1,        // Smaller buffer (was 0.15)
+  dangerAngle: 70,               // Very severe curves only
+  dangerBufferMiles: 0.1,        // Buffer around danger curve
   
   // Zone cleanup
-  mergeGapMiles: 0.3,            // Merge technical zones that are close
-  minTechnicalLengthMiles: 0.4,  // Don't create tiny technical zones (was 0.25)
+  mergeGapMiles: 0.5,            // Merge technical zones that are close (increased)
+  minTechnicalLengthMiles: 0.4,  // Don't create tiny technical zones
   
   // Urban detection (from Census)
   maxUrbanMiles: 1.5,            // Urban zones only at start/end, max this length
@@ -48,7 +56,7 @@ const CONFIG = {
 export function classifyByPattern(flowEvents, totalDistanceMeters, censusSegments = []) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🎯 Curve Pattern Zone Classifier v1.0')
+  console.log('🎯 Curve Pattern Zone Classifier v1.1 (Cluster + Sustained)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
   console.log(`   Total distance (meters): ${totalDistanceMeters}`)
   
@@ -108,19 +116,25 @@ function extractMeaningfulCurves(events) {
 }
 
 /**
- * Find technical zones by looking for curve clusters
+ * Find technical zones by looking for curve clusters AND sustained activity
  */
 function findTechnicalZones(curves, totalMiles) {
   const zones = []
   
-  // First: Find danger curve zones (single severe curves)
+  // Method 1: Find danger curve zones (single severe curves)
   const dangerZones = findDangerCurveZones(curves)
+  console.log(`   Danger zones: ${dangerZones.length}`)
   
-  // Second: Find cluster-based zones
+  // Method 2: Find CLUSTER-based zones (dense, like Northampton)
   const clusterZones = findClusterZones(curves)
+  console.log(`   Cluster zones: ${clusterZones.length}`)
   
-  // Combine and merge
-  const allZones = [...dangerZones, ...clusterZones]
+  // Method 3: Find SUSTAINED ACTIVITY zones (spread out, like Weston)
+  const sustainedZones = findSustainedActivityZones(curves)
+  console.log(`   Sustained activity zones: ${sustainedZones.length}`)
+  
+  // Combine all methods and merge overlapping
+  const allZones = [...dangerZones, ...clusterZones, ...sustainedZones]
   const merged = mergeOverlappingZones(allZones, totalMiles)
   
   // Filter out tiny zones
@@ -177,12 +191,65 @@ function findClusterZones(curves) {
         zones.push({
           startMile: startMile,
           endMile: lastCurveMile,
-          reason: `${curvesInWindow.length} curves, avg ${Math.round(avgAngle)}°`,
+          reason: `cluster: ${curvesInWindow.length} curves, avg ${Math.round(avgAngle)}°`,
           curveCount: curvesInWindow.length,
           maxAngle: Math.max(...curvesInWindow.map(c => c.angle))
         })
         
         // Skip to after this cluster to avoid overlapping clusters
+        i = j
+        continue
+      }
+    }
+    
+    i++
+  }
+  
+  return zones
+}
+
+/**
+ * Find SUSTAINED ACTIVITY zones (spread out curves like Weston)
+ * This catches technical sections where curves are 0.5-1 mile apart
+ * but still represent active, engaged driving
+ */
+function findSustainedActivityZones(curves) {
+  const zones = []
+  const windowMiles = CONFIG.sustainedLookAheadMiles
+  const minCurves = CONFIG.minCurvesForSustained
+  const minAvg = CONFIG.minAvgAngleForSustained
+  
+  let i = 0
+  while (i < curves.length) {
+    const startMile = curves[i].mile
+    const windowEnd = startMile + windowMiles
+    
+    // Collect curves in this larger window
+    const curvesInWindow = []
+    let j = i
+    while (j < curves.length && curves[j].mile <= windowEnd) {
+      curvesInWindow.push(curves[j])
+      j++
+    }
+    
+    // Check if this is a valid sustained activity zone
+    // Needs more curves AND higher average angle than cluster detection
+    if (curvesInWindow.length >= minCurves) {
+      const avgAngle = curvesInWindow.reduce((sum, c) => sum + c.angle, 0) / curvesInWindow.length
+      
+      if (avgAngle >= minAvg) {
+        // Found sustained activity!
+        const lastCurveMile = curvesInWindow[curvesInWindow.length - 1].mile
+        
+        zones.push({
+          startMile: startMile,
+          endMile: lastCurveMile,
+          reason: `sustained: ${curvesInWindow.length} curves over ${(lastCurveMile - startMile).toFixed(1)}mi, avg ${Math.round(avgAngle)}°`,
+          curveCount: curvesInWindow.length,
+          maxAngle: Math.max(...curvesInWindow.map(c => c.angle))
+        })
+        
+        // Skip to after this zone
         i = j
         continue
       }
