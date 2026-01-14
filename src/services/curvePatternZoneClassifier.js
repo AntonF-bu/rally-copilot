@@ -49,6 +49,7 @@ export function classifyByPattern(flowEvents, totalDistanceMeters, censusSegment
   
   console.log('🎯 Curve Pattern Zone Classifier v1.0')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
+  console.log(`   Total distance (meters): ${totalDistanceMeters}`)
   
   // Step 1: Extract meaningful curves
   const curves = extractMeaningfulCurves(flowEvents)
@@ -56,7 +57,9 @@ export function classifyByPattern(flowEvents, totalDistanceMeters, censusSegment
   
   if (curves.length === 0) {
     console.log('   No curves found - entire route is transit/highway')
-    return [createZone(0, totalMiles, 'transit', 'no curves detected')]
+    const zone = createZone(0, totalMiles, 'transit', 'no curves detected')
+    console.log(`   Created transit zone: ${JSON.stringify(zone)}`)
+    return [zone]
   }
   
   // Step 2: Find technical zones from clusters
@@ -83,18 +86,23 @@ export function classifyByPattern(flowEvents, totalDistanceMeters, censusSegment
  * Extract curves that are meaningful (above minimum angle threshold)
  */
 function extractMeaningfulCurves(events) {
-  return events
+  const curves = events
     .filter(e => {
-      const angle = e.angle || 0
+      // Road Flow Analyzer uses 'totalAngle', rule-based filter uses 'angle'
+      const angle = e.totalAngle ?? e.angle ?? 0
       return angle >= CONFIG.minAngleToCount
     })
     .map(e => ({
       mile: e.mile ?? e.triggerMile ?? 0,
-      angle: e.angle || 0,
+      angle: e.totalAngle ?? e.angle ?? 0,
       direction: e.direction || 'unknown',
       type: e.type || 'curve'
     }))
     .sort((a, b) => a.mile - b.mile)
+  
+  console.log(`   Sample curves: ${curves.slice(0, 5).map(c => `${c.mile.toFixed(1)}mi/${c.angle}°`).join(', ')}`)
+  
+  return curves
 }
 
 /**
@@ -122,6 +130,8 @@ function findTechnicalZones(curves, totalMiles) {
  */
 function findDangerCurveZones(curves) {
   const dangerCurves = curves.filter(c => c.angle >= CONFIG.dangerAngle)
+  
+  console.log(`   Danger curves (≥${CONFIG.dangerAngle}°): ${dangerCurves.length}`)
   
   return dangerCurves.map(c => ({
     startMile: Math.max(0, c.mile - CONFIG.dangerBufferMiles),
