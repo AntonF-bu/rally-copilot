@@ -19,22 +19,22 @@ export const SAMPLE_INTERVALS = {
 // These are DETECTION thresholds - LLM decides what to actually call out
 export const TURN_THRESHOLDS = {
   highway: {
-    minAngle: 12,        // Lowered - catch more, let LLM filter
-    sweeper: 18,         // 18°+ = notable sweeper
-    significant: 30,     // 30°+ = significant curve
+    minAngle: 10,        // Catch gentle sweepers
+    sweeper: 15,         // 15°+ = notable sweeper
+    significant: 25,     // 25°+ = significant curve
     danger: 45           // 45°+ = serious, warn early
   },
   transit: {
-    minAngle: 12,        // Same as highway - catch gentle curves too
-    sweeper: 18,
-    significant: 30,
+    minAngle: 10,        // Same as highway
+    sweeper: 15,
+    significant: 25,
     danger: 45
   },
   urban: {
-    minAngle: 40,        // Urban still high - lots of turns expected
-    sweeper: 50,
-    significant: 70,
-    danger: 90
+    minAngle: 25,        // Lower from 40° - catch more urban curves
+    sweeper: 35,         // Lower from 50°
+    significant: 50,     // Lower from 70°
+    danger: 70           // Lower from 90°
   },
   technical: {
     minAngle: 8,         // Technical - catch everything
