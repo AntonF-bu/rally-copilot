@@ -408,6 +408,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               // Use STANDARD set for preview display (most common use case)
               const displayCallouts = groupedSets.standard
               
+              // Debug: Log technical zone callouts to verify grouping
+              const techCallouts = displayCallouts.filter(c => c.zone === 'technical')
+              console.log(`\n🔍 Technical callouts for display: ${techCallouts.length}`)
+              techCallouts.slice(0, 15).forEach(c => {
+                const isGrouped = c.groupedFrom ? `[GROUPED ${c.groupedFrom.length}]` : '[individual]'
+                console.log(`   Mile ${(c.triggerMile ?? c.mile ?? 0).toFixed(1)}: "${c.text}" ${isGrouped}`)
+              })
+              
               setCuratedCallouts(displayCallouts)
               setAgentResult({
                 summary: {
@@ -1031,12 +1039,37 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     const getShortLabel = (callout) => {
       const text = callout.text || ''
       
+      // Check if this is a grouped callout
+      const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
+      
+      if (isGrouped) {
+        // For grouped callouts, show pattern-based short text
+        if (text.toLowerCase().includes('hairpin')) {
+          return text.includes('DOUBLE') ? '2xHP' : 'HP'
+        } else if (text.toLowerCase().includes('chicane')) {
+          return 'CHI'
+        } else if (text.toLowerCase().includes('esses')) {
+          return 'ESS'
+        } else if (text.includes('HARD')) {
+          const hardMatch = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
+          return hardMatch ? `H${hardMatch[1][0]}${hardMatch[2]}` : 'HRD'
+        } else if (text.match(/\d+\s*(left|right)s/i)) {
+          const countMatch = text.match(/(\d+)\s*(left|right)s/i)
+          return countMatch ? `${countMatch[1]}${countMatch[2][0].toUpperCase()}` : text.substring(0, 4)
+        } else if (text.toLowerCase().includes('tightens')) {
+          return 'TGT'
+        } else {
+          return `G${callout.groupedFrom.length}`
+        }
+      }
+      
+      // Individual callout handling
+      if (callout.type === 'wake_up') return '!'
+      if (callout.type === 'sequence') return 'SEQ'
+      
       // Extract direction (L/R) and angle if present
       const dirMatch = text.match(/\b(left|right|L|R)\b/i)
       const angleMatch = text.match(/(\d+)/);
-      
-      if (callout.type === 'wake_up') return '!'
-      if (callout.type === 'sequence') return 'S'
       
       if (dirMatch && angleMatch) {
         const dir = dirMatch[1][0].toUpperCase()  // L or R
@@ -1070,14 +1103,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       
       // Highway uses blue, Technical/Urban use severity colors
       let color
+      const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
+      
       if (callout.zone === 'transit' || callout.zone === 'highway') {
         color = '#3b82f6' // Blue for highway
       } else {
         // Technical/Urban use severity-based colors
         const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
-        if (angle >= 70) {
+        if (angle >= 70 || callout.text?.toLowerCase().includes('hairpin')) {
           color = '#ef4444' // Red - danger
-        } else if (angle >= 45) {
+        } else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane') || callout.text?.toLowerCase().includes('esses')) {
           color = '#f97316' // Orange - significant
         } else {
           color = '#22c55e' // Green - moderate
@@ -1089,14 +1124,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       el.innerHTML = `
         <div style="
           background: ${isHighway ? color + '30' : color};
-          padding: 4px 10px;
-          border-radius: 6px;
-          border: 2px solid ${color};
+          padding: ${isGrouped ? '4px 12px' : '4px 10px'};
+          border-radius: ${isGrouped ? '12px' : '6px'};
+          border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color};
           cursor: pointer;
           box-shadow: 0 2px 8px rgba(0,0,0,0.4);
         " 
-        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;Zone: ${callout.zone}&#10;${callout.reason || ''}">
-          <span style="font-size:11px;font-weight:600;color:${isHighway ? color : '#fff'};">${shortLabel}</span>
+        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;Zone: ${callout.zone}&#10;${callout.reason || ''}${isGrouped ? '&#10;(' + callout.groupedFrom.length + ' curves grouped)' : ''}">
+          <span style="font-size:${isGrouped ? '12px' : '11px'};font-weight:${isGrouped ? '700' : '600'};color:${isHighway ? color : '#fff'};">${shortLabel}</span>
         </div>
       `
       
@@ -1470,12 +1505,46 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     if (angle >= 70) color = '#ef4444'
                     else if (angle >= 45) color = '#f97316'
                     
+                    // Check if this is a grouped callout
+                    const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
+                    
                     const text = callout.text || ''
-                    const dirMatch = text.match(/\b(left|right)\b/i)
-                    const angleMatch = text.match(/(\d+)/)
-                    const shortText = dirMatch && angleMatch 
-                      ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
-                      : callout.type === 'sequence' ? text.substring(0, 8) : text.substring(0, 6)
+                    let shortText = ''
+                    
+                    if (isGrouped) {
+                      // For grouped callouts, show pattern-based short text
+                      if (text.toLowerCase().includes('hairpin')) {
+                        shortText = text.includes('DOUBLE') ? '2xHP' : 'HP'
+                        color = '#ef4444' // Always red for hairpins
+                      } else if (text.toLowerCase().includes('chicane')) {
+                        shortText = 'CHI'
+                        color = '#f97316' // Orange for chicanes
+                      } else if (text.toLowerCase().includes('esses')) {
+                        shortText = 'ESS'
+                        color = '#f97316'
+                      } else if (text.includes('HARD')) {
+                        // e.g., "Left into HARD RIGHT 68°"
+                        const hardMatch = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
+                        shortText = hardMatch ? `H${hardMatch[1][0]}${hardMatch[2]}` : 'HRD'
+                        color = '#ef4444'
+                      } else if (text.match(/\d+\s*(left|right)s/i)) {
+                        // e.g., "3 rights, max 25°"
+                        const countMatch = text.match(/(\d+)\s*(left|right)s/i)
+                        shortText = countMatch ? `${countMatch[1]}${countMatch[2][0].toUpperCase()}` : text.substring(0, 4)
+                      } else if (text.toLowerCase().includes('tightens')) {
+                        shortText = 'TGT'
+                      } else {
+                        // Fallback for other grouped
+                        shortText = `G${callout.groupedFrom.length}`
+                      }
+                    } else {
+                      // Individual callout - extract direction and angle
+                      const dirMatch = text.match(/\b(left|right)\b/i)
+                      const angleMatch = text.match(/(\d+)/)
+                      shortText = dirMatch && angleMatch 
+                        ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
+                        : callout.type === 'sequence' ? text.substring(0, 8) : text.substring(0, 6)
+                    }
                     
                     return (
                       <button
@@ -1487,8 +1556,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                           }
                         }}
                         className="px-1.5 py-0.5 rounded text-[9px] font-semibold"
-                        style={{ background: color, color: '#fff' }}
-                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}`}
+                        style={{ 
+                          background: color, 
+                          color: '#fff',
+                          border: isGrouped ? '2px solid #fff' : 'none'
+                        }}
+                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}${isGrouped ? `\n(${callout.groupedFrom.length} curves grouped)` : ''}`}
                       >
                         {shortText}
                       </button>
