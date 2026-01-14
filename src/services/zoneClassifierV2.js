@@ -1,5 +1,5 @@
 // ================================
-// Zone Classifier v2.2
+// Zone Classifier v2.3
 // 
 // Classification based on:
 // 1. CURVE DENSITY (PRIMARY) - curves per mile
@@ -7,8 +7,8 @@
 // 3. Census (VALIDATOR)
 //
 // Key insight: Technical sections have HIGH curve density
-// - Technical: 5+ curves per mile (lots of turns packed together)
-// - Highway: <3 curves per mile (sparse gentle bends)
+// - Technical: 3+ curves per mile (lots of turns packed together)
+// - Highway: <1.5 curves per mile (sparse gentle bends)
 // - Urban: High density + very tight angles (intersections)
 // ================================
 
@@ -17,17 +17,17 @@
  */
 const CONFIG = {
   // CURVE DENSITY thresholds (curves per mile) - PRIMARY
-  technicalMinDensity: 4,     // 4+ curves/mile = definitely technical
-  highwayMaxDensity: 2.5,     // <2.5 curves/mile = highway cruising
+  technicalMinDensity: 3,      // 3+ curves/mile = definitely technical
+  highwayMaxDensity: 1.5,      // <1.5 curves/mile = highway cruising
   
   // Tightness Score thresholds (degrees per mile) - SECONDARY
   urbanMinTightness: 300,      // Very sharp corners (intersections)
-  technicalMinTightness: 100,  // Winding backroads
-  // Below 100 = Highway sweepers
+  technicalMinTightness: 80,   // Winding backroads (lowered from 100)
+  // Below 80 = Highway sweepers
   
   // Fallback angle thresholds (when tightness is ambiguous)
   urbanMinAngle: 70,           // Clear intersection turns
-  highwayMaxAngle: 18,         // Clear highway sweepers
+  highwayMaxAngle: 20,         // Clear highway sweepers
   
   // Analysis window
   windowSizeMiles: 0.5,        // Analyze in half-mile windows
@@ -51,8 +51,9 @@ const CONFIG = {
 export function classifyZonesV2(flowEvents, totalDistanceMeters, censusSegments = []) {
   const totalMiles = totalDistanceMeters / 1609.34
   
-  console.log('🎯 Zone Classifier v2.2 (Density + Tightness)')
+  console.log('🎯 Zone Classifier v2.3 (Density + Tightness)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
+  console.log(`   Overall density: ${(flowEvents.length / totalMiles).toFixed(1)} events/mile`)
   
   // Step 1: Extract curve data with tightness score
   const curves = extractCurveData(flowEvents)
@@ -197,14 +198,14 @@ function analyzeWindows(curves, totalMiles) {
  * Classify a window based on DENSITY (primary) + tightness (secondary)
  * 
  * Density = curves per mile
- * - HIGH density (4+/mi): TECHNICAL - lots of turns packed together
- * - LOW density (<2.5/mi): HIGHWAY - sparse gentle bends
- * - MEDIUM density: Use tightness to decide
+ * - HIGH density (3+/mi): TECHNICAL - lots of turns packed together
+ * - LOW density (<1.5/mi): HIGHWAY - sparse gentle bends
+ * - MEDIUM density (1.5-3/mi): Use tightness to decide
  *
  * Tightness = Angle / Length (degrees per mile)
  * - > 300: URBAN (sharp intersection corners)
- * - 100-300: TECHNICAL (winding backroads)
- * - < 100: HIGHWAY (gentle sweepers)
+ * - 80-300: TECHNICAL (winding backroads)
+ * - < 80: HIGHWAY (gentle sweepers)
  */
 function classifyByDensityAndTightness(density, avgTightness, avgAngle, curves) {
   // HIGH DENSITY = TECHNICAL (regardless of tightness)
@@ -231,7 +232,7 @@ function classifyByDensityAndTightness(density, avgTightness, avgAngle, curves) 
     }
   }
   
-  // MEDIUM DENSITY (2.5-4 curves/mi) - use tightness to decide
+  // MEDIUM DENSITY (1.5-3 curves/mi) - use tightness to decide
   
   // If very tight, might be urban
   if (avgTightness >= CONFIG.urbanMinTightness && avgAngle >= CONFIG.urbanMinAngle) {
@@ -241,7 +242,7 @@ function classifyByDensityAndTightness(density, avgTightness, avgAngle, curves) 
     }
   }
   
-  // If tight-ish, technical
+  // If tight-ish (tightness >= 80), technical
   if (avgTightness >= CONFIG.technicalMinTightness) {
     return {
       character: 'technical',
@@ -249,19 +250,19 @@ function classifyByDensityAndTightness(density, avgTightness, avgAngle, curves) 
     }
   }
   
-  // If gentle tightness, highway
-  if (avgTightness < CONFIG.technicalMinTightness) {
+  // If gentle tightness AND gentle angles, highway
+  if (avgTightness < CONFIG.technicalMinTightness && avgAngle <= CONFIG.highwayMaxAngle) {
     return {
       character: 'transit',
       reason: `gentle (${density.toFixed(1)}/mi, T${Math.round(avgTightness)})`
     }
   }
   
-  // Fallback based on angle alone
-  if (avgAngle < CONFIG.highwayMaxAngle) {
+  // Medium density with medium angles = borderline, lean toward technical
+  if (avgAngle > CONFIG.highwayMaxAngle) {
     return {
-      character: 'transit',
-      reason: `gentle angle ${Math.round(avgAngle)}°`
+      character: 'technical',
+      reason: `active (${density.toFixed(1)}/mi, ${Math.round(avgAngle)}°)`
     }
   }
   
