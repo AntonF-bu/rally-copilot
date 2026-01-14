@@ -909,6 +909,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (!coords?.length) return []
     if (!characterSegments?.length) {
       console.log('🎨 No characterSegments - defaulting to all technical')
+      console.log('🎨 Built', segments.length, 'visual segments:', 
+      segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
       return [{ coords, color: CHARACTER_COLORS.technical.primary, character: 'technical' }]
     }
     
