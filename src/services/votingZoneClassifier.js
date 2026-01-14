@@ -88,11 +88,72 @@ function createZone(startMile, endMile, character, score, reasons) {
 /**
  * Main entry point
  * Now accepts coordinates and mapboxToken for road class lookups
+ * Returns zones synchronously (road class fetch happens in background if provided)
  */
-export async function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
+export function classifyWithVoting(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
   const totalMiles = totalDistanceMeters / 1609.34
   
   console.log('🗳️ Voting Zone Classifier v1.1 (with road class)')
+  console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
+  
+  // Validate inputs
+  if (!flowEvents || !Array.isArray(flowEvents)) {
+    console.error('   ❌ Invalid flowEvents - must be array')
+    return []
+  }
+  
+  if (!totalDistanceMeters || totalDistanceMeters <= 0) {
+    console.error('   ❌ Invalid totalDistanceMeters')
+    return []
+  }
+  
+  // Step 1: Extract meaningful curves
+  const curves = extractCurves(flowEvents)
+  console.log(`   Meaningful curves (≥${THRESHOLDS.minAngleToCount}°): ${curves.length}`)
+  
+  // For now, skip road class lookup to keep it synchronous
+  // TODO: Add async version that fetches road classes
+  let roadClasses = new Map()
+  console.log('   ⚠️ Road class lookup skipped (sync mode)')
+  
+  // Step 2: Build voting windows along the route
+  const windows = buildVotingWindows(curves, totalMiles, censusSegments)
+  console.log(`   Analysis windows: ${windows.length}`)
+  
+  // Step 3: Score each window (now with road classes)
+  const scoredWindows = windows.map(w => scoreWindow(w, curves, censusSegments, totalMiles, roadClasses))
+  
+  // Step 4: Determine character for each window
+  const classifiedWindows = scoredWindows.map(classifyWindow)
+  
+  // Step 5: Merge adjacent windows with same character into zones
+  const rawZones = mergeWindowsToZones(classifiedWindows)
+  console.log(`   Raw zones: ${rawZones.length}`)
+  
+  // Step 6: Clean up tiny zones
+  const cleanedZones = cleanupZones(rawZones, totalMiles)
+  console.log(`   After cleanup: ${cleanedZones.length}`)
+  
+  // Step 7: Apply urban at route edges if Census supports it
+  const finalZones = applyUrbanEdges(cleanedZones, censusSegments, totalMiles)
+  
+  // Log results
+  console.log(`   Final zones:`)
+  finalZones.forEach((z, i) => {
+    const reasonStr = z.reasons.slice(0, 3).join(', ')
+    console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.lengthMiles.toFixed(1)}mi) [T:${z.score.technical} H:${z.score.transit}] - ${reasonStr}`)
+  })
+  
+  return finalZones
+}
+
+/**
+ * Async version with road class lookup
+ */
+export async function classifyWithVotingAsync(flowEvents, totalDistanceMeters, censusSegments = [], coordinates = [], mapboxToken = null) {
+  const totalMiles = totalDistanceMeters / 1609.34
+  
+  console.log('🗳️ Voting Zone Classifier v1.1 (async with road class)')
   console.log(`   Route: ${totalMiles.toFixed(1)} miles, ${flowEvents.length} events`)
   
   // Validate inputs
