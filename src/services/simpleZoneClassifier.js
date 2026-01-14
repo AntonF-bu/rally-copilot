@@ -1,174 +1,30 @@
 // ================================
-// Simple Zone Classifier v3.0
+// Simple Zone Classifier v4.0
 // 
-// Core insight: Road names tell you everything, gaps tell you transitions
-// 
-// Rules:
-// 1. Road names are AUTHORITATIVE (I-90 = transit, West Street = technical)
-// 2. Gaps after highways = OFF-RAMPS = TECHNICAL (always!)
-// 3. Gaps after technical = still TECHNICAL
-// 4. State routes: check curve density to decide
-// 5. Urban only at route edges (from census)
+// SIMPLE RULES:
+// 1. Interstate/US Highway → TRANSIT
+// 2. State Route → TECHNICAL  
+// 3. Local Road → check symbolrank:
+//      - symbolrank 1-10 (city/town) → URBAN
+//      - symbolrank 11-19 (rural) → TECHNICAL
+// 4. Gaps after/before highways → TECHNICAL (ramps)
+// 5. Tiny transit segments (<0.5mi) surrounded by non-transit → absorb
+//
+// That's it. No curve analysis. No census data.
 // ================================
-
-/**
- * Classify road type from ref and name
- * Returns: 'interstate' | 'us_highway' | 'state_route' | 'local' | 'unknown'
- */
-function classifyRoadType(ref, name) {
-  const refUpper = (ref || '').toUpperCase().trim()
-  const nameUpper = (name || '').toUpperCase().trim()
-  
-  // Interstate: I-90, I 90, I90
-  if (refUpper.match(/^I[\s-]?\d+/)) {
-    return 'interstate'
-  }
-  
-  // US Highway: US-9, US 9, US9, U.S. 9
-  if (refUpper.match(/^U\.?S\.?[\s-]?\d+/)) {
-    return 'us_highway'
-  }
-  
-  // State Route: MA-9, MA 9, NY-17, Route 66
-  if (refUpper.match(/^[A-Z]{2}[\s-]?\d+/) || refUpper.match(/^(ROUTE|RT\.?|RTE\.?)[\s-]?\d+/i)) {
-    return 'state_route'
-  }
-  
-  // Highway-like names
-  if (nameUpper.includes('TURNPIKE') || 
-      nameUpper.includes('PARKWAY') || 
-      nameUpper.includes('EXPRESSWAY') ||
-      nameUpper.includes('FREEWAY') ||
-      nameUpper.includes('THRUWAY') ||
-      nameUpper.includes('INTERSTATE')) {
-    return 'us_highway'
-  }
-  
-  // Has a name = local road
-  if (name && name.length > 0) {
-    return 'local'
-  }
-  
-  // No ref, no name = unknown (probably ramp or connector)
-  return 'unknown'
-}
-
-/**
- * Check if road class is highway-like
- */
-function isHighwayClass(roadClass) {
-  return roadClass === 'interstate' || roadClass === 'us_highway'
-}
-
-/**
- * Analyze curves in a mile range to determine if it's technical
- * Used for state routes and ambiguous sections
- */
-function analyzeCurvesInRange(curves, startMile, endMile) {
-  if (!curves || curves.length === 0) {
-    return { curveCount: 0, curvesPerMile: 0, avgAngle: 0, maxAngle: 0, hasDanger: false }
-  }
-  
-  const curvesInRange = curves.filter(c => {
-    const mile = c.mile ?? c.triggerMile ?? (c.distance / 1609.34) ?? 0
-    return mile >= startMile && mile < endMile
-  })
-  
-  const length = endMile - startMile
-  const curveCount = curvesInRange.length
-  const curvesPerMile = length > 0 ? curveCount / length : 0
-  
-  const angles = curvesInRange.map(c => c.angle ?? c.totalAngle ?? 0)
-  const avgAngle = angles.length > 0 ? angles.reduce((a, b) => a + b, 0) / angles.length : 0
-  const maxAngle = angles.length > 0 ? Math.max(...angles) : 0
-  const hasDanger = maxAngle >= 45
-  
-  return { curveCount, curvesPerMile, avgAngle, maxAngle, hasDanger }
-}
-
-/**
- * Determine zone for a state route based on curve characteristics
- * Uses a buffer zone to catch curves just before/after the segment
- */
-function classifyStateRoute(startMile, endMile, curves) {
-  // Check curves WITH a buffer - transitions affect character
-  const buffer = 0.5 // half mile buffer on each side
-  const stats = analyzeCurvesInRange(curves, startMile - buffer, endMile + buffer)
-  
-  console.log(`   🔍 State route ${startMile.toFixed(1)}-${endMile.toFixed(1)}mi: ${stats.curveCount} curves, avg ${stats.avgAngle.toFixed(0)}°, max ${stats.maxAngle}°`)
-  
-  // If has danger curves nearby = definitely technical
-  if (stats.hasDanger) {
-    console.log(`      → TECHNICAL (danger curve ${stats.maxAngle}° nearby)`)
-    return 'technical'
-  }
-  
-  // If very few curves and gentle = highway-like state route
-  if (stats.curvesPerMile < 1.5 && stats.avgAngle < 25) {
-    console.log(`      → TRANSIT (highway-like: ${stats.curvesPerMile.toFixed(1)} curves/mi, ${stats.avgAngle.toFixed(0)}° avg)`)
-    return 'transit'
-  }
-  
-  // Otherwise = fun twisty state route
-  console.log(`      → TECHNICAL (twisty: ${stats.curvesPerMile.toFixed(1)} curves/mi, ${stats.avgAngle.toFixed(0)}° avg)`)
-  return 'technical'
-}
-
-/**
- * Classify a gap based on what's before and after it
- * 
- * Key insight: Gap after highway = OFF-RAMP = always technical!
- */
-function classifyGap(prevSegment, nextSegment, gapStart, gapEnd, curves) {
-  const prevClass = prevSegment?.roadClass || 'unknown'
-  const nextClass = nextSegment?.roadClass || 'unknown'
-  const prevZone = prevSegment?.zone || 'technical'
-  const nextZone = nextSegment?.zone || 'technical'
-  
-  const gapLength = gapEnd - gapStart
-  
-  // Coming OFF a highway → OFF-RAMP → TECHNICAL
-  if (isHighwayClass(prevClass)) {
-    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (off-ramp from ${prevClass})`)
-    return { zone: 'technical', reason: 'off-ramp' }
-  }
-  
-  // Going ONTO a highway → ON-RAMP → TECHNICAL  
-  if (isHighwayClass(nextClass)) {
-    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (on-ramp to ${nextClass})`)
-    return { zone: 'technical', reason: 'on-ramp' }
-  }
-  
-  // Between two technical zones → TECHNICAL
-  if (prevZone === 'technical' && nextZone === 'technical') {
-    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (between technical zones)`)
-    return { zone: 'technical', reason: 'inherited' }
-  }
-  
-  // Between two transit zones → TRANSIT
-  if (prevZone === 'transit' && nextZone === 'transit') {
-    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TRANSIT (between transit zones)`)
-    return { zone: 'transit', reason: 'inherited' }
-  }
-  
-  // Mixed - default to technical (safer to over-warn)
-  console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (default for mixed transition)`)
-  return { zone: 'technical', reason: 'default' }
-}
 
 /**
  * Main entry: Classify zones from road segments
  * 
  * @param {Array} roadSegments - From extractRoadRefs() in routeService
+ *   Each segment: { startMile, endMile, ref, name, roadClass, symbolrank? }
  * @param {number} totalMiles - Total route length in miles
- * @param {Array} curves - Optional curve data for state route analysis
- * @returns {Array} Zones: [{ startMile, endMile, character, road, reason }]
+ * @returns {Array} Zones: [{ startMile, endMile, character, road }]
  */
-export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
-  console.log('🛣️ Simple Zone Classifier v3.0')
+export function classifyByRoadName(roadSegments, totalMiles) {
+  console.log('🛣️ Simple Zone Classifier v4.0')
   console.log(`   Road segments: ${roadSegments?.length || 0}`)
   console.log(`   Total miles: ${totalMiles?.toFixed(1)}`)
-  console.log(`   Curves for analysis: ${curves?.length || 0}`)
   
   if (!roadSegments || roadSegments.length === 0) {
     console.log('   ⚠️ No road segments - defaulting to technical')
@@ -176,8 +32,7 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
       startMile: 0,
       endMile: totalMiles,
       character: 'technical',
-      road: 'unknown',
-      reason: 'no road data'
+      road: 'unknown'
     }]
   }
   
@@ -185,47 +40,17 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
   console.log('   Road segments:')
   roadSegments.forEach(seg => {
     const roadName = seg.ref || seg.name || 'unnamed'
-    console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})`)
+    const rankInfo = seg.symbolrank ? ` [rank:${seg.symbolrank}]` : ''
+    console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})${rankInfo}`)
   })
   
   // ========================================
   // STEP 1: Classify each road segment
   // ========================================
-  const classifiedSegments = roadSegments.map(seg => {
-    const roadClass = seg.roadClass || classifyRoadType(seg.ref, seg.name)
-    let zone
-    let reason
-    
-    switch (roadClass) {
-      case 'interstate':
-        zone = 'transit'
-        reason = 'interstate'
-        break
-      case 'us_highway':
-        zone = 'transit'
-        reason = 'US highway'
-        break
-      case 'state_route':
-        // State routes need curve analysis
-        zone = classifyStateRoute(seg.startMile, seg.endMile, curves)
-        reason = zone === 'transit' ? 'state route (highway-like)' : 'state route (twisty)'
-        break
-      case 'local':
-        zone = 'technical'
-        reason = 'local road'
-        break
-      default:
-        zone = 'technical'
-        reason = 'unknown road type'
-    }
-    
-    return {
-      ...seg,
-      roadClass,
-      zone,
-      reason
-    }
-  })
+  const classifiedSegments = roadSegments.map(seg => ({
+    ...seg,
+    zone: classifyRoad(seg)
+  }))
   
   // ========================================
   // STEP 2: Build complete zone coverage (fill gaps)
@@ -239,14 +64,12 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
     
     // Check for gap before this segment
     if (seg.startMile > currentMile + 0.01) {
-      // There's a gap - classify it
-      const gapResult = classifyGap(prevSeg, seg, currentMile, seg.startMile, curves)
+      const gapZone = classifyGap(prevSeg, seg, currentMile, seg.startMile)
       zones.push({
         startMile: currentMile,
         endMile: seg.startMile,
-        character: gapResult.zone,
-        road: `[gap: ${gapResult.reason}]`,
-        reason: gapResult.reason,
+        character: gapZone,
+        road: '[gap]',
         isGap: true
       })
     }
@@ -257,7 +80,6 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
       endMile: seg.endMile,
       character: seg.zone,
       road: seg.ref || seg.name || 'unnamed',
-      reason: seg.reason,
       roadClass: seg.roadClass
     })
     
@@ -267,15 +89,12 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
   // Check for gap at end of route
   if (currentMile < totalMiles - 0.01) {
     const lastSeg = classifiedSegments[classifiedSegments.length - 1]
-    // End gap - inherit from last segment, unless it was highway (then it's an off-ramp scenario)
-    const endZone = isHighwayClass(lastSeg?.roadClass) ? 'technical' : (lastSeg?.zone || 'technical')
-    console.log(`   📍 End gap ${currentMile.toFixed(1)}-${totalMiles.toFixed(1)}mi: ${endZone.toUpperCase()}`)
+    const endZone = isHighway(lastSeg?.roadClass) ? 'technical' : (lastSeg?.zone || 'technical')
     zones.push({
       startMile: currentMile,
       endMile: totalMiles,
       character: endZone,
-      road: '[end of route]',
-      reason: 'end gap',
+      road: '[end]',
       isGap: true
     })
   }
@@ -283,30 +102,87 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
   // ========================================
   // STEP 3: Merge adjacent zones with same character
   // ========================================
-  const mergedZones = mergeAdjacentZones(zones)
+  let mergedZones = mergeAdjacentZones(zones)
   
   // ========================================
-  // STEP 3.5: Clean up fragmentation
+  // STEP 4: Absorb tiny transit segments
   // ========================================
-  
-  // A) Merge tiny transit segments surrounded by technical
-  const MIN_TRANSIT_LENGTH = 0.3 // miles
-  let cleanedZones = mergeTinyTransitSegments(mergedZones, MIN_TRANSIT_LENGTH)
-  
-  // B) Clean up route START (before first major highway)
-  // If we have fragmented tech/transit/tech before the main highway, consolidate
-  cleanedZones = cleanRouteStart(cleanedZones)
+  mergedZones = absorbTinyTransit(mergedZones, 0.5)
   
   // ========================================
-  // STEP 4: Log final result
+  // STEP 5: Final merge after absorption
   // ========================================
+  mergedZones = mergeAdjacentZones(mergedZones)
+  
+  // Log final result
   console.log('   Final zones:')
-  cleanedZones.forEach((z, i) => {
+  mergedZones.forEach((z, i) => {
     const length = (z.endMile - z.startMile).toFixed(1)
     console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.road}) [${length}mi]`)
   })
   
-  return cleanedZones
+  return mergedZones
+}
+
+/**
+ * Classify a single road segment
+ */
+function classifyRoad(segment) {
+  const roadClass = segment.roadClass || 'unknown'
+  
+  switch (roadClass) {
+    case 'interstate':
+      return 'transit'
+    
+    case 'us_highway':
+      return 'transit'
+    
+    case 'state_route':
+      return 'technical'
+    
+    case 'local':
+      // Check symbolrank for urban vs technical
+      // 1-10 = city/town = urban
+      // 11-19 or missing = rural = technical
+      if (segment.symbolrank && segment.symbolrank <= 10) {
+        return 'urban'
+      }
+      return 'technical'
+    
+    default:
+      return 'technical'
+  }
+}
+
+/**
+ * Check if road class is highway
+ */
+function isHighway(roadClass) {
+  return roadClass === 'interstate' || roadClass === 'us_highway'
+}
+
+/**
+ * Classify a gap based on surrounding segments
+ */
+function classifyGap(prevSeg, nextSeg, gapStart, gapEnd) {
+  const prevClass = prevSeg?.roadClass || 'unknown'
+  const nextClass = nextSeg?.roadClass || 'unknown'
+  
+  // Gap after highway = off-ramp = technical
+  if (isHighway(prevClass)) {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (off-ramp)`)
+    return 'technical'
+  }
+  
+  // Gap before highway = on-ramp = technical
+  if (isHighway(nextClass)) {
+    console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (on-ramp)`)
+    return 'technical'
+  }
+  
+  // Any other gap = technical (safe default)
+  console.log(`   📍 Gap ${gapStart.toFixed(1)}-${gapEnd.toFixed(1)}mi: TECHNICAL (default)`)
+  return 'technical'
 }
 
 /**
@@ -324,14 +200,11 @@ function mergeAdjacentZones(zones) {
     if (next.character === current.character) {
       // Extend current zone
       current.endMile = next.endMile
-      // Keep the more descriptive road name (prefer actual names over gap markers)
-      if (!current.road.startsWith('[') && next.road.startsWith('[')) {
-        // Keep current road name
-      } else if (current.road.startsWith('[') && !next.road.startsWith('[')) {
+      // Keep better road name (prefer non-gap names)
+      if (current.road === '[gap]' || current.road === '[end]') {
         current.road = next.road
       }
     } else {
-      // Save current, start new
       merged.push(current)
       current = { ...next }
     }
@@ -342,32 +215,30 @@ function mergeAdjacentZones(zones) {
 }
 
 /**
- * Merge tiny transit segments that are surrounded by technical zones
- * e.g., 0.1mi of US-202 in the middle of local roads should become technical
+ * Absorb tiny transit segments surrounded by non-transit
+ * e.g., 0.1mi of US-202 in the middle of local roads
  */
-function mergeTinyTransitSegments(zones, minLength) {
-  if (zones.length <= 2) return zones
+function absorbTinyTransit(zones, minLength) {
+  if (zones.length < 3) return zones
   
   const result = []
   
   for (let i = 0; i < zones.length; i++) {
     const zone = zones[i]
-    const prev = i > 0 ? zones[i - 1] : null
+    const prev = result.length > 0 ? result[result.length - 1] : null
     const next = i < zones.length - 1 ? zones[i + 1] : null
     
     const length = zone.endMile - zone.startMile
     
-    // Check if this is a tiny transit segment surrounded by technical
+    // Check if tiny transit surrounded by non-transit
     if (zone.character === 'transit' && length < minLength) {
-      const prevIsTechnical = prev?.character === 'technical'
-      const nextIsTechnical = next?.character === 'technical'
+      const prevIsNonTransit = prev && prev.character !== 'transit'
+      const nextIsNonTransit = next && next.character !== 'transit'
       
-      if (prevIsTechnical && nextIsTechnical) {
-        // Absorb into previous technical zone
-        console.log(`   🔀 Merging tiny transit ${zone.startMile.toFixed(1)}-${zone.endMile.toFixed(1)}mi (${length.toFixed(2)}mi) into technical`)
-        if (result.length > 0) {
-          result[result.length - 1].endMile = zone.endMile
-        }
+      if (prevIsNonTransit && nextIsNonTransit) {
+        // Absorb into previous zone
+        console.log(`   🔀 Absorbing tiny transit ${zone.startMile.toFixed(1)}-${zone.endMile.toFixed(1)}mi (${length.toFixed(2)}mi)`)
+        prev.endMile = zone.endMile
         continue
       }
     }
@@ -375,76 +246,28 @@ function mergeTinyTransitSegments(zones, minLength) {
     result.push({ ...zone })
   }
   
-  // After absorbing, we may have created new adjacent same-character zones
-  return mergeAdjacentZones(result)
-}
-
-/**
- * Clean up route start - consolidate fragmented zones before the first major highway
- * Pattern: TECH → TRANSIT → TECH → BIG_HIGHWAY should become → TRANSIT → BIG_HIGHWAY
- * (We're in a city navigating to the highway - treat it all as transit/urban)
- */
-function cleanRouteStart(zones) {
-  if (zones.length < 3) return zones
-  
-  // Find the first major highway segment (transit zone > 10 miles)
-  const majorHighwayIdx = zones.findIndex(z => 
-    z.character === 'transit' && (z.endMile - z.startMile) > 10
-  )
-  
-  if (majorHighwayIdx <= 0) return zones // No major highway or it's first
-  
-  // Everything before the major highway
-  const beforeHighway = zones.slice(0, majorHighwayIdx)
-  const totalLengthBefore = beforeHighway.reduce((sum, z) => sum + (z.endMile - z.startMile), 0)
-  
-  // If it's short (< 2 miles) and fragmented, consolidate to transit
-  if (totalLengthBefore < 2 && beforeHighway.length >= 2) {
-    console.log(`   🔀 Consolidating fragmented route start (${totalLengthBefore.toFixed(1)}mi) to TRANSIT`)
-    
-    const consolidatedStart = {
-      startMile: 0,
-      endMile: zones[majorHighwayIdx].startMile,
-      character: 'transit',
-      road: 'city navigation',
-      reason: 'consolidated start'
-    }
-    
-    return [consolidatedStart, ...zones.slice(majorHighwayIdx)]
-  }
-  
-  return zones
+  return result
 }
 
 /**
  * Convert zones to standard format for the rest of the app
- * Includes both mile and meter values for compatibility
  */
 export function convertToStandardFormat(zones, totalDistanceMeters) {
   return zones.map(z => ({
-    // Meter values (for distance calculations)
     start: z.startMile * 1609.34,
     end: z.endMile * 1609.34,
     startDistance: z.startMile * 1609.34,
     endDistance: z.endMile * 1609.34,
-    // Mile values (for display and mile-based lookups)
     startMile: z.startMile,
     endMile: z.endMile,
-    // Zone info
     character: z.character,
     lengthMiles: z.endMile - z.startMile,
-    road: z.road,
-    reason: z.reason
+    road: z.road
   }))
 }
 
 /**
  * Reassign zone labels to events based on classified zones
- * Call this after zone classification to update all event.zone values
- * 
- * @param {Array} events - Events from Road Flow Analyzer (have .distance in meters or .mile)
- * @param {Array} zones - Classified zones (from convertToStandardFormat, have .start/.end in meters)
- * @returns {Array} Events with corrected zone assignments
  */
 export function reassignEventZones(events, zones) {
   if (!zones || zones.length === 0) return events
@@ -459,10 +282,7 @@ export function reassignEventZones(events, zones) {
     // Find which zone this event falls into
     const zone = zones.find(z => eventDistance >= z.start && eventDistance < z.end)
     
-    if (!zone) {
-      // Event outside all zones - keep original or default to technical
-      return event
-    }
+    if (!zone) return event
     
     if (event.zone !== zone.character) {
       reassigned++
@@ -471,36 +291,12 @@ export function reassignEventZones(events, zones) {
     return {
       ...event,
       zone: zone.character,
-      zoneType: zone.character  // Some code uses zoneType
+      zoneType: zone.character
     }
   })
   
   console.log(`📍 Reassigned zones to ${reassigned} of ${events.length} events`)
   return updatedEvents
-}
-
-/**
- * Extract curve-like events for analysis
- * Converts Road Flow events to simple curve format for state route classification
- */
-export function extractCurvesFromEvents(events) {
-  if (!events || events.length === 0) return []
-  
-  return events
-    .filter(e => (e.angle ?? e.totalAngle ?? 0) >= 10)  // Only meaningful curves
-    .map(e => ({
-      mile: e.mile ?? (e.distance / 1609.34) ?? 0,
-      angle: e.angle ?? e.totalAngle ?? 0,
-      direction: e.direction || 'unknown',
-      type: e.type || 'curve'
-    }))
-}
-
-/**
- * Get zone at a specific mile
- */
-export function getZoneAtMile(mile, zones) {
-  return zones.find(z => mile >= z.startMile && mile < z.endMile) || null
 }
 
 /**
@@ -514,7 +310,5 @@ export default {
   classifyByRoadName,
   convertToStandardFormat,
   reassignEventZones,
-  extractCurvesFromEvents,
-  getZoneAtMile,
   getZoneAtDistance
 }
