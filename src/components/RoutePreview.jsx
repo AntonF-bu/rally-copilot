@@ -15,13 +15,14 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
+import { classifyZonesByCurveDensity, convertToZoneFormat, reassignEventZones } from '../services/curveDensityZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v27
-// NEW: Speed-Based Callout Grouping (Fast/Standard sets)
+// Route Preview - v28
+// NEW: Curve-Density-First Zone Classification
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -237,49 +238,52 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     
     try {
-      // Step 1: Rule-based zone analysis
+      // ========================================
+      // NEW FLOW: Curve-Density-First Zone Classification
+      // ========================================
+      
+      // Step 1: Get Census-based zones as a FALLBACK (for urban detection)
       updateStage('zones', 'loading')
-      const analysis = await analyzeRouteCharacter(coordinates, curves || [])
-      setRouteCharacter(analysis)
-      setRouteZones(analysis.segments)
+      const censusAnalysis = await analyzeRouteCharacter(coordinates, curves || [])
+      const censusSegments = censusAnalysis.segments || []
+      console.log('📊 Census zones (fallback):', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
+      
+      // Step 2: Run Road Flow Analyzer with UNIFORM sampling (for zone classification)
+      // Use a simple "all transit" zone list to get consistent sampling
+      const uniformZones = [{
+        start: 0,
+        end: routeData.distance,
+        character: 'transit'  // Use transit sampling (50m) for initial pass
+      }]
+      
+      console.log('\n🌊 Running Road Flow Analyzer (uniform sampling for zone classification)...')
+      const flowResult = analyzeRoadFlow(coordinates, uniformZones, routeData.distance)
+      window.__roadFlowData = flowResult
+      console.log('💡 Access road flow data: window.__roadFlowData')
+      
+      // Step 3: Classify zones based on CURVE DENSITY (primary method)
+      console.log('\n🎯 Classifying zones by curve density...')
+      const densityZones = classifyZonesByCurveDensity(
+        coordinates,
+        flowResult.events,
+        routeData.distance,
+        censusSegments  // Pass census as fallback for urban detection
+      )
+      
+      // Convert to standard zone format
+      const activeZones = convertToZoneFormat(densityZones)
+      
+      // Update state
+      setRouteCharacter({ ...censusAnalysis, segments: activeZones })
+      setRouteZones(activeZones)
       updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Track the zones we'll use (may be enhanced by LLM)
-      let activeZones = analysis.segments
+      // Skip LLM zone validation - curve density is our source of truth now
+      updateStage('aiZones', 'complete')
+      setIsLoadingAI(false)
       
-      // Step 2: LLM Zone enhancement (if API key available)
-      if (hasLLMApiKey() && analysis.segments?.length > 0) {
-        updateStage('aiZones', 'loading')
-        setIsLoadingAI(true)
-        console.log('🤖 Running LLM zone validation...')
-        try {
-          const llmResponse = await validateZonesWithLLM(
-            analysis.segments,
-            routeData,
-            getLLMApiKey(),
-            curves || []  // Pass curves for accurate zone classification
-          )
-          
-          setLlmResult(llmResponse)
-          
-          const { enhanced, changes } = llmResponse
-          
-          if (enhanced?.length > 0 && changes?.length > 0) {
-            console.log(`🤖 LLM Zone: ${changes.length} change(s)`)
-            setLlmEnhanced(true)
-            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
-            setRouteZones(enhanced)
-            activeZones = enhanced
-          }
-          updateStage('aiZones', 'complete')
-        } catch (llmErr) {
-          console.warn('⚠️ LLM zone validation failed:', llmErr)
-          updateStage('aiZones', 'complete')
-        }
-      }
-      
-      // Step 3: Analyze highway bends
+      // Step 4: Analyze highway bends (using curve-density zones)
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
         updateStage('highway', 'loading')
@@ -290,23 +294,23 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         setHighwayBends(rawBends)
         updateStage('highway', 'complete')
         
-        // DEBUG: Dump all highway data for analysis (OLD SYSTEM)
-        console.log('🔍 Dumping highway data for analysis (OLD)...')
+        // DEBUG: Dump all highway data for analysis
+        console.log('🔍 Dumping highway data for analysis...')
         const debugData = dumpHighwayData(rawBends, activeZones, routeData)
         window.__highwayDebugData = debugData
         
-        // NEW: Road Flow Analyzer (continuous sampling)
-        console.log('\n🌊 Running Road Flow Analyzer...')
-        const flowResult = analyzeRoadFlow(coordinates, activeZones, routeData.distance)
-        
-        // Store flow data for debugging
-        window.__roadFlowData = flowResult
-        console.log('💡 Access road flow data: window.__roadFlowData')
-        
-        // Step 4: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
+        // Step 5: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
         if (flowResult.events.length > 0) {
           updateStage('aiCurves', 'loading')
           console.log('📋 Running Hybrid Callout System...')
+          
+          // IMPORTANT: Reassign zones to events using our new density-based classification
+          const eventsWithCorrectZones = reassignEventZones(flowResult.events, activeZones)
+          console.log(`📍 Reassigned zones to ${eventsWithCorrectZones.length} events`)
+          
+          // Update the global flow data with correct zones
+          flowResult.events = eventsWithCorrectZones
+          window.__roadFlowData = flowResult
           
           try {
             // ========================================
@@ -314,7 +318,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             // ========================================
             console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
             const ruleBasedResult = filterEventsToCallouts(
-              flowResult.events,
+              eventsWithCorrectZones,  // Use events with correct zones
               { totalMiles: routeData.distance / 1609.34 },
               activeZones  // Pass zones for exit detection
             )
