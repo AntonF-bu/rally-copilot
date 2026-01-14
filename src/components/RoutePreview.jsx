@@ -314,7 +314,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
             const ruleBasedResult = filterEventsToCallouts(
               flowResult.events,
-              { totalMiles: routeData.distance / 1609.34 }
+              { totalMiles: routeData.distance / 1609.34 },
+              activeZones  // Pass zones for exit detection
             )
             
             console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
