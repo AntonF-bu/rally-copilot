@@ -15,7 +15,14 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { detectUrbanSections, applyUrbanOverlay } from '../services/urbanDetectionService'
+// 1. UPDATE IMPORT - add classifyZones (async version)
+import { 
+  classifyZones,           // NEW: async version with urban detection built-in
+  classifyByRoadName,      // Keep for fallback
+  convertToStandardFormat, 
+  reassignEventZones,
+  extractCurvesFromEvents 
+} from '../services/simpleZoneClassifier'
 // UPDATED: Import all needed functions from simpleZoneClassifier v2
 import { 
   classifyByRoadName, 
@@ -294,48 +301,28 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       
       // ========================================
       // ========================================
-      // Step 4: Classify zones using simpleZoneClassifier v2
-      // PRIMARY: Road names (I-90 = transit, local = technical)
-      // SECONDARY: Curve analysis for gaps and state routes
+      // Step 4: Classify zones with urban detection
+      // Uses simpleZoneClassifier v5 which handles urban overlay internally
       // ========================================
-      console.log('\n🛣️ Classifying zones with simpleZoneClassifier v2...')
+      console.log('\n🛣️ Classifying zones with simpleZoneClassifier v5...')
+      updateStage('zones', 'loading')
       
       const totalMiles = routeData.distance / 1609.34
       
-      // Extract curves from flow events for gap filling
+      // Extract curves for legacy compatibility (not used by v5 but may be needed elsewhere)
       const curvesForAnalysis = extractCurvesFromEvents(flowResult.events)
-      console.log(`   Extracted ${curvesForAnalysis.length} curves for gap analysis`)
+      console.log(`   Extracted ${curvesForAnalysis.length} curves for analysis`)
       
-      // Initial classification by road name
-      const votedZones = classifyByRoadName(roadSegments, totalMiles, curvesForAnalysis)
+      // NEW: Single async call handles both road classification AND urban detection
+      const activeZones = await classifyZones(
+        roadSegments,
+        totalMiles,
+        coordinates,           // Pass coordinates for urban detection
+        routeData.distance     // Pass total distance in meters
+      )
       
-      // ========================================
-      // Step 4b: Urban Detection Overlay
-      // Converts TECHNICAL → URBAN in city areas
-      // ========================================
-      let zonesWithUrban = votedZones
-      
-      try {
-        updateStage('urban', 'loading')
-        console.log('\n🏙️ Detecting urban sections...')
-        
-        const urbanSections = await detectUrbanSections(
-          coordinates, 
-          routeData.distance,
-          1  // Sample every 1 mile for accuracy
-        )
-        
-        // Apply urban overlay (only changes technical → urban, never transit)
-        zonesWithUrban = applyUrbanOverlay(votedZones, urbanSections)
-        
-        updateStage('urban', 'complete')
-      } catch (urbanErr) {
-        console.warn('⚠️ Urban detection failed, using road-based zones:', urbanErr.message)
-        updateStage('urban', 'complete')
-      }
-      
-      // Convert to standard zone format (adds startDistance/endDistance)
-      const activeZones = convertToStandardFormat(zonesWithUrban, routeData.distance)
+      updateStage('zones', 'complete')
+
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
