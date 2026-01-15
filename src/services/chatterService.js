@@ -489,44 +489,28 @@ async function generateLLMChatterV2(triggerPoints, analysis, apiKey) {
 }
 
 function getChatterSystemPromptV2() {
-  return `You are a rally co-driver AI providing highway commentary. Professional but with personality.
-
-PERSONALITY:
-- 85% data-focused professional co-pilot
-- 15% dry wit (never cheesy, think British racing humor)
-- Knows the route inside-out, references specific data
-- Speed-aware: comments change based on how fast they're going
-
-SPEED BRACKETS (generate different variant for each):
-- slow (<55 mph): Encouraging, "traffic will clear", patient
-- cruise (55-70): Normal informative co-pilot
-- spirited (70-85): Appreciative of pace, time savings
-- fast (85-100): Playful warnings about speed traps, impressed but cautious
-- flying (100+): Mix of impressed and genuine caution, humor about arrival times
+  return `You are a rally co-driver AI generating highway commentary.
 
 RULES:
-1. Max 20 words per line (shorter is better for speech)
-2. MUST reference specific data (miles, times, curve counts)
-3. Natural speech for TTS (sounds good when spoken aloud)
-4. Each speed bracket should feel genuinely different
-5. The "fast" and "flying" variants can mention blue lights, speed traps
-6. NO smart quotes, NO special characters, NO ellipsis - plain ASCII only
+1. Max 18 words per line
+2. Reference specific data (miles, times, curve counts)
+3. Natural speech for TTS
+4. NO special characters - plain ASCII only
+5. NO quotes inside the text strings
+6. NO apostrophes - rephrase to avoid them
+7. CRITICAL: Valid JSON only - no trailing commas
 
-OUTPUT FORMAT - JSON array (use plain double quotes only):
-[
-  {
-    "id": 0,
-    "variants": {
-      "slow": ["variant 1", "variant 2"],
-      "cruise": ["variant 1", "variant 2"],
-      "spirited": ["variant 1", "variant 2"],
-      "fast": ["variant 1", "variant 2"],
-      "flying": ["variant 1", "variant 2"]
-    }
-  }
-]
+SPEED BRACKETS:
+- slow (<55): Encouraging, patient
+- cruise (55-70): Normal co-pilot
+- spirited (70-85): Appreciative of pace
+- fast (85-100): Playful speed warnings
+- flying (100+): Impressed but cautious
 
-Generate 2 variants per speed bracket (10 total per trigger). Keep it concise.`
+OUTPUT: Valid JSON array. Each item has id and variants object with 2 strings per bracket.
+
+Example (copy this structure exactly):
+[{"id":0,"variants":{"slow":["text one","text two"],"cruise":["text one","text two"],"spirited":["text one","text two"],"fast":["text one","text two"],"flying":["text one","text two"]}}]`
 }
 
 function buildChatterPromptV2(triggerPoints, analysis) {
@@ -578,8 +562,6 @@ function parseChatterResponseV2(content, triggerPoints) {
       .replace(/,\s*]/g, ']')           // Remove trailing commas before ]
       .replace(/,\s*}/g, '}')           // Remove trailing commas before }
       .replace(/[\x00-\x1F]/g, ' ')     // Remove control characters
-      .replace(/\n/g, ' ')              // Remove newlines inside strings
-      .replace(/"\s*\n\s*"/g, '", "')   // Fix broken string arrays
       .replace(/…/g, '...')             // Replace ellipsis
       .replace(/'/g, "'")               // Replace smart quotes
       .replace(/'/g, "'")
@@ -589,7 +571,52 @@ function parseChatterResponseV2(content, triggerPoints) {
       .replace(/—/g, '-')               // Replace em-dash
       .trim()
     
-    const parsed = JSON.parse(jsonStr)
+    // Try to parse
+    let parsed
+    try {
+      parsed = JSON.parse(jsonStr)
+    } catch (firstErr) {
+      console.log('🔧 First parse failed, attempting repair...')
+      
+      // More aggressive cleanup - handle unescaped quotes inside strings
+      // Replace newlines that might be inside strings
+      jsonStr = jsonStr.replace(/\n/g, ' ')
+      
+      // Fix common pattern: "word "quoted" word" -> "word 'quoted' word"
+      // Look for quotes that appear mid-string (not at array/object boundaries)
+      jsonStr = jsonStr
+        .replace(/(\w)" /g, "$1' ")      // word" space -> word' space  
+        .replace(/ "(\w)/g, " '$1")      // space "word -> space 'word
+        .replace(/(\w)"(\w)/g, "$1'$2")  // word"word -> word'word
+        .replace(/"\s+"/g, '", "')       // Fix missing commas between strings
+      
+      try {
+        parsed = JSON.parse(jsonStr)
+      } catch (secondErr) {
+        console.log('🔧 Second parse failed, trying individual extraction...')
+        
+        // Last resort: try to extract individual items
+        // Look for pattern: {"id": N, "variants": {...}}
+        const itemMatches = jsonStr.matchAll(/\{\s*"id"\s*:\s*(\d+)\s*,\s*"variants"\s*:\s*(\{[^}]+\})\s*\}/g)
+        const items = []
+        for (const match of itemMatches) {
+          try {
+            const id = parseInt(match[1])
+            const variants = JSON.parse(match[2])
+            items.push({ id, variants })
+          } catch (e) {
+            // Skip malformed item
+          }
+        }
+        
+        if (items.length > 0) {
+          console.log(`🔧 Extracted ${items.length} items via regex`)
+          parsed = items
+        } else {
+          throw secondErr
+        }
+      }
+    }
     
     return triggerPoints.map((trigger, idx) => {
       const llmData = parsed.find(p => p.id === idx) || parsed[idx]
