@@ -1,15 +1,37 @@
 // ================================
-// Highway Mode Store Extension
-// Manages highway-specific state without modifying main store.js
+// Highway Store - Updated for Chatter
+// 
+// Changes from original:
+// - chatter: true (was false) in companion mode defaults
+// - Added comments explaining chatter feature
 // ================================
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { HIGHWAY_MODE, createHighwayStats } from './highwayModeService'
+
+// Highway modes
+export const HIGHWAY_MODE = {
+  BASIC: 'basic',       // Just sweeper callouts
+  COMPANION: 'companion' // Full co-pilot experience with chatter
+}
+
+/**
+ * Create default highway stats object
+ */
+export function createHighwayStats() {
+  return {
+    sweepersHit: 0,
+    sweepersTotal: 0,
+    highwayMiles: 0,
+    highwayStartTime: null,
+    bestSweeperTime: null,
+    currentStreak: 0
+  }
+}
 
 /**
  * Highway Mode Store
- * Separate from main store to keep highway features isolated
+ * Manages highway-specific state and companion features
  */
 const useHighwayStore = create(
   persist(
@@ -21,12 +43,12 @@ const useHighwayStore = create(
       // Highway mode setting: 'basic' or 'companion'
       highwayMode: HIGHWAY_MODE.BASIC,
       
-      // Feature toggles (all default to mode defaults, user can override)
+      // Feature toggles (user can override defaults)
       highwayFeatures: {
-        sweepers: true,       // Sweeper callouts
+        sweepers: true,       // Sweeper callouts (both modes)
         elevation: true,      // Crest/dip/grade callouts (future)
         progress: true,       // Progress milestones
-        chatter: false,       // Silence breaker chatter (Companion only)
+        chatter: false,       // Companion chatter - OFF by default, enabled when companion mode selected
         apex: false,          // Apex timing (Companion only)
         stats: false,         // Stats callouts (Companion only)
         feedback: false       // Sweeper feedback (Companion only)
@@ -50,33 +72,45 @@ const useHighwayStore = create(
       // Are we currently in a highway zone?
       inHighwayZone: false,
       
-      // Sweepers for current route (enhanced curves)
+      // Current route's enhanced sweepers (from Preview analysis)
       routeSweepers: [],
       
       // ================================
       // ACTIONS
       // ================================
       
-      // Set highway mode (basic/companion)
+      // Set highway mode and update features accordingly
       setHighwayMode: (mode) => {
-        const isCompanion = mode === HIGHWAY_MODE.COMPANION
+        const features = mode === HIGHWAY_MODE.COMPANION
+          ? {
+              sweepers: true,
+              elevation: true,
+              progress: true,
+              chatter: true,    // ENABLED in companion mode
+              apex: false,      // Future feature
+              stats: false,     // Future feature
+              feedback: false   // Future feature
+            }
+          : {
+              sweepers: true,
+              elevation: true,
+              progress: true,
+              chatter: false,   // DISABLED in basic mode
+              apex: false,
+              stats: false,
+              feedback: false
+            }
+        
         set({ 
           highwayMode: mode,
-          // Auto-enable/disable companion features based on mode
-          highwayFeatures: {
-            sweepers: true,
-            elevation: true,
-            progress: true,
-            chatter: isCompanion,
-            apex: isCompanion,
-            stats: isCompanion,
-            feedback: isCompanion
-          }
+          highwayFeatures: features
         })
+        
+        console.log(`🛣️ Highway mode: ${mode}, chatter: ${features.chatter}`)
       },
       
       // Toggle individual feature
-      toggleHighwayFeature: (feature) => {
+      toggleFeature: (feature) => {
         const { highwayFeatures } = get()
         set({
           highwayFeatures: {
@@ -87,7 +121,7 @@ const useHighwayStore = create(
       },
       
       // Set feature directly
-      setHighwayFeature: (feature, enabled) => {
+      setFeature: (feature, enabled) => {
         const { highwayFeatures } = get()
         set({
           highwayFeatures: {
@@ -100,63 +134,22 @@ const useHighwayStore = create(
       // Update highway stats
       updateHighwayStats: (updates) => {
         const { highwayStats } = get()
-        set({
-          highwayStats: {
-            ...highwayStats,
-            ...updates
-          }
-        })
+        set({ highwayStats: { ...highwayStats, ...updates } })
       },
       
-      // Increment sweeper count
-      incrementSweepersCleared: () => {
+      // Record sweeper completion
+      recordSweeperHit: () => {
         const { highwayStats } = get()
         set({
           highwayStats: {
             ...highwayStats,
-            sweepersCleared: highwayStats.sweepersCleared + 1
+            sweepersHit: highwayStats.sweepersHit + 1,
+            currentStreak: highwayStats.currentStreak + 1
           }
         })
       },
       
-      // Add speed sample for averaging
-      addSpeedSample: (speed) => {
-        const { highwayStats } = get()
-        const newSamples = [...highwayStats.speedSamples, speed].slice(-50)
-        const avgSpeed = newSamples.reduce((a, b) => a + b, 0) / newSamples.length
-        set({
-          highwayStats: {
-            ...highwayStats,
-            speedSamples: newSamples,
-            averageSpeed: avgSpeed
-          }
-        })
-      },
-      
-      // Record callout time
-      recordCalloutTime: () => {
-        set({ lastCalloutTime: Date.now() })
-      },
-      
-      // Record chatter time
-      recordChatterTime: () => {
-        set({ lastChatterTime: Date.now() })
-      },
-      
-      // Record stats callout time
-      recordStatsCalloutTime: () => {
-        set({ lastStatsCalloutTime: Date.now() })
-      },
-      
-      // Add announced milestone
-      addAnnouncedMilestone: (milestoneId) => {
-        const { announcedMilestones } = get()
-        const newSet = new Set(announcedMilestones)
-        newSet.add(milestoneId)
-        set({ announcedMilestones: newSet })
-      },
-      
-      // Enter/exit highway zone
+      // Track zone transitions
       setInHighwayZone: (inZone) => {
         const { inHighwayZone, highwayStats } = get()
         
@@ -202,6 +195,12 @@ const useHighwayStore = create(
           mode: highwayMode,
           features: highwayFeatures
         }
+      },
+      
+      // Check if chatter is enabled
+      isChatterEnabled: () => {
+        const { highwayMode, highwayFeatures } = get()
+        return highwayMode === HIGHWAY_MODE.COMPANION && highwayFeatures.chatter
       }
     }),
     {
