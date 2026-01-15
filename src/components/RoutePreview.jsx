@@ -487,6 +487,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               setCurveEnhanced(true)
               
               // Store BOTH sets in global store for navigation runtime selection
+// Store BOTH sets in global store for navigation runtime selection
               useStore.getState().setCuratedHighwayCallouts(displayCallouts)
               useStore.getState().setGroupedCalloutSets?.(groupedSets)
               window.__hybridCallouts = finalResult
@@ -516,6 +517,42 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
           }
           updateStage('aiCurves', 'complete')
+          
+          // ========================================
+          // Step 7: Generate Highway Companion Chatter
+          // ========================================
+          if (hasLLMApiKey()) {
+            console.log('\n🎙️ STAGE 4: Highway Companion Chatter')
+            updateStage('chatter', 'loading')
+            
+            try {
+              const chatterResult = await generateChatterTimeline({
+                zones: activeZones,
+                callouts: curatedCallouts.length > 0 ? curatedCallouts : formattedCallouts,
+                routeData: routeData,
+                elevationData: elevationData
+              }, getLLMApiKey())
+              
+              if (chatterResult.chatterTimeline?.length > 0) {
+                console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
+                console.log(`   Method: ${chatterResult.method}`)
+                
+                // Store in global store
+                useStore.getState().setChatterTimeline(chatterResult.chatterTimeline)
+                
+                // Debug access
+                window.__chatterTimeline = chatterResult.chatterTimeline
+                console.log('💡 Access chatter: window.__chatterTimeline')
+              } else {
+                console.log('ℹ️ No chatter generated (no highway zones or short route)')
+              }
+              
+              updateStage('chatter', 'complete')
+            } catch (chatterErr) {
+              console.warn('⚠️ Chatter generation failed:', chatterErr.message)
+              updateStage('chatter', 'error')
+            }
+          }
         }
       }
       
