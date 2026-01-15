@@ -896,55 +896,30 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
-  // ================================
-  // BUILD SLEEVE SEGMENTS - DEBUG v37
-  // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
-    
-    if (!coords?.length) {
-      console.log('🎨 No coordinates provided')
-      return []
-    }
-    
-    if (!characterSegments?.length) {
-      console.log('🎨 No characterSegments - returning empty (will wait for zones)')
-      return []
-    }
+    if (!coords?.length || !characterSegments?.length) return []
     
     const totalDist = routeData?.distance || 15000
     const segments = []
     
-    characterSegments.forEach((seg, i) => {
-      // Get start/end distances - handle various formats
+    characterSegments.forEach((seg) => {
       const startDist = seg.startDistance ?? seg.start ?? 0
       const endDist = seg.endDistance ?? seg.end ?? totalDist
       
-      // Calculate coordinate indices based on distance
-      const startProgress = Math.max(0, startDist / totalDist)
-      const endProgress = Math.min(1, endDist / totalDist)
-      const startIdx = Math.floor(startProgress * (coords.length - 1))
-      const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
+      // Convert distance to index - same math as reassignEventZones uses
+      const startIdx = Math.round((startDist / totalDist) * (coords.length - 1))
+      const endIdx = Math.round((endDist / totalDist) * (coords.length - 1))
       
-      // Extract coordinates for this segment
       const segCoords = coords.slice(startIdx, endIdx + 1)
-      
-      // DEBUG: Log what we're looking up
-      const colors = CHARACTER_COLORS[seg.character]
-      console.log(`🎨 Segment ${i}: character="${seg.character}" → COLOR_LOOKUP=${seg.character} → color=${colors?.primary} → ${segCoords.length} coords`)
       
       if (segCoords.length > 1) {
         segments.push({
           coords: segCoords,
-          color: colors?.primary || '#ff0000', // Red fallback if color lookup fails
-          character: seg.character,
-          startIdx,
-          endIdx
+          color: CHARACTER_COLORS[seg.character]?.primary || '#22d3ee',
+          character: seg.character
         })
       }
     })
-    
-    console.log('🎨 FINAL segments to draw:', segments.map(s => `${s.character}:${s.color}`).join(', '))
     
     return segments
   }, [routeData?.distance])
