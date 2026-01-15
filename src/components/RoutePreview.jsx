@@ -896,54 +896,56 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
+  // BUILD SLEEVE SEGMENTS - FIXED v36
+  // Now properly extracts coordinates for each zone
+  // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    if (!coords?.length || !characterSegments?.length) return []
+    console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
+    
+    if (!coords?.length) {
+      console.log('🎨 No coordinates provided')
+      return []
+    }
+    
+    // If no segments provided, DON'T default to anything - return empty
+    // This prevents the "all cyan" issue when called before zones are ready
+    if (!characterSegments?.length) {
+      console.log('🎨 No characterSegments - returning empty (will wait for zones)')
+      return []
+    }
     
     const totalDist = routeData?.distance || 15000
     const segments = []
-    let currentSegment = null
     
-    // Walk through every coordinate
-    for (let i = 0; i < coords.length; i++) {
-      // Calculate this point's distance in meters
-      const distanceMeters = (i / (coords.length - 1)) * totalDist
+    characterSegments.forEach((seg, i) => {
+      // Get start/end distances - handle various formats
+      const startDist = seg.startDistance ?? seg.start ?? 0
+      const endDist = seg.endDistance ?? seg.end ?? totalDist
       
-      // Find which zone this point is in
-      const zone = characterSegments.find(z => 
-        distanceMeters >= (z.startDistance ?? z.start ?? 0) && 
-        distanceMeters < (z.endDistance ?? z.end ?? totalDist)
-      )
+      // Calculate coordinate indices based on distance
+      const startProgress = Math.max(0, startDist / totalDist)
+      const endProgress = Math.min(1, endDist / totalDist)
+      const startIdx = Math.floor(startProgress * (coords.length - 1))
+      const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
       
-      const character = zone?.character || 'technical'
-      const color = CHARACTER_COLORS[character]?.primary || '#22d3ee'
+      // Extract coordinates for this segment
+      const segCoords = coords.slice(startIdx, endIdx + 1)
       
-      // If same zone, add to current segment
-      if (currentSegment && currentSegment.character === character) {
-        currentSegment.coords.push(coords[i])
-      } else {
-        // New zone - save previous segment and start new one
-        if (currentSegment && currentSegment.coords.length > 1) {
-          segments.push(currentSegment)
-        }
-        currentSegment = {
-          coords: [coords[i]],
-          color,
-          character
-        }
-        // Add overlap point from previous segment for continuity
-        if (segments.length > 0) {
-          const lastCoord = segments[segments.length - 1].coords.slice(-1)[0]
-          currentSegment.coords.unshift(lastCoord)
-        }
+      if (segCoords.length > 1) {
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
+        segments.push({
+          coords: segCoords,
+          color: colors.primary,
+          character: seg.character,
+          startIdx,
+          endIdx
+        })
       }
-    }
+    })
     
-    // Push final segment
-    if (currentSegment && currentSegment.coords.length > 1) {
-      segments.push(currentSegment)
-    }
-    
-    console.log('🎨 Built segments:', segments.map(s => `${s.character}:${s.color}(${s.coords.length}pts)`).join(', '))
+    // Debug output
+    console.log('🎨 Built', segments.length, 'visual segments:', 
+      segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
     
     return segments
   }, [routeData?.distance])
