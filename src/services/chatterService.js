@@ -736,11 +736,6 @@ RULES:
 
 OUTPUT: Valid JSON with "chatter" array. Each item has id (integer) and variants (object with 5 arrays of 2 strings each).`
 }
-- flying (100+): Impressed but cautious
-
-Return this exact JSON structure:
-{"chatter":[{"id":0,"variants":{"slow":["text","text"],"cruise":["text","text"],"spirited":["text","text"],"fast":["text","text"],"flying":["text","text"]}}]}`
-}
 
 function buildChatterPromptV2(triggerPoints, analysis) {
   let prompt = `ROUTE DATA:\n`
