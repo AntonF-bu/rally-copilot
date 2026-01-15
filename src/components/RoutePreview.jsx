@@ -15,16 +15,9 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-// 1. UPDATE IMPORT - add classifyZones (async version)
+
 import { 
-  classifyZones,           // NEW: async version with urban detection built-in
-  classifyByRoadName,      // Keep for fallback
-  convertToStandardFormat, 
-  reassignEventZones,
-  extractCurvesFromEvents 
-} from '../services/simpleZoneClassifier'
-// UPDATED: Import all needed functions from simpleZoneClassifier v2
-import { 
+  classifyZones, 
   classifyByRoadName, 
   convertToStandardFormat, 
   reassignEventZones,
