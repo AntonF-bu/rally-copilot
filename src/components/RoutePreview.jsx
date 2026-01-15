@@ -519,7 +519,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           updateStage('aiCurves', 'complete')
           
           // ========================================
-          // ========================================
           // Step 7: Generate Highway Companion Chatter
           // ========================================
           if (hasLLMApiKey()) {
