@@ -897,32 +897,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    if (!coords?.length || !characterSegments?.length) return []
+    if (!characterSegments?.length) return []
     
-    const totalDist = routeData?.distance || 15000
-    const segments = []
-    
-    characterSegments.forEach((seg) => {
-      const startDist = seg.startDistance ?? seg.start ?? 0
-      const endDist = seg.endDistance ?? seg.end ?? totalDist
-      
-      // Convert distance to index - same math as reassignEventZones uses
-      const startIdx = Math.round((startDist / totalDist) * (coords.length - 1))
-      const endIdx = Math.round((endDist / totalDist) * (coords.length - 1))
-      
-      const segCoords = coords.slice(startIdx, endIdx + 1)
-      
-      if (segCoords.length > 1) {
-        segments.push({
-          coords: segCoords,
-          color: CHARACTER_COLORS[seg.character]?.primary || '#22d3ee',
-          character: seg.character
-        })
-      }
-    })
-    
-    return segments
-  }, [routeData?.distance])
+    return characterSegments
+      .filter(seg => seg.coordinates?.length > 1)
+      .map(seg => ({
+        coords: seg.coordinates,
+        color: CHARACTER_COLORS[seg.character]?.primary || '#22d3ee',
+        character: seg.character
+      }))
+  }, [])
 
   // Build severity segments (unchanged)
   const buildSeveritySegments = useCallback((coords, curves) => {
