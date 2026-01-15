@@ -11,8 +11,10 @@
 // Generated during RoutePreview, consumed during Navigation
 // ================================
 
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
 const MODEL = 'gpt-4o-mini'
+const ANTHROPIC_MODEL = 'claude-3-5-sonnet-20241022'
 
 // ================================
 // TRIGGER TYPES
@@ -469,8 +471,9 @@ async function generateLLMChatterV2(triggerPoints, analysis, apiKey) {
         { role: 'system', content: getChatterSystemPromptV2() },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.8,
-      max_tokens: 4000
+      temperature: 0.7,
+      max_tokens: 4000,
+      response_format: { type: 'json_object' }  // Force JSON output
     })
   })
   
@@ -489,28 +492,23 @@ async function generateLLMChatterV2(triggerPoints, analysis, apiKey) {
 }
 
 function getChatterSystemPromptV2() {
-  return `You are a rally co-driver AI generating highway commentary.
+  return `You generate highway commentary for a rally co-pilot app. Return a JSON object with a "chatter" array.
 
 RULES:
-1. Max 18 words per line
-2. Reference specific data (miles, times, curve counts)
-3. Natural speech for TTS
-4. NO special characters - plain ASCII only
-5. NO quotes inside the text strings
-6. NO apostrophes - rephrase to avoid them
-7. CRITICAL: Valid JSON only - no trailing commas
+- Max 18 words per line
+- Reference specific data (miles, times, curves)
+- Plain ASCII only - no special characters
+- No apostrophes - say "you will" not "you'll"
 
 SPEED BRACKETS:
-- slow (<55): Encouraging, patient
-- cruise (55-70): Normal co-pilot
+- slow (<55mph): Encouraging, patient
+- cruise (55-70): Normal co-pilot info
 - spirited (70-85): Appreciative of pace
-- fast (85-100): Playful speed warnings
+- fast (85-100): Playful speed warnings, blue lights
 - flying (100+): Impressed but cautious
 
-OUTPUT: Valid JSON array. Each item has id and variants object with 2 strings per bracket.
-
-Example (copy this structure exactly):
-[{"id":0,"variants":{"slow":["text one","text two"],"cruise":["text one","text two"],"spirited":["text one","text two"],"fast":["text one","text two"],"flying":["text one","text two"]}}]`
+Return this exact JSON structure:
+{"chatter":[{"id":0,"variants":{"slow":["text","text"],"cruise":["text","text"],"spirited":["text","text"],"fast":["text","text"],"flying":["text","text"]}}]}`
 }
 
 function buildChatterPromptV2(triggerPoints, analysis) {
@@ -545,22 +543,14 @@ function buildChatterPromptV2(triggerPoints, analysis) {
 }
 
 function parseChatterResponseV2(content, triggerPoints) {
+  // Debug: Log the first 500 chars of what we received
+  console.log('📝 LLM Response preview:', content.substring(0, 500))
+  
   try {
-    let jsonStr = content
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1]
-    } else {
-      const arrayMatch = content.match(/\[[\s\S]*\]/)
-      if (arrayMatch) {
-        jsonStr = arrayMatch[0]
-      }
-    }
+    let jsonStr = content.trim()
     
-    // Clean up common JSON issues from LLMs
+    // Clean up common issues
     jsonStr = jsonStr
-      .replace(/,\s*]/g, ']')           // Remove trailing commas before ]
-      .replace(/,\s*}/g, '}')           // Remove trailing commas before }
       .replace(/[\x00-\x1F]/g, ' ')     // Remove control characters
       .replace(/…/g, '...')             // Replace ellipsis
       .replace(/'/g, "'")               // Replace smart quotes
@@ -569,59 +559,22 @@ function parseChatterResponseV2(content, triggerPoints) {
       .replace(/"/g, '"')
       .replace(/–/g, '-')               // Replace en-dash
       .replace(/—/g, '-')               // Replace em-dash
-      .trim()
     
-    // Try to parse
-    let parsed
-    try {
-      parsed = JSON.parse(jsonStr)
-    } catch (firstErr) {
-      console.log('🔧 First parse failed, attempting repair...')
-      
-      // More aggressive cleanup - handle unescaped quotes inside strings
-      // Replace newlines that might be inside strings
-      jsonStr = jsonStr.replace(/\n/g, ' ')
-      
-      // Fix common pattern: "word "quoted" word" -> "word 'quoted' word"
-      // Look for quotes that appear mid-string (not at array/object boundaries)
-      jsonStr = jsonStr
-        .replace(/(\w)" /g, "$1' ")      // word" space -> word' space  
-        .replace(/ "(\w)/g, " '$1")      // space "word -> space 'word
-        .replace(/(\w)"(\w)/g, "$1'$2")  // word"word -> word'word
-        .replace(/"\s+"/g, '", "')       // Fix missing commas between strings
-      
-      try {
-        parsed = JSON.parse(jsonStr)
-      } catch (secondErr) {
-        console.log('🔧 Second parse failed, trying individual extraction...')
-        
-        // Last resort: try to extract individual items
-        // Look for pattern: {"id": N, "variants": {...}}
-        const itemMatches = jsonStr.matchAll(/\{\s*"id"\s*:\s*(\d+)\s*,\s*"variants"\s*:\s*(\{[^}]+\})\s*\}/g)
-        const items = []
-        for (const match of itemMatches) {
-          try {
-            const id = parseInt(match[1])
-            const variants = JSON.parse(match[2])
-            items.push({ id, variants })
-          } catch (e) {
-            // Skip malformed item
-          }
-        }
-        
-        if (items.length > 0) {
-          console.log(`🔧 Extracted ${items.length} items via regex`)
-          parsed = items
-        } else {
-          throw secondErr
-        }
-      }
+    // Parse the JSON
+    const data = JSON.parse(jsonStr)
+    
+    // Handle both formats: {chatter: [...]} or [...]
+    const parsed = data.chatter || data
+    
+    if (!Array.isArray(parsed)) {
+      throw new Error('Response is not an array')
     }
+    
+    console.log('✅ JSON parsed successfully, got', parsed.length, 'items')
     
     return triggerPoints.map((trigger, idx) => {
       const llmData = parsed.find(p => p.id === idx) || parsed[idx]
       
-      // Ensure we have variants for all speed brackets
       const variants = llmData?.variants || {}
       const defaultVariants = getTemplateVariantsV2(trigger, {})
       
@@ -641,6 +594,8 @@ function parseChatterResponseV2(content, triggerPoints) {
     })
   } catch (err) {
     console.warn('⚠️ Failed to parse LLM chatter:', err.message)
+    console.log('📝 Raw response:', content.substring(0, 1000))
+    console.log('📝 Using template fallback for all', triggerPoints.length, 'triggers')
     return generateTemplateChatterV2(triggerPoints, {})
   }
 }
