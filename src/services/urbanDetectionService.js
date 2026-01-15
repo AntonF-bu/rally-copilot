@@ -297,14 +297,25 @@ export function applyUrbanOverlay(zones, urbanSections) {
       continue
     }
     
-    // Check urban density at zone midpoint
-    const zoneMidpoint = (zone.start + zone.end) / 2
+    // Get zone bounds in MILES (zones may have startMile/endMile or just start/end in meters)
+    const zoneStartMile = zone.startMile ?? (zone.start / 1609.34)
+    const zoneEndMile = zone.endMile ?? (zone.end / 1609.34)
+    const zoneMidpointMile = (zoneStartMile + zoneEndMile) / 2
+    
+    // Debug: Log what we're comparing
+    console.log(`   Checking zone ${zoneStartMile.toFixed(1)}-${zoneEndMile.toFixed(1)}mi (midpoint: ${zoneMidpointMile.toFixed(2)}mi)`)
+    
+    // Find urban section that contains this zone's midpoint
     const urbanSection = urbanSections.find(u => 
-      zoneMidpoint >= u.startMile && zoneMidpoint < u.endMile
+      zoneMidpointMile >= u.startMile && zoneMidpointMile < u.endMile
     )
     
+    if (urbanSection) {
+      console.log(`      Found urban section: ${urbanSection.startMile.toFixed(1)}-${urbanSection.endMile.toFixed(1)}mi (${urbanSection.density}) - ${urbanSection.placeName || 'unknown'}`)
+    }
+    
     if (urbanSection?.density === 'urban') {
-      console.log(`   ✓ Mile ${zone.start.toFixed(1)}-${zone.end.toFixed(1)}: TECHNICAL → URBAN (in ${urbanSection.placeName || 'urban area'})`)
+      console.log(`   ✓ Mile ${zoneStartMile.toFixed(1)}-${zoneEndMile.toFixed(1)}: TECHNICAL → URBAN (in ${urbanSection.placeName || 'urban area'})`)
       result.push({ 
         ...zone, 
         character: 'urban',
