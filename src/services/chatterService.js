@@ -539,6 +539,112 @@ function generateTriggerPointsV2(analysis, highwayZones, callouts) {
 // ================================
 
 async function generateLLMChatterV2(triggerPoints, analysis, apiKey, useAnthropic = false) {
+  console.log(`📝 Using ${useAnthropic ? 'Anthropic Claude' : 'OpenAI'} for chatter generation`)
+  
+  if (useAnthropic) {
+    // Use Anthropic Claude - single call for all triggers
+    return await generateChatterWithClaude(triggerPoints, analysis, apiKey)
+  } else {
+    // Use OpenAI - batched approach
+    return await generateChatterWithOpenAI(triggerPoints, analysis, apiKey)
+  }
+}
+
+async function generateChatterWithClaude(triggerPoints, analysis, apiKey) {
+  const prompt = buildBatchPrompt(triggerPoints, analysis)
+  
+  console.log(`📝 Claude prompt: ${prompt.length} chars for ${triggerPoints.length} triggers`)
+  
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 8000,
+      system: getChatterSystemPromptV2(),
+      messages: [
+        { role: 'user', content: prompt }
+      ]
+    })
+  })
+  
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error('Claude API error:', response.status, errorText)
+    throw new Error(`Claude API error: ${response.status}`)
+  }
+  
+  const data = await response.json()
+  const content = data.content?.[0]?.text
+  
+  if (!content) {
+    throw new Error('Empty Claude response')
+  }
+  
+  console.log('📝 Claude response preview:', content.substring(0, 300))
+  
+  // Parse the response
+  let jsonStr = content
+  
+  // Try to extract JSON from code blocks
+  const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/)
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1]
+  } else {
+    // Try to find JSON object/array
+    const objMatch = content.match(/\{[\s\S]*\}/)
+    if (objMatch) {
+      jsonStr = objMatch[0]
+    }
+  }
+  
+  // Clean common issues
+  jsonStr = jsonStr
+    .replace(/,\s*]/g, ']')
+    .replace(/,\s*}/g, '}')
+    .replace(/'/g, "'")
+    .replace(/'/g, "'")
+    .replace(/"/g, '"')
+    .replace(/"/g, '"')
+    .trim()
+  
+  const parsed = JSON.parse(jsonStr)
+  const items = parsed.chatter || parsed
+  
+  if (!Array.isArray(items)) {
+    throw new Error('Response is not an array')
+  }
+  
+  console.log(`✅ Claude returned ${items.length} chatter items`)
+  
+  // Map results back to triggers
+  return triggerPoints.map((trigger, idx) => {
+    const llmData = items.find(p => p.id === idx) || items[idx]
+    const variants = llmData?.variants || {}
+    const defaultVariants = getTemplateVariantsV2(trigger, analysis)
+    
+    return {
+      ...trigger,
+      id: `chatter-${idx}`,
+      variants: {
+        slow: variants.slow || defaultVariants.slow,
+        cruise: variants.cruise || defaultVariants.cruise,
+        spirited: variants.spirited || defaultVariants.spirited,
+        fast: variants.fast || defaultVariants.fast,
+        flying: variants.flying || defaultVariants.flying
+      },
+      isChatter: true,
+      priority: 3
+    }
+  })
+}
+
+async function generateChatterWithOpenAI(triggerPoints, analysis, apiKey) {
   // Process in batches of 4 to avoid response truncation
   const BATCH_SIZE = 4
   const results = []
