@@ -896,8 +896,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
-  // ================================
-  // BUILD SLEEVE SEGMENTS - DEBUG v37
+  // BUILD SLEEVE SEGMENTS - FIXED v36
+  // Now properly extracts coordinates for each zone
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
     console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
@@ -907,6 +907,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       return []
     }
     
+    // If no segments provided, DON'T default to anything - return empty
+    // This prevents the "all cyan" issue when called before zones are ready
     if (!characterSegments?.length) {
       console.log('🎨 No characterSegments - returning empty (will wait for zones)')
       return []
@@ -929,25 +931,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       // Extract coordinates for this segment
       const segCoords = coords.slice(startIdx, endIdx + 1)
       
-      // DEBUG: Log what we're looking up
-      const colors = CHARACTER_COLORS[seg.character]
-      console.log(`🎨 Segment ${i}: character="${seg.character}" → COLOR_LOOKUP=${seg.character} → color=${colors?.primary} → ${segCoords.length} coords`)
-      
       if (segCoords.length > 1) {
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
         segments.push({
           coords: segCoords,
-          color: colors?.primary || '#ff0000', // Red fallback if color lookup fails
+          color: colors.primary,
           character: seg.character,
           startIdx,
           endIdx
         })
       }
     })
-    
-    console.log('🎨 FINAL segments to draw:', segments.map(s => `${s.character}:${s.color}`).join(', '))
-    
-    return segments
-  }, [routeData?.distance])
     
     // Debug output
     console.log('🎨 Built', segments.length, 'visual segments:', 
