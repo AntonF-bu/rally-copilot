@@ -14,7 +14,7 @@
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions'
 const MODEL = 'gpt-4o-mini'
-const ANTHROPIC_MODEL = 'claude-3-5-sonnet-20241022'
+const ANTHROPIC_MODEL = 'claude-sonnet-4-20250514'
 
 // ================================
 // API KEY HELPERS
