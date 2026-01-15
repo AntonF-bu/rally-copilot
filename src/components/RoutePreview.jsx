@@ -897,16 +897,56 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    if (!characterSegments?.length) return []
+    if (!coords?.length || !characterSegments?.length) return []
     
-    return characterSegments
-      .filter(seg => seg.coordinates?.length > 1)
-      .map(seg => ({
-        coords: seg.coordinates,
-        color: CHARACTER_COLORS[seg.character]?.primary || '#22d3ee',
-        character: seg.character
-      }))
-  }, [])
+    const totalDist = routeData?.distance || 15000
+    const segments = []
+    let currentSegment = null
+    
+    // Walk through every coordinate
+    for (let i = 0; i < coords.length; i++) {
+      // Calculate this point's distance in meters
+      const distanceMeters = (i / (coords.length - 1)) * totalDist
+      
+      // Find which zone this point is in
+      const zone = characterSegments.find(z => 
+        distanceMeters >= (z.startDistance ?? z.start ?? 0) && 
+        distanceMeters < (z.endDistance ?? z.end ?? totalDist)
+      )
+      
+      const character = zone?.character || 'technical'
+      const color = CHARACTER_COLORS[character]?.primary || '#22d3ee'
+      
+      // If same zone, add to current segment
+      if (currentSegment && currentSegment.character === character) {
+        currentSegment.coords.push(coords[i])
+      } else {
+        // New zone - save previous segment and start new one
+        if (currentSegment && currentSegment.coords.length > 1) {
+          segments.push(currentSegment)
+        }
+        currentSegment = {
+          coords: [coords[i]],
+          color,
+          character
+        }
+        // Add overlap point from previous segment for continuity
+        if (segments.length > 0) {
+          const lastCoord = segments[segments.length - 1].coords.slice(-1)[0]
+          currentSegment.coords.unshift(lastCoord)
+        }
+      }
+    }
+    
+    // Push final segment
+    if (currentSegment && currentSegment.coords.length > 1) {
+      segments.push(currentSegment)
+    }
+    
+    console.log('🎨 Built segments:', segments.map(s => `${s.character}:${s.color}(${s.coords.length}pts)`).join(', '))
+    
+    return segments
+  }, [routeData?.distance])
 
   // Build severity segments (unchanged)
   const buildSeveritySegments = useCallback((coords, curves) => {
