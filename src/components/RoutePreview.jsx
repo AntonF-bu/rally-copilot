@@ -518,37 +518,46 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           }
           updateStage('aiCurves', 'complete')
           
-          updateStage('aiCurves', 'complete')
-          
           // ========================================
           // Step 7: Generate Highway Companion Chatter
           // ========================================
           if (hasLLMApiKey()) {
             console.log('\n🎙️ STAGE 4: Highway Companion Chatter')
+            updateStage('chatter', 'loading')
+            
             try {
-              // Get the highway data dump from window (it was stored earlier)
-              const highwayDataDump = window.__highwayDataDump || null
+              // Use displayCallouts (the curated callouts we just stored)
+              const calloutsForChatter = useStore.getState().curatedHighwayCallouts || []
               
               const chatterResult = await generateChatterTimeline({
                 zones: activeZones,
-                callouts: curatedCallouts,  // Use curatedCallouts (it's in scope!)
-                routeData,
-                elevationData: null,
-                highwayDataDump  // Pass the rich data!
-              })
+                callouts: calloutsForChatter,
+                routeData: routeData,
+                elevationData: elevationData
+              }, getLLMApiKey())
               
-              console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
-              console.log(`   Method: ${chatterResult.method}`)
+              if (chatterResult.chatterTimeline?.length > 0) {
+                console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
+                console.log(`   Method: ${chatterResult.method}`)
+                
+                // Store in global store
+                useStore.getState().setChatterTimeline(chatterResult.chatterTimeline)
+                
+                // Debug access
+                window.__chatterTimeline = chatterResult.chatterTimeline
+                console.log('💡 Access chatter: window.__chatterTimeline')
+              } else {
+                console.log('ℹ️ No chatter generated (no highway zones or short route)')
+              }
               
-              // Store in global store for navigation
-              useStore.getState().setChatterTimeline?.(chatterResult.chatterTimeline)
-              window.__chatterTimeline = chatterResult.chatterTimeline
-              
-              console.log('💡 Access chatter: window.__chatterTimeline')
+              updateStage('chatter', 'complete')
             } catch (chatterErr) {
               console.warn('⚠️ Chatter generation failed:', chatterErr.message)
+              updateStage('chatter', 'error')
             }
           }
+        }
+      }
       
       setIsLoadingAI(false)
       setIsPreviewLoading(false)
