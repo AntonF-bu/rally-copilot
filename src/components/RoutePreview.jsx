@@ -293,6 +293,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       console.log('💡 Access road flow data: window.__roadFlowData')
       
       // ========================================
+      // ========================================
       // Step 4: Classify zones using simpleZoneClassifier v2
       // PRIMARY: Road names (I-90 = transit, local = technical)
       // SECONDARY: Curve analysis for gaps and state routes
@@ -301,15 +302,40 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       
       const totalMiles = routeData.distance / 1609.34
       
-      // UPDATED: Extract curves from flow events for gap filling
+      // Extract curves from flow events for gap filling
       const curvesForAnalysis = extractCurvesFromEvents(flowResult.events)
       console.log(`   Extracted ${curvesForAnalysis.length} curves for gap analysis`)
       
-      // UPDATED: Pass curves to classifier for gap filling and state route analysis
+      // Initial classification by road name
       const votedZones = classifyByRoadName(roadSegments, totalMiles, curvesForAnalysis)
       
+      // ========================================
+      // Step 4b: Urban Detection Overlay
+      // Converts TECHNICAL → URBAN in city areas
+      // ========================================
+      let zonesWithUrban = votedZones
+      
+      try {
+        updateStage('urban', 'loading')
+        console.log('\n🏙️ Detecting urban sections...')
+        
+        const urbanSections = await detectUrbanSections(
+          coordinates, 
+          routeData.distance,
+          1  // Sample every 1 mile for accuracy
+        )
+        
+        // Apply urban overlay (only changes technical → urban, never transit)
+        zonesWithUrban = applyUrbanOverlay(votedZones, urbanSections)
+        
+        updateStage('urban', 'complete')
+      } catch (urbanErr) {
+        console.warn('⚠️ Urban detection failed, using road-based zones:', urbanErr.message)
+        updateStage('urban', 'complete')
+      }
+      
       // Convert to standard zone format (adds startDistance/endDistance)
-      const activeZones = convertToStandardFormat(votedZones, routeData.distance)
+      const activeZones = convertToStandardFormat(zonesWithUrban, routeData.distance)
       
       // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
