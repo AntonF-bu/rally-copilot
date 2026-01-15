@@ -2,8 +2,8 @@ import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 
 // ================================
-// Geolocation Hook v4 - VERY Lenient Accuracy
-// FIXED: Accept GPS even with poor accuracy to keep app working
+// Geolocation Hook v5 - iOS Crash Fix
+// Added try-catch guards and delayed initialization
 // ================================
 
 export function useGeolocation(enabled = false) {
@@ -23,17 +23,23 @@ export function useGeolocation(enabled = false) {
   const positionHistoryRef = useRef([])
   const animationFrameRef = useRef(null)
   const currentDisplayPositionRef = useRef(null)
+  const mountedRef = useRef(true)
 
   // Interpolate position between GPS updates based on velocity
   const interpolatePosition = useCallback(() => {
-    if (!lastGpsPositionRef.current || !isRunning) return
+    // Safety check - don't run if unmounted or stopped
+    if (!mountedRef.current || !lastGpsPositionRef.current || !isRunning) {
+      return
+    }
 
     const now = Date.now()
     const timeSinceGps = (now - lastGpsTimeRef.current) / 1000
     const velocity = velocityRef.current
 
     if (velocity.speed < 2.2 || timeSinceGps > 3) {
-      animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+      if (mountedRef.current && isRunning) {
+        animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+      }
       return
     }
 
@@ -63,7 +69,9 @@ export function useGeolocation(enabled = false) {
       setPosition(projectedPosition)
     }
 
-    animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+    if (mountedRef.current && isRunning) {
+      animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+    }
   }, [setPosition, isRunning])
 
   // Calculate velocity from position history
@@ -110,80 +118,83 @@ export function useGeolocation(enabled = false) {
 
   // Handle new GPS position
   const handlePosition = useCallback((position) => {
-    const { latitude, longitude, accuracy, speed: gpsSpeed, heading: gpsHeading, altitude } = position.coords
-    const now = Date.now()
-
-    // ================================================================
-    // VERY LENIENT: Accept almost all GPS readings
-    // Only reject truly terrible accuracy (>500m)
-    // ================================================================
-    const maxAccuracy = 500 // Accept up to 500m accuracy
+    // Safety check
+    if (!mountedRef.current) return
     
-    if (accuracy > maxAccuracy) {
-      console.log(`📍 GPS ignored - accuracy ${accuracy.toFixed(0)}m > ${maxAccuracy}m (very poor)`)
-      return
-    }
+    try {
+      const { latitude, longitude, accuracy, speed: gpsSpeed, heading: gpsHeading, altitude } = position.coords
+      const now = Date.now()
 
-    const newPosition = [longitude, latitude]
-
-    // Jump filter - reject positions that imply impossible speed
-    if (lastGpsPositionRef.current) {
-      const timeDelta = (now - lastGpsTimeRef.current) / 1000
-      const distance = getDistance(lastGpsPositionRef.current, newPosition)
-      const impliedSpeed = distance / timeDelta
-
-      // Max realistic speed ~150 mph = ~67 m/s (be lenient)
-      if (impliedSpeed > 67 && timeDelta < 5) {
-        console.log(`📍 GPS jump rejected - implied ${(impliedSpeed * 2.237).toFixed(0)}mph`)
+      // VERY LENIENT: Accept almost all GPS readings
+      const maxAccuracy = 500
+      
+      if (accuracy > maxAccuracy) {
+        console.log(`📍 GPS ignored - accuracy ${accuracy.toFixed(0)}m > ${maxAccuracy}m (very poor)`)
         return
       }
-    }
 
-    // Update position history
-    positionHistoryRef.current.push({ pos: newPosition, time: now })
-    if (positionHistoryRef.current.length > 10) {
-      positionHistoryRef.current.shift()
-    }
+      const newPosition = [longitude, latitude]
 
-    // Update velocity calculation
-    updateVelocity(newPosition, now)
+      // Jump filter - reject positions that imply impossible speed
+      if (lastGpsPositionRef.current) {
+        const timeDelta = (now - lastGpsTimeRef.current) / 1000
+        const distance = getDistance(lastGpsPositionRef.current, newPosition)
+        const impliedSpeed = distance / timeDelta
 
-    // Store GPS reference
-    lastGpsPositionRef.current = newPosition
-    lastGpsTimeRef.current = now
-
-    // Update display position
-    currentDisplayPositionRef.current = newPosition
-    setPosition(newPosition)
-
-    // Set GPS accuracy
-    setGpsAccuracy(accuracy)
-
-    // Set altitude
-    if (altitude !== null && !isNaN(altitude)) {
-      setAltitude(altitude)
-    }
-
-    // Use GPS speed if available
-    if (gpsSpeed !== null && gpsSpeed >= 0) {
-      const speedMph = gpsSpeed * 2.237
-      setSpeed(speedMph)
-      
-      if (gpsSpeed > 1) {
-        velocityRef.current.speed = gpsSpeed
+        if (impliedSpeed > 67 && timeDelta < 5) {
+          console.log(`📍 GPS jump rejected - implied ${(impliedSpeed * 2.237).toFixed(0)}mph`)
+          return
+        }
       }
-    } else {
-      setSpeed(velocityRef.current.speed * 2.237)
+
+      // Update position history
+      positionHistoryRef.current.push({ pos: newPosition, time: now })
+      if (positionHistoryRef.current.length > 10) {
+        positionHistoryRef.current.shift()
+      }
+
+      // Update velocity calculation
+      updateVelocity(newPosition, now)
+
+      // Store GPS reference
+      lastGpsPositionRef.current = newPosition
+      lastGpsTimeRef.current = now
+
+      // Update display position
+      currentDisplayPositionRef.current = newPosition
+      setPosition(newPosition)
+
+      // Set GPS accuracy
+      setGpsAccuracy(accuracy)
+
+      // Set altitude
+      if (altitude !== null && !isNaN(altitude)) {
+        setAltitude(altitude)
+      }
+
+      // Use GPS speed if available
+      if (gpsSpeed !== null && gpsSpeed >= 0) {
+        const speedMph = gpsSpeed * 2.237
+        setSpeed(speedMph)
+        
+        if (gpsSpeed > 1) {
+          velocityRef.current.speed = gpsSpeed
+        }
+      } else {
+        setSpeed(velocityRef.current.speed * 2.237)
+      }
+
+      // Use GPS heading if available and moving
+      if (gpsHeading !== null && !isNaN(gpsHeading) && gpsSpeed > 2) {
+        setHeading(gpsHeading)
+        velocityRef.current.heading = gpsHeading
+      }
+
+      console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${(velocityRef.current.speed * 2.237).toFixed(0)}mph`)
+
+    } catch (e) {
+      console.error('📍 Error processing GPS position:', e)
     }
-
-    // Use GPS heading if available and moving
-    if (gpsHeading !== null && !isNaN(gpsHeading) && gpsSpeed > 2) {
-      setHeading(gpsHeading)
-      velocityRef.current.heading = gpsHeading
-    }
-
-    console.log(`📍 GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} | ±${accuracy.toFixed(0)}m | ${(velocityRef.current.speed * 2.237).toFixed(0)}mph`)
-
   }, [setPosition, setHeading, setSpeed, setAltitude, setGpsAccuracy, updateVelocity])
 
   // Handle GPS errors
@@ -193,9 +204,15 @@ export function useGeolocation(enabled = false) {
 
   // Start/stop GPS watching
   useEffect(() => {
+    mountedRef.current = true
+    
     if (!enabled || !isRunning) {
       if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current)
+        try {
+          navigator.geolocation.clearWatch(watchIdRef.current)
+        } catch (e) {
+          console.error('📍 clearWatch error:', e)
+        }
         watchIdRef.current = null
       }
       if (animationFrameRef.current) {
@@ -215,32 +232,57 @@ export function useGeolocation(enabled = false) {
     const options = {
       enableHighAccuracy: true,
       maximumAge: 0,
-      timeout: 10000
+      timeout: 15000  // Longer timeout for iOS
     }
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      handlePosition,
-      handleError,
-      options
-    )
+    try {
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        handlePosition,
+        handleError,
+        options
+      )
 
-    navigator.geolocation.getCurrentPosition(
-      handlePosition,
-      handleError,
-      options
-    )
+      // Delay first position request slightly for iOS stability
+      const initTimeout = setTimeout(() => {
+        if (!mountedRef.current) return
+        try {
+          navigator.geolocation.getCurrentPosition(
+            handlePosition,
+            handleError,
+            options
+          )
+        } catch (e) {
+          console.error('📍 getCurrentPosition error:', e)
+        }
+      }, 100)
 
-    animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+      // Delay interpolation start for iOS
+      const interpTimeout = setTimeout(() => {
+        if (mountedRef.current && isRunning && enabled) {
+          animationFrameRef.current = requestAnimationFrame(interpolatePosition)
+        }
+      }, 500)
 
-    return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current)
-        watchIdRef.current = null
+      return () => {
+        mountedRef.current = false
+        clearTimeout(initTimeout)
+        clearTimeout(interpTimeout)
+        
+        if (watchIdRef.current !== null) {
+          try {
+            navigator.geolocation.clearWatch(watchIdRef.current)
+          } catch (e) {
+            console.error('📍 clearWatch error:', e)
+          }
+          watchIdRef.current = null
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current)
+          animationFrameRef.current = null
+        }
       }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-        animationFrameRef.current = null
-      }
+    } catch (e) {
+      console.error('📍 GPS initialization error:', e)
     }
   }, [enabled, isRunning, handlePosition, handleError, interpolatePosition])
 
