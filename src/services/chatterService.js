@@ -505,28 +505,28 @@ SPEED BRACKETS (generate different variant for each):
 - flying (100+): Mix of impressed and genuine caution, humor about arrival times
 
 RULES:
-1. Max 25 words per line
+1. Max 20 words per line (shorter is better for speech)
 2. MUST reference specific data (miles, times, curve counts)
 3. Natural speech for TTS (sounds good when spoken aloud)
-4. Each speed bracket should feel genuinely different, not just swapping adjectives
-5. The "fast" and "flying" variants can mention blue lights, speed traps, arrival times
-6. Include ETA/time references where relevant ("at this pace", "saving X minutes")
+4. Each speed bracket should feel genuinely different
+5. The "fast" and "flying" variants can mention blue lights, speed traps
+6. NO smart quotes, NO special characters, NO ellipsis - plain ASCII only
 
-OUTPUT FORMAT - JSON array:
+OUTPUT FORMAT - JSON array (use plain double quotes only):
 [
   {
     "id": 0,
     "variants": {
-      "slow": ["variant 1", "variant 2", "variant 3"],
-      "cruise": ["variant 1", "variant 2", "variant 3"],
-      "spirited": ["variant 1", "variant 2", "variant 3"],
-      "fast": ["variant 1", "variant 2", "variant 3"],
-      "flying": ["variant 1", "variant 2", "variant 3"]
+      "slow": ["variant 1", "variant 2"],
+      "cruise": ["variant 1", "variant 2"],
+      "spirited": ["variant 1", "variant 2"],
+      "fast": ["variant 1", "variant 2"],
+      "flying": ["variant 1", "variant 2"]
     }
   }
 ]
 
-Generate 3 variants per speed bracket (15 total per trigger).`
+Generate 2 variants per speed bracket (10 total per trigger). Keep it concise.`
 }
 
 function buildChatterPromptV2(triggerPoints, analysis) {
@@ -575,9 +575,18 @@ function parseChatterResponseV2(content, triggerPoints) {
     
     // Clean up common JSON issues from LLMs
     jsonStr = jsonStr
-      .replace(/,\s*]/g, ']')      // Remove trailing commas before ]
-      .replace(/,\s*}/g, '}')      // Remove trailing commas before }
-      .replace(/[\x00-\x1F]/g, ' ') // Remove control characters
+      .replace(/,\s*]/g, ']')           // Remove trailing commas before ]
+      .replace(/,\s*}/g, '}')           // Remove trailing commas before }
+      .replace(/[\x00-\x1F]/g, ' ')     // Remove control characters
+      .replace(/\n/g, ' ')              // Remove newlines inside strings
+      .replace(/"\s*\n\s*"/g, '", "')   // Fix broken string arrays
+      .replace(/…/g, '...')             // Replace ellipsis
+      .replace(/'/g, "'")               // Replace smart quotes
+      .replace(/'/g, "'")
+      .replace(/"/g, '"')               // Replace smart double quotes  
+      .replace(/"/g, '"')
+      .replace(/–/g, '-')               // Replace en-dash
+      .replace(/—/g, '-')               // Replace em-dash
       .trim()
     
     const parsed = JSON.parse(jsonStr)
@@ -634,28 +643,23 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `${ctx.zoneLengthMiles} miles of highway ahead. Should be smooth from here.`,
-          `Entering highway. ${ctx.zoneLengthMiles} miles to cruise through.`,
-          `Highway stretch starting. Settle in for ${ctx.estimatedMinutes || 'a few'} minutes.`
+          `Entering highway. ${ctx.zoneLengthMiles} miles to cruise through.`
         ],
         cruise: [
           `${ctx.zoneLengthMiles} miles of highway. ${ctx.sweeperCount} sweepers to keep it interesting.`,
-          `Highway mode. ${ctx.zoneLengthMiles} miles, then ${ctx.nextTechnicalCurves} curves in the technical section.`,
-          `Cruising into ${ctx.zoneLengthMiles} miles of highway. I'll call out the sweepers.`
+          `Highway mode. ${ctx.zoneLengthMiles} miles, then ${ctx.nextTechnicalCurves} curves in technical.`
         ],
         spirited: [
-          `${ctx.zoneLengthMiles} miles of highway - good chance to make up some time.`,
-          `Highway stretch. ${ctx.zoneLengthMiles} miles at this pace, you'll be early.`,
-          `Nice pace into the highway. ${ctx.sweeperCount} sweepers ahead, nothing dramatic.`
+          `${ctx.zoneLengthMiles} miles of highway. Good chance to make up time.`,
+          `Highway stretch. At this pace you'll be early.`
         ],
         fast: [
-          `${ctx.zoneLengthMiles} miles of highway. At this speed, watch for speed traps around mile markers.`,
-          `Highway time. ${ctx.zoneLengthMiles} miles - plenty of time for a blue light to notice you.`,
-          `Moving well. ${ctx.zoneLengthMiles} miles of highway, maybe ease off near the overpasses.`
+          `${ctx.zoneLengthMiles} miles of highway. Watch for speed traps near mile markers.`,
+          `Moving well. ${ctx.zoneLengthMiles} miles, maybe ease off near overpasses.`
         ],
         flying: [
-          `Alright speed demon, ${ctx.zoneLengthMiles} miles of highway. At this rate you'll arrive yesterday.`,
-          `${ctx.zoneLengthMiles} miles at this pace? That's about ${Math.round((parseFloat(ctx.zoneLengthMiles) || 10) / 110 * 60)} minutes if you don't get pulled over.`,
-          `Highway stretch. At triple digits, the scenery becomes a blur anyway.`
+          `${ctx.zoneLengthMiles} miles of highway. At this rate you'll arrive yesterday.`,
+          `Highway stretch. At triple digits the scenery becomes a blur anyway.`
         ]
       }
     
@@ -663,28 +667,23 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `Technical section in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves coming up.`,
-          `Highway ends soon. Get ready for ${ctx.nextTechnicalCurves} curves.`,
-          `${ctx.distance} to go, then it gets twisty. ${ctx.nextTechnicalCurves} curves ahead.`
+          `Highway ends soon. Get ready for ${ctx.nextTechnicalCurves} curves.`
         ],
         cruise: [
-          `Heads up - technical section in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves waiting.`,
-          `Highway ends in ${ctx.distance}. Time to wake up - ${ctx.nextTechnicalCurves} curves coming.`,
-          `${ctx.distance} of highway left. Then ${ctx.nextTechnicalCurves} curves to play with.`
+          `Heads up. Technical section in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves waiting.`,
+          `Highway ends in ${ctx.distance}. Time to wake up.`
         ],
         spirited: [
-          `${ctx.distance} to fun time. ${ctx.nextTechnicalCurves} curves in the technical section.`,
-          `Almost to the good stuff. ${ctx.nextTechnicalCurves} curves in ${ctx.distance}.`,
-          `Technical section in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves - this is what we came for.`
+          `${ctx.distance} to fun time. ${ctx.nextTechnicalCurves} curves in technical.`,
+          `Almost to the good stuff. ${ctx.nextTechnicalCurves} curves in ${ctx.distance}.`
         ],
         fast: [
-          `Might want to dial it back - technical section with ${ctx.nextTechnicalCurves} curves in ${ctx.distance}.`,
-          `${ctx.nextTechnicalCurves} curves coming in ${ctx.distance}. Good time to shed some speed.`,
-          `Technical in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves don't care how fast you got here.`
+          `Dial it back. Technical with ${ctx.nextTechnicalCurves} curves in ${ctx.distance}.`,
+          `${ctx.nextTechnicalCurves} curves coming. Good time to shed some speed.`
         ],
         flying: [
           `Brakes exist for a reason. ${ctx.nextTechnicalCurves} curves in ${ctx.distance}.`,
-          `${ctx.distance} to reality check. ${ctx.nextTechnicalCurves} curves that require... less velocity.`,
-          `Technical section ahead. ${ctx.nextTechnicalCurves} curves that won't appreciate your current enthusiasm.`
+          `Reality check in ${ctx.distance}. ${ctx.nextTechnicalCurves} curves that want less velocity.`
         ]
       }
     
@@ -696,28 +695,23 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `${remaining} miles to go. Traffic should be clearing up.`,
-          `${pct}% through the highway stretch. Hang in there.`,
-          `${intoHighway} miles done. ${remaining} to go.`
+          `${pct}% through the highway stretch. Hang in there.`
         ],
         cruise: [
           `${remaining} miles of highway remaining. Good rhythm.`,
-          `${pct}% through. ${remaining} miles to the technical section.`,
-          `Cruising nicely. ${remaining} miles to go.`
+          `${pct}% through. ${remaining} miles to technical section.`
         ],
         spirited: [
-          `${remaining} miles left. Making good time at this pace.`,
-          `${pct}% done, running ahead of schedule.`,
-          `${intoHighway} miles down. You're about 3 minutes ahead of pace.`
+          `${remaining} miles left. Making good time.`,
+          `${pct}% done. Running ahead of schedule.`
         ],
         fast: [
-          `${remaining} miles at this speed? About ${Math.round(parseFloat(remaining) / 85 * 60)} minutes. If you're lucky.`,
-          `${pct}% through. Still no blue lights - impressive.`,
-          `${remaining} to go. At this pace you're saving serious time. And tempting fate.`
+          `${remaining} miles at this speed? About ${Math.round(parseFloat(remaining) / 85 * 60)} minutes if lucky.`,
+          `${pct}% through. Still no blue lights. Impressive.`
         ],
         flying: [
-          `${remaining} miles left. At this speed, that's about ${Math.round(parseFloat(remaining) / 110 * 60)} minutes. Theoretically.`,
-          `${pct}% through and no helicopter yet. Living dangerously.`,
-          `${remaining} miles. You'll either arrive very early or very late. No in between.`
+          `${remaining} miles left. At this speed that's ${Math.round(parseFloat(remaining) / 110 * 60)} minutes. Theoretically.`,
+          `${pct}% through and no helicopter yet. Living dangerously.`
         ]
       }
     
@@ -726,28 +720,23 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `Long straight ahead. ${straightMiles} miles to relax.`,
-          `${straightMiles} miles without a turn. Easy stretch.`,
-          `Straight shot for ${straightMiles} miles.`
+          `${straightMiles} miles without a turn. Easy stretch.`
         ],
         cruise: [
-          `${straightMiles} miles of straight road. Longest stretch on the route.`,
-          `Long straight - ${straightMiles} miles. Enjoy the cruise.`,
-          `${straightMiles} miles without a turn coming up.`
+          `${straightMiles} miles of straight road. Longest on the route.`,
+          `Long straight. ${straightMiles} miles. Enjoy the cruise.`
         ],
         spirited: [
           `${straightMiles} miles of open road. Make the most of it.`,
-          `Long straight ahead. ${straightMiles} miles to stretch the legs.`,
-          `${straightMiles} miles of nothing but tarmac. Have fun.`
+          `Long straight ahead. ${straightMiles} miles to stretch the legs.`
         ],
         fast: [
           `${straightMiles} miles of straight. Prime speed trap territory.`,
-          `Long straight - ${straightMiles} miles. Cop favorite zone.`,
-          `${straightMiles} miles of temptation. They know people speed here.`
+          `Long straight. ${straightMiles} miles. Cop favorite zone.`
         ],
         flying: [
-          `${straightMiles} miles straight. At this speed, that's about ${Math.round(parseFloat(straightMiles) / 120 * 60)} minutes of clenching.`,
-          `Long straight. ${straightMiles} miles of praying your tires are balanced.`,
-          `${straightMiles} miles. Every overhead bridge is a potential speed trap. Just saying.`
+          `${straightMiles} miles straight. Praying your tires are balanced.`,
+          `${straightMiles} miles. Every bridge is a potential speed trap.`
         ]
       }
     
@@ -755,28 +744,23 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `Curves returning soon. Stay alert.`,
-          `End of the straight stretch ahead.`,
-          `Features coming back. Wake up time.`
+          `End of the straight stretch ahead.`
         ],
         cruise: [
           `Long straight ending. Curves returning.`,
-          `Back to normal shortly. Sweepers ahead.`,
-          `Straight section ending. Time to engage again.`
+          `Back to normal shortly. Sweepers ahead.`
         ],
         spirited: [
           `Good stretch. Curves coming back now.`,
-          `End of the straight. Back to the fun stuff.`,
-          `Straight's done. Sweepers returning.`
+          `Straight is done. Back to the fun stuff.`
         ],
         fast: [
-          `Curves ahead. Might want to bring it down a notch.`,
-          `Straight ending. Real road returning.`,
+          `Curves ahead. Might want to bring it down.`,
           `Time to use those brakes. Curves coming.`
         ],
         flying: [
           `Curves approaching. Physics is about to matter again.`,
-          `Straight's over. Time to remember how steering works.`,
-          `Reality check incoming. Curves ahead.`
+          `Straight is over. Time to remember how steering works.`
         ]
       }
     
@@ -785,29 +769,24 @@ function getTemplateVariantsV2(trigger, analysis) {
       const dir = ctx.direction || 'curve'
       return {
         slow: [
-          `Sharpest highway curve in ${ctx.distance}. ${angle}° ${dir}.`,
-          `${angle}° ${dir} coming up. Sharpest on this stretch.`,
-          `Notable curve ahead - ${angle}° ${dir}.`
+          `Sharpest highway curve in ${ctx.distance}. ${angle} degrees ${dir}.`,
+          `${angle} degree ${dir} coming up. Sharpest on this stretch.`
         ],
         cruise: [
-          `Heads up - ${angle}° ${dir} in ${ctx.distance}. Sharpest on the highway.`,
-          `Sharpest highway curve coming. ${angle}° ${dir}.`,
-          `${angle}° ${dir} ahead. Worth paying attention to this one.`
+          `Heads up. ${angle} degree ${dir} in ${ctx.distance}. Sharpest on highway.`,
+          `Sharpest highway curve coming. ${angle} degrees ${dir}.`
         ],
         spirited: [
-          `${angle}° ${dir} in ${ctx.distance}. Sharpest highway curve - enjoy it.`,
-          `Good one coming - ${angle}° ${dir}. Best curve on this stretch.`,
-          `Sharpest on the route: ${angle}° ${dir}. ${ctx.distance} away.`
+          `${angle} degree ${dir} in ${ctx.distance}. Best curve on this stretch.`,
+          `Good one coming. ${angle} degrees ${dir}. Enjoy it.`
         ],
         fast: [
-          `${angle}° ${dir} ahead. You'll want to shed speed for this one.`,
-          `Sharpest curve coming - ${angle}° ${dir}. Seriously, brake.`,
-          `${ctx.distance} to a ${angle}° ${dir}. Current speed: not recommended.`
+          `${angle} degree ${dir} ahead. You'll want to shed speed for this one.`,
+          `Sharpest curve coming. ${angle} degrees. Seriously, brake.`
         ],
         flying: [
-          `${angle}° ${dir} incoming. At this speed, that's gonna be exciting.`,
-          `Sharpest curve ahead. ${angle}°. Your call if you want to test physics.`,
-          `${angle}° ${dir} in ${ctx.distance}. Triple digit entry: not advised.`
+          `${angle} degree ${dir} incoming. At this speed that's gonna be exciting.`,
+          `Sharpest curve ahead. ${angle} degrees. Your call on testing physics.`
         ]
       }
     
@@ -816,38 +795,33 @@ function getTemplateVariantsV2(trigger, analysis) {
       return {
         slow: [
           `${milestone} miles into the highway. Steady progress.`,
-          `${milestone} mile mark. You're doing fine.`,
-          `${milestone} miles done.`
+          `${milestone} mile mark. You're doing fine.`
         ],
         cruise: [
           `${milestone} miles in. Good rhythm.`,
-          `${milestone} mile mark. Cruising nicely.`,
-          `${milestone} miles of highway down.`
+          `${milestone} mile mark. Cruising nicely.`
         ],
         spirited: [
           `${milestone} miles done. Nice pace.`,
-          `${milestone} mile mark. Running a few minutes hot.`,
-          `${milestone} in. You're ahead of schedule.`
+          `${milestone} mile mark. Running a few minutes hot.`
         ],
         fast: [
           `${milestone} miles already? Time flies at this speed.`,
-          `${milestone} mile mark. Still no blue lights - lucky.`,
-          `${milestone} down. You're eating this highway alive.`
+          `${milestone} mile mark. Still no blue lights. Lucky.`
         ],
         flying: [
           `${milestone} miles in what, 5 minutes? Impressive. And illegal.`,
-          `${milestone} mile mark. Your guardian angel is working overtime.`,
-          `${milestone} down. At this rate you'll need to wait for the restaurant to open.`
+          `${milestone} mile mark. Your guardian angel is working overtime.`
         ]
       }
     
     default:
       return {
-        slow: [`Continuing on route.`],
-        cruise: [`Continuing on route.`],
-        spirited: [`Good pace.`],
-        fast: [`Moving well. Stay sharp.`],
-        flying: [`Easy there, speed racer.`]
+        slow: [`Continuing on route.`, `Making progress.`],
+        cruise: [`Continuing on route.`, `Good pace.`],
+        spirited: [`Good pace.`, `Nice rhythm.`],
+        fast: [`Moving well. Stay sharp.`, `Good speed. Eyes up.`],
+        flying: [`Easy there speed racer.`, `Wow. Just wow.`]
       }
   }
 }
