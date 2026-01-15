@@ -573,6 +573,13 @@ function parseChatterResponseV2(content, triggerPoints) {
       }
     }
     
+    // Clean up common JSON issues from LLMs
+    jsonStr = jsonStr
+      .replace(/,\s*]/g, ']')      // Remove trailing commas before ]
+      .replace(/,\s*}/g, '}')      // Remove trailing commas before }
+      .replace(/[\x00-\x1F]/g, ' ') // Remove control characters
+      .trim()
+    
     const parsed = JSON.parse(jsonStr)
     
     return triggerPoints.map((trigger, idx) => {
