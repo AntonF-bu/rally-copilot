@@ -6,25 +6,29 @@
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 
 // Symbolrank thresholds (lower = bigger city)
-// 1-6 = major cities (Boston, NYC, etc.)
-// 7-10 = medium cities/large towns
-// 11-14 = small towns/villages
-// 15-19 = hamlets/neighborhoods
-const URBAN_THRESHOLD = 10      // symbolrank <= 10 = urban
-const SUBURBAN_THRESHOLD = 14   // symbolrank 11-14 = suburban (not used for override, just logging)
+// 1-4 = major metros (Boston, NYC, Chicago, etc.)
+// 5-8 = large cities (Worcester, Springfield, etc.)
+// 9-12 = medium cities/large towns
+// 13-15 = small towns
+// 16-19 = neighborhoods/hamlets (Back Bay, Fenway, etc.)
+const URBAN_THRESHOLD = 8       // symbolrank <= 8 = urban (cities)
+const SUBURBAN_THRESHOLD = 12   // symbolrank 9-12 = suburban (towns)
+// Note: 13+ are neighborhoods/hamlets - we need to look PAST these to find the city
 
 /**
  * Query Mapbox Vector Tiles for nearby place labels
+ * Uses a LARGE radius to find city-level labels (not just neighborhoods)
+ * 
  * @param {number} lng - Longitude
  * @param {number} lat - Latitude  
- * @param {number} radiusKm - Search radius in kilometers (default 3km)
+ * @param {number} radiusKm - Search radius in kilometers (default 15km to catch cities)
  * @returns {Object|null} Most significant place found, or null
  */
-async function queryPlaceLabel(lng, lat, radiusKm = 3) {
+async function queryPlaceLabel(lng, lat, radiusKm = 15) {
   const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json?` +
     `layers=place_label&` +
     `radius=${radiusKm * 1000}&` +
-    `limit=10&` +
+    `limit=50&` +  // Get more results to find city-level labels
     `access_token=${MAPBOX_TOKEN}`
   
   try {
@@ -42,22 +46,42 @@ async function queryPlaceLabel(lng, lat, radiusKm = 3) {
     }
     
     // Filter to only place labels with symbolrank
-    // Sort by symbolrank (lowest = most significant)
     const places = data.features
       .filter(f => f.properties?.symbolrank !== undefined)
-      .sort((a, b) => a.properties.symbolrank - b.properties.symbolrank)
     
     if (!places.length) {
       return null
     }
     
-    const best = places[0]
+    // Find the most significant place (lowest symbolrank)
+    // This should give us cities over neighborhoods
+    const sortedByRank = [...places].sort((a, b) => 
+      a.properties.symbolrank - b.properties.symbolrank
+    )
+    
+    const best = sortedByRank[0]
+    
+    // Also find the nearest place for context
+    const sortedByDistance = [...places].sort((a, b) => 
+      (a.properties.tilequery?.distance || 0) - (b.properties.tilequery?.distance || 0)
+    )
+    const nearest = sortedByDistance[0]
+    
+    // Log what we found for debugging
+    const cityLevel = sortedByRank.filter(p => p.properties.symbolrank <= 8)
+    if (cityLevel.length > 0) {
+      console.log(`      Found city: ${cityLevel[0].properties.name} (rank ${cityLevel[0].properties.symbolrank})`)
+    }
+    
     return {
       name: best.properties.name || 'Unknown',
       symbolrank: best.properties.symbolrank,
-      type: best.properties.type || 'place', // city, town, village, etc.
+      type: best.properties.type || 'place',
       distance: best.properties.tilequery?.distance || 0,
-      filterrank: best.properties.filterrank
+      filterrank: best.properties.filterrank,
+      // Also include nearest for context
+      nearestName: nearest?.properties?.name,
+      nearestRank: nearest?.properties?.symbolrank
     }
   } catch (err) {
     console.warn('🏙️ Place label query error:', err.message)
@@ -67,14 +91,21 @@ async function queryPlaceLabel(lng, lat, radiusKm = 3) {
 
 /**
  * Classify urban density based on symbolrank
+ * 
+ * KEY INSIGHT: Mapbox symbolrank correlates with city SIZE, not density.
+ * - rank 1-4: Major metros (Boston, NYC) → URBAN
+ * - rank 5-8: Large cities (Worcester, Springfield) → URBAN  
+ * - rank 9-12: Medium towns (Auburn, Ludlow) → SUBURBAN
+ * - rank 13+: Small towns, neighborhoods → RURAL (for our purposes)
+ * 
  * @param {number} symbolrank - Mapbox symbolrank (1-19)
  * @returns {string} 'urban', 'suburban', or 'rural'
  */
 function classifyDensity(symbolrank) {
   if (symbolrank === null || symbolrank === undefined) return 'rural'
-  if (symbolrank <= URBAN_THRESHOLD) return 'urban'
-  if (symbolrank <= SUBURBAN_THRESHOLD) return 'suburban'
-  return 'rural'
+  if (symbolrank <= URBAN_THRESHOLD) return 'urban'      // Cities (rank 1-8)
+  if (symbolrank <= SUBURBAN_THRESHOLD) return 'suburban' // Towns (rank 9-12)
+  return 'rural'  // Neighborhoods/hamlets (rank 13+)
 }
 
 /**
@@ -167,7 +198,9 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
       mile: sample.mile,
       place: place?.name || null,
       symbolrank: place?.symbolrank ?? 99,
-      density: place ? classifyDensity(place.symbolrank) : 'rural'
+      density: place ? classifyDensity(place.symbolrank) : 'rural',
+      nearestName: place?.nearestName || null,
+      nearestRank: place?.nearestRank || null
     })
     
     // Rate limiting - 50ms delay between requests
@@ -176,11 +209,15 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
     }
   }
   
-  // Log sample results
+  // Log sample results - show both city-level and neighborhood
   console.log(`   Sample results:`)
   results.forEach(r => {
     const icon = r.density === 'urban' ? '🏙️' : r.density === 'suburban' ? '🏘️' : '🌲'
-    console.log(`      Mile ${r.mile.toFixed(1)}: ${icon} ${r.density}${r.place ? ` (${r.place}, rank ${r.symbolrank})` : ''}`)
+    const cityInfo = r.place ? `${r.place} (rank ${r.symbolrank})` : ''
+    const neighborhoodInfo = r.nearestName && r.nearestName !== r.place 
+      ? ` [near ${r.nearestName}]` 
+      : ''
+    console.log(`      Mile ${r.mile.toFixed(1)}: ${icon} ${r.density}${cityInfo ? ` - ${cityInfo}` : ''}${neighborhoodInfo}`)
   })
   
   // Consolidate consecutive samples with same density into sections
