@@ -525,21 +525,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           if (hasLLMApiKey()) {
             console.log('\n🎙️ STAGE 4: Highway Companion Chatter')
             try {
-              // Get the highway data dump from window (it was stored earlier)
               const highwayDataDump = window.__highwayDataDump || null
               
               const chatterResult = await generateChatterTimeline({
                 zones: activeZones,
-                callouts: curatedCallouts,  // Use curatedCallouts (it's in scope!)
+                callouts: curatedCallouts,
                 routeData,
                 elevationData: null,
-                highwayDataDump  // Pass the rich data!
+                highwayDataDump
               })
               
               console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
               console.log(`   Method: ${chatterResult.method}`)
               
-              // Store in global store for navigation
               useStore.getState().setChatterTimeline?.(chatterResult.chatterTimeline)
               window.__chatterTimeline = chatterResult.chatterTimeline
               
@@ -548,6 +546,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               console.warn('⚠️ Chatter generation failed:', chatterErr.message)
             }
           }
+        }
+      }
       
       setIsLoadingAI(false)
       setIsPreviewLoading(false)
