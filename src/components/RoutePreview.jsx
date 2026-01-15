@@ -897,58 +897,58 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // ================================
   // ================================
-    // BUILD SLEEVE SEGMENTS - FIXED v37
-    // Uses same zone lookup as callouts (distance-based matching)
-    // ================================
-    const buildSleeveSegments = useCallback((coords, characterSegments) => {
-      console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
+  // BUILD SLEEVE SEGMENTS - FIXED v37
+  // Uses same zone lookup as callouts (distance-based matching)
+  // ================================
+  const buildSleeveSegments = useCallback((coords, characterSegments) => {
+    console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
+    
+    if (!coords?.length) {
+      console.log('🎨 No coordinates provided')
+      return []
+    }
+    
+    if (!characterSegments?.length) {
+      console.log('🎨 No characterSegments - returning empty (will wait for zones)')
+      return []
+    }
+    
+    const totalDist = routeData?.distance || 15000
+    const segments = []
+    
+    characterSegments.forEach((seg, i) => {
+      // Use same distance calculation as callouts - convert miles to meters if needed
+      const startDist = seg.startDistance ?? (seg.start * 1609.34) ?? 0
+      const endDist = seg.endDistance ?? (seg.end * 1609.34) ?? totalDist
       
-      if (!coords?.length) {
-        console.log('🎨 No coordinates provided')
-        return []
+      // Calculate coordinate indices based on distance
+      const startProgress = Math.max(0, startDist / totalDist)
+      const endProgress = Math.min(1, endDist / totalDist)
+      const startIdx = Math.floor(startProgress * (coords.length - 1))
+      const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
+      
+      // Extract coordinates for this segment
+      const segCoords = coords.slice(startIdx, endIdx + 1)
+      
+      if (segCoords.length > 1) {
+        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
+        segments.push({
+          coords: segCoords,
+          color: colors.primary,
+          character: seg.character,
+          startIdx,
+          endIdx
+        })
+        
+        console.log(`🎨 Segment ${i}: ${seg.character} (${colors.primary}) - ${(startDist/1609.34).toFixed(1)}mi to ${(endDist/1609.34).toFixed(1)}mi`)
       }
-      
-      if (!characterSegments?.length) {
-        console.log('🎨 No characterSegments - returning empty (will wait for zones)')
-        return []
-      }
-      
-      const totalDist = routeData?.distance || 15000
-      const segments = []
-      
-      characterSegments.forEach((seg, i) => {
-        // Use same distance calculation as callouts - convert miles to meters if needed
-        const startDist = seg.startDistance ?? (seg.start * 1609.34) ?? 0
-        const endDist = seg.endDistance ?? (seg.end * 1609.34) ?? totalDist
-        
-        // Calculate coordinate indices based on distance
-        const startProgress = Math.max(0, startDist / totalDist)
-        const endProgress = Math.min(1, endDist / totalDist)
-        const startIdx = Math.floor(startProgress * (coords.length - 1))
-        const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
-        
-        // Extract coordinates for this segment
-        const segCoords = coords.slice(startIdx, endIdx + 1)
-        
-        if (segCoords.length > 1) {
-          const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
-          segments.push({
-            coords: segCoords,
-            color: colors.primary,
-            character: seg.character,
-            startIdx,
-            endIdx
-          })
-          
-          console.log(`🎨 Segment ${i}: ${seg.character} (${colors.primary}) - ${(startDist/1609.34).toFixed(1)}mi to ${(endDist/1609.34).toFixed(1)}mi`)
-        }
-      })
-      
-      console.log('🎨 Built', segments.length, 'visual segments:', 
-        segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
-      
-      return segments
-    }, [routeData?.distance])
+    })
+    
+    console.log('🎨 Built', segments.length, 'visual segments:', 
+      segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
+    
+    return segments
+  }, [routeData?.distance])
 
   // Build severity segments (unchanged)
   const buildSeveritySegments = useCallback((coords, curves) => {
