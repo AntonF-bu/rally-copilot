@@ -526,9 +526,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             updateStage('chatter', 'loading')
             
             try {
+              // Use displayCallouts (the curated callouts we just stored)
+              const calloutsForChatter = useStore.getState().curatedHighwayCallouts || []
+              
               const chatterResult = await generateChatterTimeline({
                 zones: activeZones,
-                callouts: curatedCallouts.length > 0 ? curatedCallouts : formattedCallouts,
+                callouts: calloutsForChatter,
                 routeData: routeData,
                 elevationData: elevationData
               }, getLLMApiKey())
