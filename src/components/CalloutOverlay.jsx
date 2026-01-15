@@ -1,23 +1,27 @@
 import { useMemo, useState, useEffect } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
-import { getBehaviorForCurve, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
+import { CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { useHighwayMode } from '../hooks/useHighwayMode'
 
 // ================================
-// Racing HUD - v11
-// NEW: Highway mode support - shows SW, S-SWEEP, ACTIVE sections
+// Racing HUD - v12
+// NEW: Uses curated callouts from Preview
+// NEW: Urban zone support (pink color)
 // ================================
 
-// Highway colors
-const HIGHWAY_BEND_COLOR = '#3b82f6'  // Blue for sweepers
-const ACTIVE_SECTION_COLOR = '#f59e0b'  // Amber for active sections
+// Zone colors - MUST match Preview and Map
+const ZONE_COLORS = {
+  technical: '#22d3ee',  // Cyan
+  transit: '#3b82f6',    // Blue
+  urban: '#f472b6'       // Pink
+}
 
 // Character labels for zone badge
 const CHARACTER_LABELS = {
-  [ROUTE_CHARACTER.TECHNICAL]: { label: 'TECHNICAL', short: 'TECH' },
-  [ROUTE_CHARACTER.TRANSIT]: { label: 'HIGHWAY', short: 'HWY' },
-  [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY' }
+  [ROUTE_CHARACTER.TECHNICAL]: { label: 'TECHNICAL', short: 'TECH', color: ZONE_COLORS.technical },
+  [ROUTE_CHARACTER.TRANSIT]: { label: 'HIGHWAY', short: 'HWY', color: ZONE_COLORS.transit },
+  [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY', color: ZONE_COLORS.urban }
 }
 
 export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 }) {
@@ -32,6 +36,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     routeData,
     routeMode,
     routeZones,
+    curatedHighwayCallouts, // NEW: curated callouts from Preview
     gpsAccuracy,
     altitude,
     speed,
@@ -39,7 +44,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     elevationData
   } = useStore()
 
-  // NEW: Get highway data
+  // Highway mode hook (for chatter, etc)
   const { highwayBends, isHighwayActive } = useHighwayMode()
 
   const [isOnline, setIsOnline] = useState(true)
@@ -64,58 +69,49 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
-  // Get current route character using userDistance (for GPS) or simulationProgress (for demo)
-  const currentCharacter = useMemo(() => {
+  // Get current zone using userDistance
+  const currentZone = useMemo(() => {
     if (!routeZones?.length) return null
     
     const totalDist = routeData?.distance || 15000
     const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
     
-    // Sort zones by startDistance to ensure correct order
     const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
     
-    // Find zone containing current distance
-    const segment = sortedZones.find(s => 
+    const zone = sortedZones.find(s => 
       currentDist >= s.startDistance && currentDist <= s.endDistance
     )
     
-    // If found, use it. Otherwise find the zone that starts closest to 0 (for initial state)
-    if (segment) return segment.character
+    if (zone) return zone
     
-    // For distance=0 or gaps, find the first zone that covers the start
-    const startZone = sortedZones.find(s => s.startDistance <= 100) || sortedZones[0]
-    return startZone?.character || null
+    // Fallback for start of route
+    return sortedZones.find(s => s.startDistance <= 100) || sortedZones[0]
   }, [routeZones, simulationProgress, routeData?.distance, userDistance])
   
-  const characterColors = currentCharacter ? CHARACTER_COLORS[currentCharacter] : null
+  const currentCharacter = currentZone?.character || null
+  const zoneColor = currentCharacter ? ZONE_COLORS[currentCharacter] : ZONE_COLORS.technical
   const characterLabel = currentCharacter ? CHARACTER_LABELS[currentCharacter] : null
 
-  // NEW: Find upcoming highway bend
-  const upcomingHighwayBend = useMemo(() => {
-    if (!highwayBends?.length) return null
+  // Get upcoming curated callouts
+  const upcomingCallouts = useMemo(() => {
+    if (!curatedHighwayCallouts?.length) return []
     
-    const upcoming = highwayBends
-      .filter(bend => {
-        const distanceToBend = bend.distanceFromStart - userDistance
-        return distanceToBend > 0 && distanceToBend < 800  // Look ahead 800m
+    return curatedHighwayCallouts
+      .filter(callout => {
+        const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+        const distanceToCallout = calloutDist - userDistance
+        return distanceToCallout > 0 && distanceToCallout < 2000
       })
-      .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
-    
-    return upcoming[0] || null
-  }, [highwayBends, userDistance])
+      .sort((a, b) => {
+        const distA = a.triggerDistance ?? (a.triggerMile * 1609.34)
+        const distB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+        return distA - distB
+      })
+      .slice(0, 5)
+  }, [curatedHighwayCallouts, userDistance])
 
-  // NEW: Get next few highway bends for "upcoming" display
-  const upcomingHighwayBends = useMemo(() => {
-    if (!highwayBends?.length) return []
-    
-    return highwayBends
-      .filter(bend => {
-        const distanceToBend = bend.distanceFromStart - userDistance
-        return distanceToBend > 0 && distanceToBend < 2000
-      })
-      .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
-      .slice(0, 4)
-  }, [highwayBends, userDistance])
+  // Next callout (for main display)
+  const nextCallout = upcomingCallouts[0] || null
 
   // Calculate route progress
   const routeProgress = useMemo(() => {
@@ -131,10 +127,10 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
       remainingDist: isMetric ? Math.round(remainingDist) : Math.round(remainingDist * 3.28084),
       remainingDistUnit: isMetric ? 'm' : 'ft',
       remainingTime: Math.round(remainingTime / 60),
-      totalCurves: routeData?.curves?.length || 0,
-      curvesPassed: Math.round((routeData?.curves?.length || 0) * progress)
+      totalCurves: curatedHighwayCallouts?.length || routeData?.curves?.length || 0,
+      curvesPassed: Math.round((curatedHighwayCallouts?.length || routeData?.curves?.length || 0) * progress)
     }
-  }, [simulationProgress, routeData, isMetric, userDistance])
+  }, [simulationProgress, routeData, isMetric, userDistance, curatedHighwayCallouts])
 
   // Elevation data
   const { elevationStats } = useMemo(() => {
@@ -174,26 +170,22 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 
   const hasNetworkIssue = !isOnline
 
-  // Determine if we're in a highway zone
-  const inHighwayZone = currentCharacter === ROUTE_CHARACTER.TRANSIT
-  
   // ========================================
-  // HIGHWAY HUD - when in transit zone
+  // CURATED CALLOUT HUD - when we have curated callouts
   // ========================================
-  if (inHighwayZone) {
-    // If there's an upcoming bend, show it
-    if (upcomingHighwayBend) {
-      const bend = upcomingHighwayBend
-      const distanceToBend = bend.distanceFromStart - userDistance
-      const distanceDisplay = isMetric 
-        ? Math.round(distanceToBend) 
-        : Math.round(distanceToBend * 3.28084)
-      
-      const bendColor = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
-      const targetSpeed = bend.optimalSpeed || 70
-      
-      const maxDistance = 500
-      const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToBend) / maxDistance) * 100))
+  if (curatedHighwayCallouts?.length > 0 && nextCallout) {
+    const calloutDist = nextCallout.triggerDistance ?? (nextCallout.triggerMile * 1609.34)
+    const distanceToCallout = calloutDist - userDistance
+    const distanceDisplay = isMetric 
+      ? Math.round(distanceToCallout) 
+      : Math.round(distanceToCallout * 3.28084)
+    
+    // Color based on callout type
+    const calloutColor = getCalloutColor(nextCallout)
+    const targetSpeed = nextCallout.optimalSpeed || 60
+    
+    const maxDistance = 500
+    const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToCallout) / maxDistance) * 100))
 
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
@@ -203,35 +195,30 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
           {/* Top row: Zone badge + stats */}
           <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-white/5">
             <div className="flex items-center gap-2">
-              <ZoneBadge colors={CHARACTER_COLORS[ROUTE_CHARACTER.TRANSIT]} label="HIGHWAY" />
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
             </div>
             <div className="flex items-center gap-4 text-white/40 text-xs">
               <span>{routeProgress.percent}%</span>
               <span>{routeProgress.remainingTime}min</span>
               {settings.showElevation !== false && (
-                <span style={{ color: modeColor }}>↑{elevationStats.current}{elevationUnit}</span>
+                <span style={{ color: zoneColor }}>↑{elevationStats.current}{elevationUnit}</span>
               )}
             </div>
           </div>
 
-          {/* Main highway bend info */}
+          {/* Main callout info */}
           <div className="px-4 py-3">
             <div className="flex items-center gap-4">
               
-              {/* Bend type display */}
-              <HighwayBendDisplay bend={bend} color={bendColor} />
+              {/* Callout type display */}
+              <CalloutDisplay callout={nextCallout} color={calloutColor} />
               
-              {/* Distance and type info */}
+              {/* Callout text and distance */}
               <div className="flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold" style={{ color: bendColor }}>
-                    {bend.isSection ? `${bend.bendCount} bends` : 
-                     bend.isSSweep ? 'S-SWEEP' : 
-                     `${bend.angle}°`}
+                  <span className="text-xl font-bold" style={{ color: calloutColor }}>
+                    {nextCallout.text}
                   </span>
-                  {bend.isSection && (
-                    <span className="text-sm text-white/60">{bend.length}m</span>
-                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-white/50 text-sm">DISTANCE</span>
@@ -245,14 +232,14 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                     className="h-full rounded-full transition-all duration-300"
                     style={{ 
                       width: `${progress}%`,
-                      background: bendColor
+                      background: calloutColor
                     }}
                   />
                 </div>
               </div>
               
               {/* Speed display */}
-              {settings.showSpeedometer !== false ? (
+              {settings.showSpeedometer !== false && (
                 <div className="text-right pl-2 flex flex-col items-end">
                   <div className="flex items-baseline gap-1">
                     <div 
@@ -267,17 +254,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                     </div>
                     <span className="text-xs text-white/40">{speedUnit}</span>
                   </div>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <span className="text-[10px] text-white/40">TARGET</span>
-                    <span className="text-sm font-bold" style={{ color: bendColor }}>{targetSpeed}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-right pl-2">
-                  <div className="text-3xl font-bold tracking-tight leading-none" style={{ color: bendColor, textShadow: `0 0 20px ${bendColor}30` }}>
-                    {targetSpeed}
-                  </div>
-                  <span className="text-[10px] text-white/40">{speedUnit}</span>
                 </div>
               )}
             </div>
@@ -287,19 +263,24 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
           <div className="px-4 pb-2">
             <ProgressBar 
               percent={routeProgress.percent} 
-              modeColor={bendColor}
+              modeColor={zoneColor}
               compact
             />
           </div>
         </div>
 
-        {/* Upcoming highway bends */}
-        {upcomingHighwayBends.length > 1 && (
+        {/* Upcoming callouts */}
+        {upcomingCallouts.length > 1 && (
           <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
             <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
             <div className="flex flex-col gap-1">
-              {upcomingHighwayBends.slice(1, 4).map((next) => (
-                <UpcomingHighwayBendRow key={next.id} bend={next} userDistance={userDistance} isMetric={isMetric} />
+              {upcomingCallouts.slice(1, 4).map((callout, i) => (
+                <UpcomingCalloutRow 
+                  key={callout.id || i} 
+                  callout={callout} 
+                  userDistance={userDistance} 
+                  isMetric={isMetric} 
+                />
               ))}
             </div>
           </div>
@@ -308,9 +289,12 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
         <style>{hudStyles}</style>
       </div>
     )
-    }
-    
-    // Highway zone but no immediate bend - show "clear" state
+  }
+  
+  // ========================================
+  // CLEAR AHEAD - when we have curated callouts but none nearby
+  // ========================================
+  if (curatedHighwayCallouts?.length > 0 && !nextCallout) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
         {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
@@ -318,13 +302,13 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <ZoneBadge colors={CHARACTER_COLORS[ROUTE_CHARACTER.TRANSIT]} label="HIGHWAY" />
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: zoneColor }} />
               <span className="text-white/50 text-sm">Clear ahead</span>
             </div>
             {settings.showSpeedometer !== false && (
               <div className="text-right">
-                <span className="text-2xl font-bold" style={{ color: HIGHWAY_BEND_COLOR }}>
+                <span className="text-2xl font-bold" style={{ color: zoneColor }}>
                   {currentSpeedDisplay}
                 </span>
                 <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
@@ -335,25 +319,13 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
           <div className="mt-3">
             <ProgressBar 
               percent={routeProgress.percent} 
-              modeColor={HIGHWAY_BEND_COLOR}
+              modeColor={zoneColor}
               remainingDist={routeProgress.remainingDist}
               remainingDistUnit={routeProgress.remainingDistUnit}
               remainingTime={routeProgress.remainingTime}
             />
           </div>
         </div>
-
-        {/* Show upcoming highway bends if any */}
-        {upcomingHighwayBends.length > 0 && (
-          <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
-            <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">AHEAD</div>
-            <div className="flex flex-col gap-1">
-              {upcomingHighwayBends.slice(0, 3).map((next) => (
-                <UpcomingHighwayBendRow key={next.id} bend={next} userDistance={userDistance} isMetric={isMetric} />
-              ))}
-            </div>
-          </div>
-        )}
         
         <style>{hudStyles}</style>
       </div>
@@ -361,7 +333,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   }
 
   // ========================================
-  // REGULAR CURVE HUD - non-highway zones
+  // LEGACY CURVE HUD - fallback when no curated callouts
   // ========================================
   
   // No curve view
@@ -377,13 +349,11 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
               <span className="text-white/50 text-sm">
                 {routeMode === 'demo' ? 'Demo Mode' : 'Route Active'}
               </span>
-              {characterColors && characterLabel && (
-                <ZoneBadge colors={characterColors} label={characterLabel.short} />
-              )}
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
             </div>
             {settings.showSpeedometer !== false && (
               <div className="text-right">
-                <span className="text-2xl font-bold" style={{ color: modeColor }}>
+                <span className="text-2xl font-bold" style={{ color: zoneColor }}>
                   {currentSpeedDisplay}
                 </span>
                 <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
@@ -394,7 +364,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
           <div className="mt-3">
             <ProgressBar 
               percent={routeProgress.percent} 
-              modeColor={modeColor}
+              modeColor={zoneColor}
               remainingDist={routeProgress.remainingDist}
               remainingDistUnit={routeProgress.remainingDistUnit}
               remainingTime={routeProgress.remainingTime}
@@ -407,6 +377,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     )
   }
 
+  // Legacy curve display
   const recommendedSpeed = getRecommendedSpeed(curve)
   const severityColor = getCurveColor(curve.severity)
   
@@ -451,9 +422,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                 </div>
               )}
               <span className="text-lg text-white/60">{distanceDisplay}{distanceUnit}</span>
-              {characterColors && characterLabel && (
-                <ZoneBadge colors={characterColors} label={characterLabel.short} size="small" />
-              )}
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} size="small" />
             </div>
             <div className="text-right">
               <span className="text-2xl font-bold" style={{ color: modeColor }}>{recommendedSpeed}</span>
@@ -466,40 +435,32 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     )
   }
 
-  // Full HUD mode
+  // Full legacy HUD
   return (
     <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
       {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
 
       <div className="hud-glass rounded-2xl overflow-hidden">
-        {/* Top row: Zone badge + stats */}
+        {/* Top row */}
         <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-white/5">
           <div className="flex items-center gap-2">
-            {characterColors && characterLabel && (
-              <ZoneBadge colors={characterColors} label={characterLabel.label} />
-            )}
+            <ZoneBadge color={zoneColor} label={characterLabel?.label || 'TECHNICAL'} />
           </div>
           <div className="flex items-center gap-4 text-white/40 text-xs">
             <span>{routeProgress.curvesPassed}/{routeProgress.totalCurves} curves</span>
             <span>{routeProgress.remainingTime}min</span>
-            {settings.showElevation !== false && (
-              <span style={{ color: modeColor }}>↑{elevationStats.current}{elevationUnit}</span>
-            )}
           </div>
         </div>
 
         {/* Main curve info */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-4">
-            
-            {/* Curve display */}
             {curve.isChicane ? (
               <ChicaneDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
             ) : (
               <CurveDisplay curve={curve} severityColor={severityColor} isLeft={isLeft} />
             )}
             
-            {/* Distance and severity info */}
             <div className="flex-1">
               <div className="flex items-baseline gap-2">
                 <span className="text-3xl font-bold" style={{ color: severityColor }}>
@@ -515,7 +476,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                 <span className="text-white/40 text-xs">{distanceUnit}</span>
               </div>
               
-              {/* Braking progress bar */}
               <div className="mt-2 h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div 
                   className="h-full rounded-full transition-all duration-300"
@@ -532,16 +492,14 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
               )}
             </div>
             
-            {/* Speed display */}
-            {settings.showSpeedometer !== false ? (
+            {settings.showSpeedometer !== false && (
               <div className="text-right pl-2 flex flex-col items-end">
                 <div className="flex items-baseline gap-1">
                   <div 
                     className="text-4xl font-bold tracking-tight leading-none"
                     style={{ 
                       color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' : 
-                             currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white',
-                      textShadow: '0 0 20px rgba(255,255,255,0.3)'
+                             currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white'
                     }}
                   >
                     {currentSpeedDisplay}
@@ -553,18 +511,10 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                   <span className="text-sm font-bold" style={{ color: modeColor }}>{recommendedSpeed}</span>
                 </div>
               </div>
-            ) : (
-              <div className="text-right pl-2">
-                <div className="text-3xl font-bold tracking-tight leading-none" style={{ color: modeColor, textShadow: `0 0 20px ${modeColor}30` }}>
-                  {recommendedSpeed}
-                </div>
-                <span className="text-[10px] text-white/40">{speedUnit}</span>
-              </div>
             )}
           </div>
         </div>
         
-        {/* Progress bar at bottom */}
         <div className="px-4 pb-2">
           <ProgressBar 
             percent={routeProgress.percent} 
@@ -574,7 +524,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
         </div>
       </div>
 
-      {/* Upcoming curves */}
       {upcomingCurves.length > 1 && (
         <div className="mt-2 hud-glass rounded-xl px-3 py-2 inline-block">
           <div className="text-[8px] font-semibold text-white/30 tracking-wider mb-1">NEXT</div>
@@ -592,52 +541,54 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 }
 
 // ========================================
-// NEW: Highway Bend Display Component
+// Helper: Get color for curated callout
 // ========================================
-function HighwayBendDisplay({ bend, color }) {
-  if (bend.isSection) {
-    // Active Section display
-    return (
-      <div 
-        className="px-3 py-2 rounded-xl min-w-[60px]"
-        style={{ 
-          background: `linear-gradient(135deg, ${color}20, ${color}10)`,
-          border: `2px solid ${color}60`,
-          boxShadow: `0 0 25px ${color}40`
-        }}
-      >
-        <div className="text-center">
-          <span className="text-[10px] font-bold tracking-wider" style={{ color }}>ACTIVE</span>
-          <div className="text-xl font-bold" style={{ color }}>{bend.bendCount}</div>
-        </div>
-      </div>
-    )
+function getCalloutColor(callout) {
+  // Zone-based default
+  const zoneColors = {
+    technical: '#22d3ee',
+    transit: '#3b82f6',
+    urban: '#f472b6'
   }
   
-  if (bend.isSSweep) {
-    // S-Sweep display
-    const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
-    const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
-    return (
-      <div 
-        className="px-3 py-2 rounded-xl"
-        style={{ 
-          background: `linear-gradient(135deg, ${color}20, ${color}10)`,
-          border: `2px solid ${color}60`,
-          boxShadow: `0 0 25px ${color}40`
-        }}
-      >
-        <div className="text-center">
-          <span className="text-[10px] font-bold tracking-wider" style={{ color }}>S-SWEEP</span>
-          <div className="text-lg font-bold" style={{ color }}>{dir1}{dir2}</div>
-        </div>
-      </div>
-    )
+  // Type-based override
+  if (callout.type === 'danger' || callout.text?.toLowerCase().includes('caution')) {
+    return '#ef4444' // Red
+  }
+  if (callout.type === 'significant') {
+    return '#f97316' // Orange
+  }
+  if (callout.type === 'sequence') {
+    return '#ec4899' // Pink
+  }
+  if (callout.type === 'wake_up') {
+    return '#10b981' // Green
   }
   
-  // Regular sweeper display
-  const isLeft = bend.direction === 'LEFT'
-  const dirArrow = isLeft ? '←' : '→'
+  return zoneColors[callout.zone] || '#22c55e'
+}
+
+// ========================================
+// Callout Display Component
+// ========================================
+function CalloutDisplay({ callout, color }) {
+  // Get short label based on callout
+  const getIcon = () => {
+    if (callout.type === 'danger') return '⚠'
+    if (callout.type === 'sequence') return 'SEQ'
+    if (callout.type === 'wake_up') return '!'
+    if (callout.type === 'transition') return '→'
+    
+    // Extract direction from text
+    const text = callout.text || ''
+    const leftMatch = text.match(/\bleft\b/i)
+    const rightMatch = text.match(/\bright\b/i)
+    
+    if (leftMatch) return '←'
+    if (rightMatch) return '→'
+    
+    return '•'
+  }
   
   return (
     <div 
@@ -648,56 +599,38 @@ function HighwayBendDisplay({ bend, color }) {
         boxShadow: `0 0 25px ${color}40`
       }}
     >
-      <span className="text-[10px] font-bold" style={{ color }}>SW</span>
-      <span className="text-xl font-bold" style={{ color }}>{dirArrow}</span>
+      <span className="text-2xl font-bold" style={{ color }}>{getIcon()}</span>
     </div>
   )
 }
 
 // ========================================
-// NEW: Upcoming Highway Bend Row
+// Upcoming Callout Row
 // ========================================
-function UpcomingHighwayBendRow({ bend, userDistance, isMetric }) {
-  const distanceToBend = bend.distanceFromStart - userDistance
-  const dist = isMetric ? Math.round(distanceToBend) : Math.round(distanceToBend * 3.28084)
+function UpcomingCalloutRow({ callout, userDistance, isMetric }) {
+  const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+  const distanceToCallout = calloutDist - userDistance
+  const dist = isMetric ? Math.round(distanceToCallout) : Math.round(distanceToCallout * 3.28084)
   const unit = isMetric ? 'm' : 'ft'
-  const color = bend.isSection ? ACTIVE_SECTION_COLOR : HIGHWAY_BEND_COLOR
+  const color = getCalloutColor(callout)
   
-  if (bend.isSection) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${color}30`, color }}>ACTIVE</span>
-        <span className="text-[10px] font-bold" style={{ color }}>{bend.bendCount}</span>
-        <span className="text-[10px] text-white/40">{dist}{unit}</span>
-      </div>
-    )
-  }
-  
-  if (bend.isSSweep) {
-    const dir1 = bend.firstBend?.direction === 'LEFT' ? '←' : '→'
-    const dir2 = bend.secondBend?.direction === 'LEFT' ? '←' : '→'
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-bold" style={{ color }}>S{dir1}{dir2}</span>
-        <span className="text-[10px] text-white/40">{dist}{unit}</span>
-      </div>
-    )
-  }
-  
-  const isLeft = bend.direction === 'LEFT'
-  const dirArrow = isLeft ? '←' : '→'
+  // Truncate text if too long
+  const displayText = callout.text?.length > 25 
+    ? callout.text.substring(0, 22) + '...' 
+    : callout.text
   
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs font-bold" style={{ color }}>SW{dirArrow}</span>
-      <span className="text-[10px]" style={{ color }}>{bend.angle}°</span>
-      <span className="text-[10px] text-white/40">{dist}{unit}</span>
+      <span className="text-xs font-bold truncate max-w-[150px]" style={{ color }}>{displayText}</span>
+      <span className="text-[10px] text-white/40 whitespace-nowrap">{dist}{unit}</span>
     </div>
   )
 }
 
-// Zone Badge Component
-function ZoneBadge({ colors, label, size = 'normal' }) {
+// ========================================
+// Zone Badge Component (simplified)
+// ========================================
+function ZoneBadge({ color, label, size = 'normal' }) {
   const padding = size === 'small' ? 'px-1.5 py-0.5' : 'px-2 py-1'
   const fontSize = size === 'small' ? 'text-[8px]' : 'text-[10px]'
   
@@ -705,9 +638,9 @@ function ZoneBadge({ colors, label, size = 'normal' }) {
     <span 
       className={`${padding} rounded ${fontSize} font-bold tracking-wider`}
       style={{ 
-        background: `${colors.primary}25`, 
-        color: colors.primary,
-        border: `1px solid ${colors.primary}50`
+        background: `${color}25`, 
+        color: color,
+        border: `1px solid ${color}50`
       }}
     >
       {label}
@@ -746,7 +679,7 @@ function ProgressBar({ percent, modeColor, remainingDist, remainingDistUnit, rem
   )
 }
 
-// Curve display
+// Legacy curve display
 function CurveDisplay({ curve, severityColor, isLeft }) {
   return (
     <div 
@@ -764,7 +697,7 @@ function CurveDisplay({ curve, severityColor, isLeft }) {
   )
 }
 
-// Chicane display
+// Legacy chicane display
 function ChicaneDisplay({ curve, severityColor, isLeft }) {
   const typeLabel = curve.chicaneType === 'CHICANE' ? 'CH' : 'S'
   return (
@@ -784,7 +717,7 @@ function ChicaneDisplay({ curve, severityColor, isLeft }) {
   )
 }
 
-// Upcoming curve row
+// Legacy upcoming curve row
 function UpcomingCurveRow({ curve }) {
   const isMetric = useStore.getState().settings?.units === 'metric'
   const color = getCurveColor(curve.severity)
