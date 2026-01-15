@@ -897,8 +897,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
   // ================================
   // ================================
-  // BUILD SLEEVE SEGMENTS - FIXED v37
-  // Uses same zone lookup as callouts (distance-based matching)
+  // BUILD SLEEVE SEGMENTS - DEBUG v38
+  // Detailed logging to find mismatch
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
     console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
@@ -914,18 +914,40 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     
     const totalDist = routeData?.distance || 15000
+    const totalMiles = totalDist / 1609.34
+    console.log(`🎨 Total route distance: ${totalDist.toFixed(0)}m (${totalMiles.toFixed(1)} miles)`)
+    console.log(`🎨 Total coordinates: ${coords.length}`)
+    
+    // DEBUG: Log raw input segments
+    console.log('📊 RAW INPUT SEGMENTS (characterSegments):')
+    characterSegments.forEach((seg, i) => {
+      console.log(`   Segment ${i}: character=${seg.character}`)
+      console.log(`      start=${seg.start}, end=${seg.end} (miles?)`)
+      console.log(`      startDistance=${seg.startDistance}, endDistance=${seg.endDistance} (meters?)`)
+    })
+    
     const segments = []
     
+    console.log('📊 VISUAL SLEEVE SEGMENTS (calculated):')
     characterSegments.forEach((seg, i) => {
       // Use same distance calculation as callouts - convert miles to meters if needed
       const startDist = seg.startDistance ?? (seg.start * 1609.34) ?? 0
       const endDist = seg.endDistance ?? (seg.end * 1609.34) ?? totalDist
+      
+      const startMile = startDist / 1609.34
+      const endMile = endDist / 1609.34
       
       // Calculate coordinate indices based on distance
       const startProgress = Math.max(0, startDist / totalDist)
       const endProgress = Math.min(1, endDist / totalDist)
       const startIdx = Math.floor(startProgress * (coords.length - 1))
       const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
+      
+      console.log(`   Segment ${i}: ${seg.character.toUpperCase()}`)
+      console.log(`      Distance: ${startDist.toFixed(0)}m - ${endDist.toFixed(0)}m`)
+      console.log(`      Miles: ${startMile.toFixed(1)} - ${endMile.toFixed(1)}`)
+      console.log(`      Progress: ${(startProgress * 100).toFixed(1)}% - ${(endProgress * 100).toFixed(1)}%`)
+      console.log(`      Coord indices: ${startIdx} - ${endIdx} (of ${coords.length})`)
       
       // Extract coordinates for this segment
       const segCoords = coords.slice(startIdx, endIdx + 1)
@@ -940,12 +962,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           endIdx
         })
         
-        console.log(`🎨 Segment ${i}: ${seg.character} (${colors.primary}) - ${(startDist/1609.34).toFixed(1)}mi to ${(endDist/1609.34).toFixed(1)}mi`)
+        console.log(`      ✓ Created with ${segCoords.length} coords, color ${colors.primary}`)
+      } else {
+        console.log(`      ✗ Skipped - only ${segCoords.length} coords`)
       }
     })
     
-    console.log('🎨 Built', segments.length, 'visual segments:', 
-      segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
+    console.log('🎨 SUMMARY: Built', segments.length, 'visual segments')
     
     return segments
   }, [routeData?.distance])
