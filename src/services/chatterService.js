@@ -17,6 +17,22 @@ const MODEL = 'gpt-4o-mini'
 const ANTHROPIC_MODEL = 'claude-3-5-sonnet-20241022'
 
 // ================================
+// API KEY HELPERS
+// ================================
+
+export function getOpenAIApiKey() {
+  return import.meta.env.VITE_OPENAI_API_KEY || null
+}
+
+export function getAnthropicApiKey() {
+  return import.meta.env.VITE_ANTHROPIC_API_KEY || null
+}
+
+export function hasChatterApiKey() {
+  return !!(getAnthropicApiKey() || getOpenAIApiKey())
+}
+
+// ================================
 // TRIGGER TYPES
 // ================================
 export const CHATTER_TRIGGERS = {
@@ -46,9 +62,13 @@ const MIN_INTERVAL_MILES = 1.5
 // MAIN EXPORT: Generate Chatter Timeline
 // ================================
 
-export async function generateChatterTimeline({ zones, callouts, routeData, elevationData }, apiKey) {
+export async function generateChatterTimeline({ zones, callouts, routeData, elevationData }, openAiKey = null, anthropicKey = null) {
   console.log('🎙️ Highway Chatter Service v2.0 starting...')
   const startTime = Date.now()
+  
+  // Get API keys - prefer passed keys, fall back to env
+  const anthropicApiKey = anthropicKey || getAnthropicApiKey()
+  const openaiApiKey = openAiKey || getOpenAIApiKey()
   
   // Extract highway zones only
   const highwayZones = zones?.filter(z => z.character === 'transit') || []
@@ -85,8 +105,12 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
     return { chatterTimeline: [], stats: routeAnalysis }
   }
   
-  // If no API key, use template-based fallback
-  if (!apiKey) {
+  // Determine which API to use (prefer Anthropic)
+  const useAnthropic = !!anthropicApiKey
+  const effectiveApiKey = anthropicApiKey || openaiApiKey
+  
+  // If no API key at all, use template-based fallback
+  if (!effectiveApiKey) {
     console.log('ℹ️ No API key - using template chatter')
     const templateChatter = generateTemplateChatterV2(triggerPoints, routeAnalysis)
     return { 
@@ -98,7 +122,7 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
   
   // Call LLM to generate varied, contextual chatter with speed variants
   try {
-    const llmChatter = await generateLLMChatterV2(triggerPoints, routeAnalysis, apiKey)
+    const llmChatter = await generateLLMChatterV2(triggerPoints, routeAnalysis, effectiveApiKey, useAnthropic)
     
     const elapsed = Date.now() - startTime
     console.log(`🎙️ Chatter generation complete in ${elapsed}ms`)
@@ -107,7 +131,7 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
     return {
       chatterTimeline: llmChatter,
       stats: routeAnalysis,
-      method: 'llm'
+      method: useAnthropic ? 'claude' : 'openai'
     }
   } catch (err) {
     console.warn('⚠️ LLM chatter failed, using templates:', err.message)
@@ -454,10 +478,48 @@ function generateTriggerPointsV2(analysis, highwayZones, callouts) {
 // LLM CHATTER GENERATION V2 (With Speed Variants)
 // ================================
 
-async function generateLLMChatterV2(triggerPoints, analysis, apiKey) {
-  const prompt = buildChatterPromptV2(triggerPoints, analysis)
+async function generateLLMChatterV2(triggerPoints, analysis, apiKey, useAnthropic = false) {
+  // Process in batches of 4 to avoid response truncation
+  const BATCH_SIZE = 4
+  const results = []
   
-  console.log(`📝 Chatter prompt: ${prompt.length} chars for ${triggerPoints.length} triggers`)
+  console.log(`📝 Generating chatter for ${triggerPoints.length} triggers in ${Math.ceil(triggerPoints.length/BATCH_SIZE)} batches`)
+  
+  for (let i = 0; i < triggerPoints.length; i += BATCH_SIZE) {
+    const batch = triggerPoints.slice(i, i + BATCH_SIZE)
+    const batchNum = Math.floor(i/BATCH_SIZE) + 1
+    
+    console.log(`📝 Batch ${batchNum}: triggers ${i} to ${i + batch.length - 1}`)
+    
+    try {
+      const batchResults = await generateBatchChatter(batch, analysis, apiKey, i)
+      results.push(...batchResults)
+      console.log(`✅ Batch ${batchNum} complete: ${batchResults.length} items`)
+    } catch (err) {
+      console.warn(`⚠️ Batch ${batchNum} failed: ${err.message}, using templates`)
+      // Fallback to templates for this batch
+      batch.forEach((trigger, idx) => {
+        results.push({
+          ...trigger,
+          id: `chatter-${i + idx}`,
+          variants: getTemplateVariantsV2(trigger, analysis),
+          isChatter: true,
+          priority: 3
+        })
+      })
+    }
+    
+    // Small delay between batches to avoid rate limiting
+    if (i + BATCH_SIZE < triggerPoints.length) {
+      await new Promise(r => setTimeout(r, 500))
+    }
+  }
+  
+  return results
+}
+
+async function generateBatchChatter(triggers, analysis, apiKey, startId) {
+  const prompt = buildBatchPrompt(triggers, analysis)
   
   const response = await fetch(OPENAI_API_URL, {
     method: 'POST',
@@ -472,23 +534,71 @@ async function generateLLMChatterV2(triggerPoints, analysis, apiKey) {
         { role: 'user', content: prompt }
       ],
       temperature: 0.7,
-      max_tokens: 4000,
-      response_format: { type: 'json_object' }  // Force JSON output
+      max_tokens: 2500,
+      response_format: { type: 'json_object' }
     })
   })
   
   if (!response.ok) {
-    throw new Error(`OpenAI API error: ${response.status}`)
+    throw new Error(`API error: ${response.status}`)
   }
   
   const data = await response.json()
   const content = data.choices?.[0]?.message?.content
   
   if (!content) {
-    throw new Error('Empty LLM response')
+    throw new Error('Empty response')
   }
   
-  return parseChatterResponseV2(content, triggerPoints)
+  // Parse the response
+  const parsed = JSON.parse(content)
+  const items = parsed.chatter || parsed
+  
+  if (!Array.isArray(items)) {
+    throw new Error('Response is not an array')
+  }
+  
+  // Map results back to triggers
+  return triggers.map((trigger, idx) => {
+    const llmData = items.find(p => p.id === idx) || items[idx]
+    const variants = llmData?.variants || {}
+    const defaultVariants = getTemplateVariantsV2(trigger, analysis)
+    
+    return {
+      ...trigger,
+      id: `chatter-${startId + idx}`,
+      variants: {
+        slow: variants.slow || defaultVariants.slow,
+        cruise: variants.cruise || defaultVariants.cruise,
+        spirited: variants.spirited || defaultVariants.spirited,
+        fast: variants.fast || defaultVariants.fast,
+        flying: variants.flying || defaultVariants.flying
+      },
+      isChatter: true,
+      priority: 3
+    }
+  })
+}
+
+function buildBatchPrompt(triggers, analysis) {
+  let prompt = `Generate chatter for ${triggers.length} highway waypoints.\n\n`
+  prompt += `ROUTE: ${analysis.totalMiles.toFixed(1)}mi total, ${analysis.highwayMiles.toFixed(1)}mi highway (~${analysis.estimatedHighwayMinutes}min at 70mph)\n`
+  prompt += `Curves in highway section: ${analysis.highwayCallouts || 'unknown'}\n\n`
+  
+  prompt += `WAYPOINTS (generate for each):\n`
+  triggers.forEach((t, idx) => {
+    const ctx = t.context || {}
+    prompt += `${idx}. Mile ${t.triggerMile.toFixed(1)}: ${t.type}`
+    if (ctx.milesIntoHighway) prompt += ` | ${ctx.milesIntoHighway}mi into highway`
+    if (ctx.milesRemaining) prompt += ` | ${ctx.milesRemaining}mi remaining`
+    if (ctx.inLongStraight) prompt += ` | in ${ctx.inLongStraight}mi straight`
+    if (ctx.percentComplete) prompt += ` | ${ctx.percentComplete}% complete`
+    prompt += `\n`
+  })
+  
+  prompt += `\nReturn {"chatter":[...]} array with ${triggers.length} items. Each item needs id (0 to ${triggers.length - 1}) and variants object with slow/cruise/spirited/fast/flying arrays containing 2 strings each.`
+  
+  return prompt
 }
 
 function getChatterSystemPromptV2() {
