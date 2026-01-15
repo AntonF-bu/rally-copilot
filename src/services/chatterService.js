@@ -62,7 +62,7 @@ const MIN_INTERVAL_MILES = 1.5
 // MAIN EXPORT: Generate Chatter Timeline
 // ================================
 
-export async function generateChatterTimeline({ zones, callouts, routeData, elevationData }, openAiKey = null, anthropicKey = null) {
+export async function generateChatterTimeline({ zones, callouts, routeData, elevationData, highwayDataDump }, openAiKey = null, anthropicKey = null) {
   console.log('🎙️ Highway Chatter Service v2.0 starting...')
   const startTime = Date.now()
   
@@ -86,7 +86,8 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
     callouts,
     routeData,
     elevationData,
-    highwayZones
+    highwayZones,
+    highwayDataDump  // Pass the rich highway data
   })
   
   console.log('📊 Route analysis:', {
@@ -171,7 +172,7 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
 // ROUTE ANALYSIS
 // ================================
 
-function analyzeRouteForChatter({ zones, callouts, routeData, elevationData, highwayZones }) {
+function analyzeRouteForChatter({ zones, callouts, routeData, elevationData, highwayZones, highwayDataDump }) {
   const totalMiles = (routeData?.distance || 0) / 1609.34
   
   // Calculate highway miles
@@ -185,22 +186,56 @@ function analyzeRouteForChatter({ zones, callouts, routeData, elevationData, hig
   // Target 1 chatter every ~2 minutes
   const targetChatterCount = Math.max(3, Math.ceil(estimatedHighwayMinutes / 2))
   
-  // Find gaps between callouts (potential long straights)
-  const gaps = findCalloutGaps(highwayZones, callouts)
+  // Use highway data dump if available (much richer data!)
+  let gaps, longestStraight, notableFeatures, difficultySpikes, bends
   
-  // Find longest straight
-  const longestStraight = gaps.length > 0 
-    ? gaps.reduce((max, g) => g.lengthMiles > max.lengthMiles ? g : max, gaps[0])
-    : null
+  if (highwayDataDump) {
+    console.log('📊 Using rich highway data dump for chatter')
+    
+    // Extract gaps from dump
+    gaps = (highwayDataDump.gaps || []).map(g => ({
+      startMile: g.start,
+      endMile: g.end,
+      lengthMiles: g.length,
+      startDistance: g.start * 1609.34,
+      endDistance: g.end * 1609.34
+    }))
+    
+    // Find longest straight from gaps
+    longestStraight = gaps.length > 0 
+      ? gaps.reduce((max, g) => g.lengthMiles > max.lengthMiles ? g : max, gaps[0])
+      : null
+    
+    // Extract notable features
+    notableFeatures = (highwayDataDump.notable || []).map(n => ({
+      type: 'sharpest_curve',
+      mile: n.mile,
+      angle: n.angle,
+      direction: n.direction
+    }))
+    
+    // Difficulty spikes
+    difficultySpikes = highwayDataDump.difficultySpikes || []
+    
+    // Bends
+    bends = highwayDataDump.bends || []
+    
+  } else {
+    // Fallback to computed gaps
+    gaps = findCalloutGaps(highwayZones, callouts)
+    longestStraight = gaps.length > 0 
+      ? gaps.reduce((max, g) => g.lengthMiles > max.lengthMiles ? g : max, gaps[0])
+      : null
+    notableFeatures = findNotableFeatures(callouts, highwayZones)
+    difficultySpikes = []
+    bends = []
+  }
   
   // Elevation analysis
   const { elevationGain, elevationLoss } = analyzeElevation(elevationData, highwayZones)
   
-  // Find notable features
-  const notableFeatures = findNotableFeatures(callouts, highwayZones)
-  
   // Count highway callouts
-  const highwayCallouts = (callouts || []).filter(c => c.zone === 'transit').length
+  const highwayCallouts = (callouts || []).filter(c => c.zone === 'transit' || c.zoneType === 'highway').length
   
   // Calculate curves in next zone (for exit preview)
   const technicalZones = zones?.filter(z => z.character === 'technical') || []
@@ -220,7 +255,9 @@ function analyzeRouteForChatter({ zones, callouts, routeData, elevationData, hig
     highwayCallouts,
     highwayZones,
     notableFeatures,
-    nextTechnicalCurves
+    nextTechnicalCurves,
+    difficultySpikes,
+    bends
   }
 }
 
@@ -604,40 +641,101 @@ async function generateBatchChatter(triggers, analysis, apiKey, startId) {
 }
 
 function buildBatchPrompt(triggers, analysis) {
-  let prompt = `Generate chatter for ${triggers.length} highway waypoints.\n\n`
-  prompt += `ROUTE: ${analysis.totalMiles.toFixed(1)}mi total, ${analysis.highwayMiles.toFixed(1)}mi highway (~${analysis.estimatedHighwayMinutes}min at 70mph)\n`
-  prompt += `Curves in highway section: ${analysis.highwayCallouts || 'unknown'}\n\n`
+  let prompt = `ROUTE INTELLIGENCE:\n`
+  prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+  prompt += `Total: ${analysis.totalMiles.toFixed(1)} miles | Highway: ${analysis.highwayMiles.toFixed(1)} miles\n`
+  prompt += `ETA at 70mph: ~${analysis.estimatedHighwayMinutes} minutes\n`
+  prompt += `Highway bends: ${analysis.highwayCallouts || 0} (${((analysis.highwayCallouts || 0) / analysis.highwayMiles).toFixed(1)}/mile)\n`
   
-  prompt += `WAYPOINTS (generate for each):\n`
+  // Add notable features if available
+  if (analysis.longestStraight) {
+    prompt += `Longest straight: ${analysis.longestStraight.lengthMiles?.toFixed(1) || '?'} miles (mile ${analysis.longestStraight.startMile?.toFixed(1) || '?'} to ${analysis.longestStraight.endMile?.toFixed(1) || '?'})\n`
+  }
+  
+  // Add gaps (boring stretches) - these are prime chatter locations
+  if (analysis.gaps?.length > 0) {
+    prompt += `\nQUIET STRETCHES (no curves):\n`
+    analysis.gaps.slice(0, 5).forEach(gap => {
+      prompt += `  • Mile ${gap.startMile?.toFixed(1) || gap.start?.toFixed(1) || '?'}-${gap.endMile?.toFixed(1) || gap.end?.toFixed(1) || '?'}: ${gap.lengthMiles?.toFixed(1) || gap.length?.toFixed(1) || '?'} miles of nothing\n`
+    })
+  }
+  
+  // Add notable features (sharpest curves to warn about)
+  if (analysis.notableFeatures?.length > 0) {
+    prompt += `\nNOTABLE FEATURES:\n`
+    analysis.notableFeatures.forEach(f => {
+      if (f.type === 'sharpest_curve') {
+        prompt += `  • Sharpest: ${f.angle}° ${f.direction} at mile ${f.mile?.toFixed(1)}\n`
+      }
+    })
+  }
+  
+  // Add difficulty spikes
+  if (analysis.difficultySpikes?.length > 0) {
+    prompt += `\nDIFFICULTY SPIKES (sudden increases):\n`
+    analysis.difficultySpikes.slice(0, 3).forEach(spike => {
+      prompt += `  • Mile ${spike.mile?.toFixed(1)}: goes from ${spike.from}° to ${spike.to}° curve\n`
+    })
+  }
+  
+  // Technical section preview
+  if (analysis.nextTechnicalCurves > 0) {
+    prompt += `\nCOMING UP: Technical section with ${analysis.nextTechnicalCurves} curves after highway\n`
+  }
+  
+  prompt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+  prompt += `GENERATE CHATTER FOR THESE ${triggers.length} WAYPOINTS:\n\n`
+  
   triggers.forEach((t, idx) => {
     const ctx = t.context || {}
-    prompt += `${idx}. Mile ${t.triggerMile.toFixed(1)}: ${t.type}`
-    if (ctx.milesIntoHighway) prompt += ` | ${ctx.milesIntoHighway}mi into highway`
-    if (ctx.milesRemaining) prompt += ` | ${ctx.milesRemaining}mi remaining`
-    if (ctx.inLongStraight) prompt += ` | in ${ctx.inLongStraight}mi straight`
-    if (ctx.percentComplete) prompt += ` | ${ctx.percentComplete}% complete`
+    prompt += `[${idx}] Mile ${t.triggerMile?.toFixed(1) || '?'} - ${t.type?.replace(/_/g, ' ') || 'checkpoint'}\n`
+    
+    // Add specific context for each trigger
+    if (ctx.milesIntoHighway) prompt += `    Progress: ${ctx.milesIntoHighway}mi into highway (${ctx.percentComplete || '?'}%)\n`
+    if (ctx.milesRemaining) prompt += `    Remaining: ${ctx.milesRemaining}mi of highway left\n`
+    if (ctx.inLongStraight) prompt += `    Context: Currently in ${ctx.inLongStraight}mi straight stretch\n`
+    if (ctx.nearMilestone) prompt += `    Milestone: ${ctx.nearMilestone} miles completed!\n`
+    if (t.type === 'highway_exit_preview') prompt += `    Note: Technical section starting soon!\n`
     prompt += `\n`
   })
   
-  prompt += `\nReturn {"chatter":[...]} array with ${triggers.length} items. Each item needs id (0 to ${triggers.length - 1}) and variants object with slow/cruise/spirited/fast/flying arrays containing 2 strings each.`
+  prompt += `Return a JSON object: {"chatter":[{id:0,variants:{slow:[...],cruise:[...],spirited:[...],fast:[...],flying:[...]}}, ...]}\n`
+  prompt += `Each speed bracket needs exactly 2 variant strings.`
   
   return prompt
 }
 
 function getChatterSystemPromptV2() {
-  return `You generate highway commentary for a rally co-pilot app. Return a JSON object with a "chatter" array.
+  return `You are an expert rally co-driver generating highway commentary. Your personality: 85% sharp professional, 15% dry British wit.
+
+YOUR DATA ADVANTAGE:
+You have access to detailed route analysis - use it! Reference specific miles, curves, straights, and upcoming features. Generic commentary is failure. Every line should prove you know THIS route.
+
+SPEED BRACKETS (genuinely different tone for each):
+• slow (<55mph): Supportive but restless. "Traffic will ease up." Reference upcoming features to look forward to.
+• cruise (55-70mph): Classic co-driver. Informative, professional. Time/distance updates.  
+• spirited (70-85mph): Appreciative. Note time savings. "Making good progress."
+• fast (85-100mph): Mix of impressed and cautious. Mention speed traps, arrival times at this pace.
+• flying (100+mph): Dry humor about being pulled over. "At this rate we will arrive before we left."
+
+WHAT MAKES GREAT CHATTER:
+✓ "32 miles of highway ahead, longest straight is 9 miles starting at mile 24"
+✓ "Halfway through - 22 miles down, 23 to go. Technical section has 47 curves waiting"
+✓ "5 mile straight coming up. Good time to check mirrors and relax the grip"
+✓ "At this pace you are saving about 8 minutes. Assuming no blue lights"
+✗ "Nice drive ahead" (too generic)
+✗ "Keep going" (useless)
+✗ "You got this" (empty motivation)
 
 RULES:
-- Max 18 words per line
-- Reference specific data (miles, times, curves)
-- Plain ASCII only - no special characters
-- No apostrophes - say "you will" not "you'll"
+1. Max 18 words - must sound natural when spoken
+2. Reference SPECIFIC data from the route analysis
+3. Plain ASCII only - no smart quotes, no apostrophes (say "you will" not "you'll")
+4. Each speed bracket must feel genuinely different
+5. The fast/flying brackets can be playfully cautionary about speed
 
-SPEED BRACKETS:
-- slow (<55mph): Encouraging, patient
-- cruise (55-70): Normal co-pilot info
-- spirited (70-85): Appreciative of pace
-- fast (85-100): Playful speed warnings, blue lights
+OUTPUT: Valid JSON with "chatter" array. Each item has id (integer) and variants (object with 5 arrays of 2 strings each).`
+}
 - flying (100+): Impressed but cautious
 
 Return this exact JSON structure:
