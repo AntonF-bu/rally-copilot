@@ -31,8 +31,8 @@ import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 
 // ================================
-// Rally Co-Pilot App - v21
-// FIXED: Highway mode callouts during navigation
+// Rally Co-Pilot App - v22
+// NEW: Unified curated callout system - matches Preview exactly
 // ================================
 
 const CHARACTER_TO_MODE = {
@@ -57,6 +57,7 @@ export default function App() {
     routeMode,
     routeData,
     routeZones,
+    curatedHighwayCallouts, // NEW: Get curated callouts from store
     goToMenu,
     goToPreview,
     goToDriving,
@@ -67,13 +68,12 @@ export default function App() {
     goToEditor,
   } = useStore()
 
-  // Highway mode hook
+  // Highway mode hook (still used for zone tracking, chatter, etc)
   const {
     isHighwayActive,
     inHighwayZone,
     highwayBends,
     highwayMode,
-    getNextHighwayCallout,
     getProgressCallout,
     getChatter,
     onBendCompleted,
@@ -89,7 +89,10 @@ export default function App() {
   const lastLogRef = useRef(0)
   const lastZoneAnnouncedRef = useRef(null)
   
-  // Track announced highway bends separately
+  // NEW: Track announced curated callouts
+  const announcedCuratedCalloutsRef = useRef(new Set())
+  
+  // LEGACY: Track announced highway bends (fallback only)
   const announcedHighwayBendsRef = useRef(new Set())
   
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
@@ -108,6 +111,7 @@ export default function App() {
     earlyRef.current = new Set()
     finalRef.current = new Set()
     announcedHighwayBendsRef.current = new Set()
+    announcedCuratedCalloutsRef.current = new Set() // NEW
     lastCalloutRef.current = 0
     lastZoneAnnouncedRef.current = null
     setUserDistanceAlongRoute(0)
@@ -121,6 +125,7 @@ export default function App() {
       earlyRef.current = new Set()
       finalRef.current = new Set()
       announcedHighwayBendsRef.current = new Set()
+      announcedCuratedCalloutsRef.current = new Set() // NEW
       lastCalloutRef.current = Date.now() - 5000
       lastZoneAnnouncedRef.current = null
     }
@@ -165,8 +170,7 @@ export default function App() {
       distanceAlong += Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters)
     }
     
-    // Debug log ALWAYS for troubleshooting
-    console.log(`📍 App.jsx Distance: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m, position=[${position[0].toFixed(5)}, ${position[1].toFixed(5)}]`)
+    console.log(`📍 App.jsx Distance: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m`)
     
     setUserDistanceAlongRoute(distanceAlong)
     
@@ -176,25 +180,20 @@ export default function App() {
   useEffect(() => {
     if (!isRunning || !routeZones?.length) return
     
-    // Sort zones by startDistance
     const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
     
-    // DEBUG: Log sorted zones on first run
     if (userDistanceAlongRoute < 10) {
       console.log('🎯 App.jsx sorted zones:', 
         sortedZones.map(z => `${z.character}(${Math.round(z.startDistance)}-${Math.round(z.endDistance)}m)`).join(' → ')
       )
     }
     
-    // Find zone containing current distance
     let zone = sortedZones.find(z => 
       userDistanceAlongRoute >= z.startDistance && userDistanceAlongRoute <= z.endDistance
     )
     
-    // If no zone found (gap or distance=0), find the first zone that covers the start
     if (!zone && userDistanceAlongRoute < 100) {
       zone = sortedZones.find(z => z.startDistance <= 100) || sortedZones[0]
-      console.log(`🎯 Fallback zone for dist=${Math.round(userDistanceAlongRoute)}m: ${zone?.character} (${Math.round(zone?.startDistance || 0)}-${Math.round(zone?.endDistance || 0)}m)`)
     }
     
     if (zone) {
@@ -204,7 +203,6 @@ export default function App() {
         console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
         setCurrentMode(newMode)
         
-        // Announce zone transition (only once per zone)
         if (lastZoneAnnouncedRef.current !== zone.id) {
           const announcement = getZoneAnnouncement(zone.character)
           if (announcement) {
@@ -218,92 +216,73 @@ export default function App() {
   }, [isRunning, routeZones, userDistanceAlongRoute, currentMode, speak])
 
   // ================================
-  // HIGHWAY BEND CALLOUTS
-  // Separate effect for highway-specific bend announcements
+  // UNIFIED CURATED CALLOUT SYSTEM
+  // Uses callouts from Preview (hybrid system output)
+  // This replaces the old highway bend + curve systems
   // ================================
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled) return
-    if (!highwayBends?.length) {
-      // Log occasionally for debugging
-      if (Math.random() < 0.01) console.log('🛣️ No highway bends detected')
-      return
+    
+    // Use curated callouts from store (set by RoutePreview)
+    if (!curatedHighwayCallouts?.length) {
+      return // Will fall back to legacy system below
     }
     
+    const userDist = userDistanceAlongRoute
     const now = Date.now()
-    const minPause = 1500 // Minimum pause between callouts
     
-    if (now - lastCalloutRef.current < minPause) return
+    // Adaptive throttle based on zone
+    const currentZone = routeZones?.find(z => 
+      userDist >= z.startDistance && userDist <= z.endDistance
+    )
+    const minInterval = currentZone?.character === 'technical' ? 2000 
+                      : currentZone?.character === 'urban' ? 3000 
+                      : 4000
     
-    // Find upcoming highway bends
-    const upcomingBends = highwayBends.filter(bend => {
-      const distanceToBend = bend.distanceFromStart - userDistanceAlongRoute
-      return distanceToBend > 0 && distanceToBend < 500 // Look ahead 500m
+    if (now - lastCalloutRef.current < minInterval) return
+    
+    // Adaptive lookahead based on speed
+    const speedMps = (currentSpeed || 30) * 0.44704
+    const lookaheadDistance = Math.max(150, Math.min(500, speedMps * 6))
+    
+    // Find next unannounced callout
+    const nextCallout = curatedHighwayCallouts.find(callout => {
+      if (announcedCuratedCalloutsRef.current.has(callout.id)) return false
+      
+      const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+      const distanceToCallout = calloutDist - userDist
+      
+      return distanceToCallout > 0 && distanceToCallout < lookaheadDistance
     })
     
-    if (upcomingBends.length === 0) return
+    if (!nextCallout) return
     
-    // Get closest bend
-    const nextBend = upcomingBends[0]
-    const distanceToBend = nextBend.distanceFromStart - userDistanceAlongRoute
+    // Speak it!
+    const calloutText = nextCallout.text
+    const isUrgent = ['danger', 'significant'].includes(nextCallout.type) ||
+                     calloutText.toLowerCase().includes('caution') ||
+                     calloutText.toLowerCase().includes('hard')
+    const priority = isUrgent ? 'high' : 'normal'
     
-    // Already announced?
-    if (announcedHighwayBendsRef.current.has(nextBend.id)) return
+    const calloutDist = nextCallout.triggerDistance ?? (nextCallout.triggerMile * 1609.34)
+    console.log(`🎤 CURATED [${nextCallout.zone}/${nextCallout.type}]: "${calloutText}" @ ${Math.round(calloutDist)}m`)
+    speak(calloutText, priority)
     
-    // Check announcement distance based on bend type
-    const announceDistance = nextBend.isSection ? 450 :
-                            nextBend.isSSweep ? 400 : 
-                            nextBend.angle > 20 ? 350 : 
-                            nextBend.angle > 10 ? 300 : 250
+    announcedCuratedCalloutsRef.current.add(nextCallout.id)
+    lastCalloutRef.current = now
     
-    // Log when we're approaching
-    if (distanceToBend <= announceDistance + 50 && distanceToBend > announceDistance) {
-      console.log(`🛣️ Approaching bend: ${nextBend.direction} ${nextBend.angle}° @ ${Math.round(distanceToBend)}m (announce at ${announceDistance}m)`)
+    if (nextCallout.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
+      navigator.vibrate([150])
     }
     
-    if (distanceToBend <= announceDistance) {
-      // Generate callout text from bend data
-      console.log(`🛣️ Getting callout for bend at ${Math.round(distanceToBend)}m`)
-      
-      // Build callout text directly from bend
-      let calloutText = ''
-      if (nextBend.isSection) {
-        calloutText = `Active section ahead. ${nextBend.bendCount} bends over ${Math.round(nextBend.length || 500)} meters.`
-      } else if (nextBend.isSSweep) {
-        const dir1 = nextBend.firstBend?.direction === 'LEFT' ? 'left' : 'right'
-        const dir2 = nextBend.secondBend?.direction === 'LEFT' ? 'left' : 'right'
-        calloutText = `S-sweep ahead. ${dir1} then ${dir2}.`
-      } else {
-        const dir = nextBend.direction === 'LEFT' ? 'left' : 'right'
-        const angle = nextBend.angle || 10
-        if (angle > 20) {
-          calloutText = `Sweeper ${dir}, ${angle} degrees.`
-        } else if (angle > 10) {
-          calloutText = `Gentle ${dir}, ${angle} degrees.`
-        } else {
-          calloutText = `Easy ${dir} ahead.`
-        }
-      }
-      
-      if (calloutText) {
-        console.log(`🛣️ HIGHWAY SPEAKING: "${calloutText}" @ ${Math.round(distanceToBend)}m`)
-        speak(calloutText, 'high')
-        announcedHighwayBendsRef.current.add(nextBend.id)
-        lastCalloutRef.current = now
-        recordCalloutTime()
-      } else {
-        console.log(`🛣️ WARNING: Could not generate callout for bend`)
-      }
-    }
-  }, [isRunning, settings.voiceEnabled, highwayBends, userDistanceAlongRoute, getNextHighwayCallout, speak, recordCalloutTime])
+  }, [isRunning, settings.voiceEnabled, curatedHighwayCallouts, userDistanceAlongRoute, currentSpeed, routeZones, speak, settings.hapticFeedback])
 
   // ================================
   // HIGHWAY COMPANION CHATTER
-  // Periodic fun callouts during quiet stretches
   // ================================
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || !inHighwayZone) return
     
-    // Check for chatter every 10 seconds
     const interval = setInterval(() => {
       const chatter = getChatter()
       if (chatter) {
@@ -316,7 +295,7 @@ export default function App() {
   }, [isRunning, settings.voiceEnabled, inHighwayZone, getChatter, speak])
 
   // ================================
-  // REGULAR CURVE CALLOUTS
+  // LEGACY CURVE CALLOUTS (fallback when no curated callouts)
   // ================================
   useEffect(() => {
     const now = Date.now()
@@ -328,12 +307,11 @@ export default function App() {
         - isRunning: ${isRunning}
         - voiceEnabled: ${settings.voiceEnabled}
         - upcomingCurves.length: ${upcomingCurves.length}
+        - curatedCallouts: ${curatedHighwayCallouts?.length || 0}
         - currentSpeed: ${currentSpeed}
         - currentMode: ${currentMode}
         - routeMode: ${routeMode}
         - isDemoMode: ${isDemoMode}
-        - isHighwayActive: ${isHighwayActive}
-        - highwayBends: ${highwayBends?.length || 0}
         - userDistance: ${Math.round(userDistanceAlongRoute)}m`)
     }
     
@@ -341,9 +319,8 @@ export default function App() {
       return
     }
 
-    // CRITICAL: If highway mode is active, skip regular curve callouts entirely
-    // Highway bends are handled by the separate highway callout effect
-    if (isHighwayActive) {
+    // Skip if curated callouts are handling everything
+    if (curatedHighwayCallouts?.length > 0) {
       return
     }
 
@@ -353,7 +330,7 @@ export default function App() {
     const distance = curve.distance
     const curveId = curve.id
     
-    // Helper: Check if a curve is in a highway zone (transit)
+    // Skip curves in transit zones
     const isCurveInHighwayZone = (curveDistance) => {
       if (!routeZones?.length) return false
       return routeZones.some(zone => 
@@ -363,27 +340,20 @@ export default function App() {
       )
     }
     
-    // Skip if this curve is in a transit/highway zone - highway system handles those
     if (curve.distanceFromStart && isCurveInHighwayZone(curve.distanceFromStart)) {
-      // Don't announce - highway mode handles these zones
       return
     }
     
-    // Get thresholds
     const thresholds = getWarningDistances(currentMode, currentSpeed)
-    
-    // Minimum pause
     const minPause = VOICE_CONFIG[currentMode]?.minPauseBetween || 1200
+    
     if (now - lastCalloutRef.current < minPause) {
       return
     }
     
-    // Check if already announced
     const alreadyAnnounced = announcedRef.current.has(curveId)
     
-    // ================================
-    // EARLY WARNING (severity 4+ only)
-    // ================================
+    // Early warning (severity 4+)
     if (curve.severity >= 4 &&
         distance <= thresholds.early && 
         distance > thresholds.main &&
@@ -391,7 +361,7 @@ export default function App() {
       
       const text = generateEarlyWarning(currentMode, curve)
       if (text && shouldAnnounceCurve(currentMode, curve)) {
-        console.log(`🔊 EARLY: "${text}" @ ${Math.round(distance)}m`)
+        console.log(`🔊 LEGACY EARLY: "${text}" @ ${Math.round(distance)}m`)
         speak(text, 'normal')
         earlyRef.current.add(curveId)
         lastCalloutRef.current = now
@@ -399,9 +369,7 @@ export default function App() {
       }
     }
 
-    // ================================
-    // MAIN CALLOUT
-    // ================================
+    // Main callout
     if (distance <= thresholds.main && 
         distance > thresholds.final &&
         !alreadyAnnounced) {
@@ -409,7 +377,7 @@ export default function App() {
       if (shouldAnnounceCurve(currentMode, curve)) {
         const text = generateCallout(currentMode, curve)
         if (text) {
-          console.log(`🔊 MAIN: "${text}" @ ${Math.round(distance)}m`)
+          console.log(`🔊 LEGACY MAIN: "${text}" @ ${Math.round(distance)}m`)
           speak(text, 'high')
           announcedRef.current.add(curveId)
           setLastAnnouncedCurveId(curveId)
@@ -423,16 +391,14 @@ export default function App() {
       }
     }
     
-    // ================================
-    // CATCH-UP (if we missed main window)
-    // ================================
+    // Catch-up
     if (distance <= thresholds.final && 
         distance > 10 &&
         !alreadyAnnounced) {
       
       const text = generateCallout(currentMode, curve)
       if (text) {
-        console.log(`🔊 CATCH-UP: "${text}" @ ${Math.round(distance)}m (missed main window)`)
+        console.log(`🔊 LEGACY CATCH-UP: "${text}" @ ${Math.round(distance)}m`)
         speak(text, 'high')
         announcedRef.current.add(curveId)
         setLastAnnouncedCurveId(curveId)
@@ -441,9 +407,7 @@ export default function App() {
       }
     }
 
-    // ================================
-    // FINAL WARNING (severity 5+ only)
-    // ================================
+    // Final warning (severity 5+)
     if (curve.severity >= 5 &&
         distance <= thresholds.final && 
         distance > 10 &&
@@ -452,7 +416,7 @@ export default function App() {
       
       const text = generateFinalWarning(currentMode, curve)
       if (text) {
-        console.log(`🔊 FINAL: "${text}"`)
+        console.log(`🔊 LEGACY FINAL: "${text}"`)
         speak(text, 'high')
         finalRef.current.add(curveId)
         lastCalloutRef.current = now
@@ -463,7 +427,7 @@ export default function App() {
       }
     }
 
-  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode, routeZones, userDistanceAlongRoute])
+  }, [isRunning, upcomingCurves, currentSpeed, settings, setLastAnnouncedCurveId, speak, currentMode, routeZones, userDistanceAlongRoute, curatedHighwayCallouts])
 
   // ================================
   // HIGHWAY PROGRESS CALLOUTS
@@ -496,6 +460,7 @@ export default function App() {
     earlyRef.current = new Set()
     finalRef.current = new Set()
     announcedHighwayBendsRef.current = new Set()
+    announcedCuratedCalloutsRef.current = new Set()
     lastCalloutRef.current = Date.now() - 5000
     resetHighwayTrip()
     goToDriving()
