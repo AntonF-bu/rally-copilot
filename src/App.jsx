@@ -42,7 +42,7 @@ const CHARACTER_TO_MODE = {
 }
 
 export default function App() {
-  const { speak } = useSpeech()
+  const { speak, initAudio } = useSpeech()
   
   const {
     isRunning,
@@ -132,9 +132,11 @@ export default function App() {
   }, [isRunning])
 
   // Calculate user's distance along route from position
+  // OPTIMIZED: Use cached index and only search nearby points
+  const lastClosestIdxRef = useRef(0)
+  
   useEffect(() => {
     if (!isRunning || !position || !routeData?.coordinates) {
-      console.log(`📍 Distance calc skipped: isRunning=${isRunning}, position=${!!position}, coords=${!!routeData?.coordinates}`)
       return
     }
     
@@ -146,31 +148,41 @@ export default function App() {
     }
     
     // In live GPS mode, calculate from position
+    // OPTIMIZATION: Only search near the last known position
     const coords = routeData.coordinates
-    let minDist = Infinity
-    let closestIdx = 0
+    const searchRadius = 50 // Only check 50 points in each direction
+    const startIdx = Math.max(0, lastClosestIdxRef.current - searchRadius)
+    const endIdx = Math.min(coords.length - 1, lastClosestIdxRef.current + searchRadius)
     
-    for (let i = 0; i < coords.length; i++) {
+    let minDist = Infinity
+    let closestIdx = lastClosestIdxRef.current
+    
+    for (let i = startIdx; i <= endIdx; i++) {
       const dx = coords[i][0] - position[0]
       const dy = coords[i][1] - position[1]
-      const dist = Math.sqrt(dx * dx + dy * dy)
+      const dist = dx * dx + dy * dy // Skip sqrt for comparison
       if (dist < minDist) {
         minDist = dist
         closestIdx = i
       }
     }
     
-    // Calculate actual distance along route to closest point
-    let distanceAlong = 0
-    for (let i = 0; i < closestIdx && i < coords.length - 1; i++) {
-      const dx = coords[i + 1][0] - coords[i][0]
-      const dy = coords[i + 1][1] - coords[i][1]
-      const dxMeters = dx * 111320 * Math.cos(coords[i][1] * Math.PI / 180)
-      const dyMeters = dy * 110540
-      distanceAlong += Math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters)
+    // Update cached index
+    lastClosestIdxRef.current = closestIdx
+    
+    // Use pre-calculated distances if available, otherwise estimate
+    let distanceAlong
+    if (routeData.cumulativeDistances?.[closestIdx]) {
+      distanceAlong = routeData.cumulativeDistances[closestIdx]
+    } else {
+      // Estimate based on index ratio
+      distanceAlong = (closestIdx / coords.length) * (routeData.distance || 15000)
     }
     
-    console.log(`📍 App.jsx Distance: closestIdx=${closestIdx}, distanceAlong=${Math.round(distanceAlong)}m`)
+    // Only log occasionally to reduce console spam
+    if (Math.random() < 0.1) {
+      console.log(`📍 Distance: idx=${closestIdx}, dist=${Math.round(distanceAlong)}m`)
+    }
     
     setUserDistanceAlongRoute(distanceAlong)
     
@@ -252,7 +264,7 @@ export default function App() {
       const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
       const distanceToCallout = calloutDist - userDist
       
-      return distanceToCallout > 15 && distanceToCallout < lookaheadDistance
+      return distanceToCallout > 0 && distanceToCallout < lookaheadDistance
     })
     
     if (!nextCallout) return
@@ -279,19 +291,31 @@ export default function App() {
 
   // ================================
   // HIGHWAY COMPANION CHATTER
+  // FIXED: Added mounted check and longer interval
   // ================================
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || !inHighwayZone) return
     
-    const interval = setInterval(() => {
-      const chatter = getChatter()
-      if (chatter) {
-        console.log(`🎤 CHATTER: "${chatter}"`)
-        speak(chatter, 'low')
-      }
-    }, 10000)
+    let mounted = true
     
-    return () => clearInterval(interval)
+    const interval = setInterval(() => {
+      if (!mounted) return
+      
+      try {
+        const chatter = getChatter()
+        if (chatter && mounted) {
+          console.log(`🎤 CHATTER: "${chatter}"`)
+          speak(chatter, 'low')
+        }
+      } catch (e) {
+        console.warn('Chatter error:', e.message)
+      }
+    }, 15000) // Increased from 10s to 15s
+    
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
   }, [isRunning, settings.voiceEnabled, inHighwayZone, getChatter, speak])
 
   // ================================
@@ -300,19 +324,10 @@ export default function App() {
   useEffect(() => {
     const now = Date.now()
     
-    // Log state every 2 seconds
-    if (now - lastLogRef.current > 2000) {
+    // Log state every 10 seconds instead of 2 (reduces iOS pressure)
+    if (now - lastLogRef.current > 10000) {
       lastLogRef.current = now
-      console.log(`🔍 CALLOUT DEBUG:
-        - isRunning: ${isRunning}
-        - voiceEnabled: ${settings.voiceEnabled}
-        - upcomingCurves.length: ${upcomingCurves.length}
-        - curatedCallouts: ${curatedHighwayCallouts?.length || 0}
-        - currentSpeed: ${currentSpeed}
-        - currentMode: ${currentMode}
-        - routeMode: ${routeMode}
-        - isDemoMode: ${isDemoMode}
-        - userDistance: ${Math.round(userDistanceAlongRoute)}m`)
+      console.log(`🔍 DEBUG: running=${isRunning}, curated=${curatedHighwayCallouts?.length || 0}, speed=${currentSpeed}, mode=${currentMode}`)
     }
     
     if (!isRunning || !settings.voiceEnabled || upcomingCurves.length === 0) {
@@ -455,7 +470,10 @@ export default function App() {
   }, [isRunning, upcomingCurves])
 
   // Navigation handlers
-  const handleStartNavigation = () => {
+  const handleStartNavigation = async () => {
+    // CRITICAL: Unlock audio on iOS before navigation starts
+    await initAudio()
+    
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
