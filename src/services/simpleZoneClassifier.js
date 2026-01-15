@@ -1,28 +1,73 @@
 // ================================
-// Simple Zone Classifier v4.0
+// Simple Zone Classifier v5.0
 // 
 // SIMPLE RULES:
-// 1. Interstate/US Highway → TRANSIT
+// 1. Interstate/US Highway → TRANSIT (always, regardless of urban context)
 // 2. State Route → TECHNICAL  
-// 3. Local Road → check symbolrank:
-//      - symbolrank 1-10 (city/town) → URBAN
-//      - symbolrank 11-19 (rural) → TECHNICAL
+// 3. Local Road → TECHNICAL
 // 4. Gaps after/before highways → TECHNICAL (ramps)
 // 5. Tiny transit segments (<0.5mi) surrounded by non-transit → absorb
+// 6. POST-PROCESS: Urban overlay - TECHNICAL in major cities → URBAN
 //
-// That's it. No curve analysis. No census data.
+// Key principle: TRANSIT (highway) is NEVER changed to URBAN
+// Only TECHNICAL zones can become URBAN based on city context
 // ================================
+
+import { detectUrbanSections, applyUrbanOverlay } from './urbanDetectionService'
 
 /**
  * Main entry: Classify zones from road segments
+ * Now ASYNC because it calls urban detection
  * 
  * @param {Array} roadSegments - From extractRoadRefs() in routeService
- *   Each segment: { startMile, endMile, ref, name, roadClass, symbolrank? }
+ *   Each segment: { startMile, endMile, ref, name, roadClass }
  * @param {number} totalMiles - Total route length in miles
- * @returns {Array} Zones: [{ startMile, endMile, character, road }]
+ * @param {Array} coordinates - Route coordinates for urban detection
+ * @param {number} totalDistanceMeters - Total route distance in meters
+ * @returns {Promise<Array>} Zones: [{ start, end, character, road, ... }]
  */
-export function classifyByRoadName(roadSegments, totalMiles) {
-  console.log('🛣️ Simple Zone Classifier v4.0')
+export async function classifyZones(roadSegments, totalMiles, coordinates, totalDistanceMeters) {
+  console.log('🛣️ Simple Zone Classifier v5.0')
+  console.log(`   Road segments: ${roadSegments?.length || 0}`)
+  console.log(`   Total miles: ${totalMiles?.toFixed(1)}`)
+  
+  // Step 1: Classify by road name (sync)
+  const roadBasedZones = classifyByRoadName(roadSegments, totalMiles)
+  
+  // Step 2: Apply urban overlay (async - queries Mapbox)
+  let finalZones = roadBasedZones
+  
+  if (coordinates?.length > 0 && totalDistanceMeters > 0) {
+    try {
+      console.log('\n🏙️ Detecting urban sections...')
+      const urbanSections = await detectUrbanSections(
+        coordinates,
+        totalDistanceMeters,
+        1  // Sample every 1 mile
+      )
+      
+      // Apply urban overlay (only changes TECHNICAL → URBAN, never TRANSIT)
+      finalZones = applyUrbanOverlay(roadBasedZones, urbanSections)
+    } catch (urbanErr) {
+      console.warn('⚠️ Urban detection failed, using road-based zones:', urbanErr.message)
+    }
+  }
+  
+  // Step 3: Convert to standard format
+  return convertToStandardFormat(finalZones, totalDistanceMeters)
+}
+
+/**
+ * Synchronous version - classifies by road name only (no urban detection)
+ * Use this if you need sync behavior or will apply urban overlay separately
+ * 
+ * @param {Array} roadSegments - From extractRoadRefs() in routeService
+ * @param {number} totalMiles - Total route length in miles
+ * @param {Array} curves - Optional curves for gap analysis (legacy, not used in v5)
+ * @returns {Array} Zones in mile format: [{ startMile, endMile, character, road }]
+ */
+export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
+  console.log('🛣️ Simple Zone Classifier v5.0 (road-based)')
   console.log(`   Road segments: ${roadSegments?.length || 0}`)
   console.log(`   Total miles: ${totalMiles?.toFixed(1)}`)
   
@@ -40,8 +85,7 @@ export function classifyByRoadName(roadSegments, totalMiles) {
   console.log('   Road segments:')
   roadSegments.forEach(seg => {
     const roadName = seg.ref || seg.name || 'unnamed'
-    const rankInfo = seg.symbolrank ? ` [rank:${seg.symbolrank}]` : ''
-    console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})${rankInfo}`)
+    console.log(`      Mile ${seg.startMile.toFixed(1)}-${seg.endMile.toFixed(1)}: ${roadName} (${seg.roadClass})`)
   })
   
   // ========================================
@@ -61,6 +105,7 @@ export function classifyByRoadName(roadSegments, totalMiles) {
   for (let i = 0; i < classifiedSegments.length; i++) {
     const seg = classifiedSegments[i]
     const prevSeg = i > 0 ? classifiedSegments[i - 1] : null
+    const nextSeg = i < classifiedSegments.length - 1 ? classifiedSegments[i + 1] : null
     
     // Check for gap before this segment
     if (seg.startMile > currentMile + 0.01) {
@@ -69,59 +114,50 @@ export function classifyByRoadName(roadSegments, totalMiles) {
         startMile: currentMile,
         endMile: seg.startMile,
         character: gapZone,
-        road: '[gap]',
-        isGap: true
+        road: '[gap]'
       })
     }
     
-    // Add this segment
+    // Add this segment's zone
     zones.push({
-      startMile: seg.startMile,
+      startMile: Math.max(seg.startMile, currentMile),
       endMile: seg.endMile,
       character: seg.zone,
-      road: seg.ref || seg.name || 'unnamed',
-      roadClass: seg.roadClass
+      road: seg.ref || seg.name || 'unnamed'
     })
     
     currentMile = seg.endMile
   }
   
-  // Check for gap at end of route
+  // Fill gap at end if needed
   if (currentMile < totalMiles - 0.01) {
     const lastSeg = classifiedSegments[classifiedSegments.length - 1]
-    const endZone = isHighway(lastSeg?.roadClass) ? 'technical' : (lastSeg?.zone || 'technical')
     zones.push({
       startMile: currentMile,
       endMile: totalMiles,
-      character: endZone,
-      road: '[end]',
-      isGap: true
+      character: 'technical',  // Default to technical at route end
+      road: '[end]'
     })
   }
   
   // ========================================
   // STEP 3: Merge adjacent zones with same character
   // ========================================
-  let mergedZones = mergeAdjacentZones(zones)
+  const mergedZones = mergeAdjacentZones(zones)
   
   // ========================================
   // STEP 4: Absorb tiny transit segments
   // ========================================
-  mergedZones = absorbTinyTransit(mergedZones, 0.5)
+  const finalZones = absorbTinyTransit(mergedZones, 0.5)
   
-  // ========================================
-  // STEP 5: Final merge after absorption
-  // ========================================
-  mergedZones = mergeAdjacentZones(mergedZones)
-  
-  // Log final result
+  // Log final zones
   console.log('   Final zones:')
-  mergedZones.forEach((z, i) => {
+  finalZones.forEach((z, i) => {
     const length = (z.endMile - z.startMile).toFixed(1)
     console.log(`      ${i + 1}. Mile ${z.startMile.toFixed(1)}-${z.endMile.toFixed(1)}: ${z.character.toUpperCase()} (${z.road}) [${length}mi]`)
   })
   
-  return mergedZones
+  return finalZones
 }
 
 /**
@@ -141,12 +177,6 @@ function classifyRoad(segment) {
       return 'technical'
     
     case 'local':
-      // Check symbolrank for urban vs technical
-      // 1-10 = city/town = urban
-      // 11-19 or missing = rural = technical
-      if (segment.symbolrank && segment.symbolrank <= 10) {
-        return 'urban'
-      }
       return 'technical'
     
     default:
@@ -218,7 +248,7 @@ function mergeAdjacentZones(zones) {
  * Absorb tiny transit segments surrounded by non-transit
  * e.g., 0.1mi of US-202 in the middle of local roads
  */
-function absorbTinyTransit(zones, minLength) {
+function absorbTinyTransit(zones, minLength = 0.5) {
   if (zones.length < 3) return zones
   
   const result = []
@@ -251,18 +281,25 @@ function absorbTinyTransit(zones, minLength) {
 
 /**
  * Convert zones to standard format for the rest of the app
+ * Adds both mile and meter measurements
  */
 export function convertToStandardFormat(zones, totalDistanceMeters) {
   return zones.map(z => ({
+    // Meter-based (primary for distance calculations)
     start: z.startMile * 1609.34,
     end: z.endMile * 1609.34,
     startDistance: z.startMile * 1609.34,
     endDistance: z.endMile * 1609.34,
+    // Mile-based (for display)
     startMile: z.startMile,
     endMile: z.endMile,
-    character: z.character,
     lengthMiles: z.endMile - z.startMile,
-    road: z.road
+    // Classification
+    character: z.character,
+    road: z.road,
+    // Urban context (if set by applyUrbanOverlay)
+    urbanPlace: z.urbanPlace || null,
+    urbanNeighborhood: z.urbanNeighborhood || null
   }))
 }
 
@@ -341,7 +378,6 @@ export function getZoneAtDistance(distance, zones) {
 
 /**
  * Extract curve-like events for analysis (legacy compatibility)
- * Not used by v4 classifier but may be needed by other components
  */
 export function extractCurvesFromEvents(events) {
   if (!events || events.length === 0) return []
@@ -349,7 +385,7 @@ export function extractCurvesFromEvents(events) {
   return events
     .filter(e => (e.angle ?? e.totalAngle ?? 0) >= 10)
     .map(e => ({
-      mile: e.mile ?? (e.distance / 1609.34) ?? 0,
+      mile: e.mile ?? e.apexMile ?? (e.distance / 1609.34) ?? 0,
       angle: e.angle ?? e.totalAngle ?? 0,
       direction: e.direction || 'unknown',
       type: e.type || 'curve'
@@ -357,6 +393,7 @@ export function extractCurvesFromEvents(events) {
 }
 
 export default {
+  classifyZones,
   classifyByRoadName,
   convertToStandardFormat,
   reassignEventZones,
