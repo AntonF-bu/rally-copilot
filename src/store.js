@@ -63,6 +63,10 @@ const useStore = create(
       // These are the FINAL callouts to show, after LLM merges/filters raw bends
       curatedHighwayCallouts: [],
       
+      // Highway companion chatter timeline (pre-generated in Preview)
+      // Only plays in companion mode, during highway zones
+      chatterTimeline: [],
+      
       // AI Agent briefing result (full analysis)
       agentBriefing: null,
       
@@ -199,6 +203,11 @@ const useStore = create(
       setCuratedHighwayCallouts: (callouts) => set({ curatedHighwayCallouts: callouts }),
       
       clearCuratedHighwayCallouts: () => set({ curatedHighwayCallouts: [] }),
+      
+      // ========== Chatter Timeline Actions ==========
+      setChatterTimeline: (timeline) => set({ chatterTimeline: timeline }),
+      
+      clearChatterTimeline: () => set({ chatterTimeline: [] }),
       
       // ========== AI Agent Briefing Actions ==========
       setAgentBriefing: (briefing) => set({ agentBriefing: briefing }),
@@ -419,7 +428,8 @@ const useStore = create(
         upcomingCurves: [],
         activeCurve: null,
         highwayBends: [],
-        calloutVariants: {}  // Also clear callout variants when route is cleared
+        calloutVariants: {},
+        chatterTimeline: []  // Also clear chatter when route is cleared
       }),
       
       setActiveCurve: (curve) => set({ activeCurve: curve }),
