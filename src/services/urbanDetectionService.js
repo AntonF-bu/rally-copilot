@@ -5,37 +5,46 @@
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 
-// Symbolrank thresholds (lower = bigger city)
-// 1-4 = major metros (Boston, NYC, Chicago, etc.)
-// 5-8 = large cities (Worcester, Springfield, etc.)
-// 9-12 = medium cities/large towns
-// 13-15 = small towns
-// 16-19 = neighborhoods/hamlets (Back Bay, Fenway, etc.)
-const URBAN_THRESHOLD = 8       // symbolrank <= 8 = urban (cities)
-const SUBURBAN_THRESHOLD = 12   // symbolrank 9-12 = suburban (towns)
-// Note: 13+ are neighborhoods/hamlets - we need to look PAST these to find the city
+// Known major cities and their population (for urban classification)
+// This is a fallback - we primarily use Mapbox's place type
+const MAJOR_CITIES = new Set([
+  'boston', 'new york', 'chicago', 'los angeles', 'philadelphia',
+  'san francisco', 'seattle', 'denver', 'atlanta', 'miami',
+  'washington', 'baltimore', 'pittsburgh', 'cleveland', 'detroit',
+  'minneapolis', 'st. louis', 'dallas', 'houston', 'phoenix',
+  'san diego', 'portland', 'las vegas', 'austin', 'san antonio',
+  // Add MA cities
+  'worcester', 'springfield', 'cambridge', 'lowell', 'brockton',
+  'new bedford', 'quincy', 'lynn', 'fall river', 'newton',
+  'somerville', 'lawrence', 'framingham', 'haverhill', 'waltham'
+])
+
+// Medium cities/large towns - suburban classification
+const MEDIUM_CITIES = new Set([
+  'auburn', 'ludlow', 'amherst', 'northampton', 'westfield',
+  'chicopee', 'holyoke', 'agawam', 'palmer', 'ware',
+  'natick', 'wellesley', 'needham', 'dedham', 'brookline'
+])
 
 /**
- * Query Mapbox Vector Tiles for nearby place labels
- * Uses a LARGE radius to find city-level labels (not just neighborhoods)
+ * Query Mapbox Geocoding API for reverse geocoding
+ * This gives us the full place hierarchy: neighborhood → city → state
  * 
  * @param {number} lng - Longitude
  * @param {number} lat - Latitude  
- * @param {number} radiusKm - Search radius in kilometers (default 15km to catch cities)
- * @returns {Object|null} Most significant place found, or null
+ * @returns {Object|null} Place info with city context
  */
-async function queryPlaceLabel(lng, lat, radiusKm = 15) {
-  const url = `https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/${lng},${lat}.json?` +
-    `layers=place_label&` +
-    `radius=${radiusKm * 1000}&` +
-    `limit=50&` +  // Get more results to find city-level labels
+async function queryPlaceLabel(lng, lat) {
+  // Use reverse geocoding to get place hierarchy
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?` +
+    `types=neighborhood,locality,place&` +
     `access_token=${MAPBOX_TOKEN}`
   
   try {
     const response = await fetch(url)
     
     if (!response.ok) {
-      console.warn(`🏙️ Place query failed: ${response.status}`)
+      console.warn(`🏙️ Geocoding failed: ${response.status}`)
       return null
     }
     
@@ -45,67 +54,62 @@ async function queryPlaceLabel(lng, lat, radiusKm = 15) {
       return null
     }
     
-    // Filter to only place labels with symbolrank
-    const places = data.features
-      .filter(f => f.properties?.symbolrank !== undefined)
+    // Parse the response to extract place hierarchy
+    const feature = data.features[0]
+    const context = feature.context || []
     
-    if (!places.length) {
-      return null
+    // Find the city/place from context
+    // Context items have ids like "place.123456" or "locality.789"
+    let cityName = null
+    let neighborhood = null
+    let placeType = feature.place_type?.[0] || 'unknown'
+    
+    // The main feature might be neighborhood, locality, or place
+    if (placeType === 'neighborhood') {
+      neighborhood = feature.text
+      // Look in context for the city
+      const placeContext = context.find(c => c.id?.startsWith('place.'))
+      const localityContext = context.find(c => c.id?.startsWith('locality.'))
+      cityName = placeContext?.text || localityContext?.text || null
+    } else if (placeType === 'locality' || placeType === 'place') {
+      cityName = feature.text
     }
     
-    // Find the most significant place (lowest symbolrank)
-    // This should give us cities over neighborhoods
-    const sortedByRank = [...places].sort((a, b) => 
-      a.properties.symbolrank - b.properties.symbolrank
-    )
-    
-    const best = sortedByRank[0]
-    
-    // Also find the nearest place for context
-    const sortedByDistance = [...places].sort((a, b) => 
-      (a.properties.tilequery?.distance || 0) - (b.properties.tilequery?.distance || 0)
-    )
-    const nearest = sortedByDistance[0]
-    
-    // Log what we found for debugging
-    const cityLevel = sortedByRank.filter(p => p.properties.symbolrank <= 8)
-    if (cityLevel.length > 0) {
-      console.log(`      Found city: ${cityLevel[0].properties.name} (rank ${cityLevel[0].properties.symbolrank})`)
-    }
+    // Determine urban classification based on city name
+    const cityLower = (cityName || '').toLowerCase()
+    const isUrban = MAJOR_CITIES.has(cityLower)
+    const isSuburban = MEDIUM_CITIES.has(cityLower) || 
+                       (cityName && !isUrban && placeType === 'place')
     
     return {
-      name: best.properties.name || 'Unknown',
-      symbolrank: best.properties.symbolrank,
-      type: best.properties.type || 'place',
-      distance: best.properties.tilequery?.distance || 0,
-      filterrank: best.properties.filterrank,
-      // Also include nearest for context
-      nearestName: nearest?.properties?.name,
-      nearestRank: nearest?.properties?.symbolrank
+      name: cityName || neighborhood || 'Unknown',
+      neighborhood: neighborhood,
+      cityName: cityName,
+      placeType: placeType,
+      isUrban: isUrban,
+      isSuburban: isSuburban,
+      fullPlaceName: feature.place_name
     }
   } catch (err) {
-    console.warn('🏙️ Place label query error:', err.message)
+    console.warn('🏙️ Geocoding error:', err.message)
     return null
   }
 }
 
 /**
- * Classify urban density based on symbolrank
+ * Classify urban density based on place info from geocoding
  * 
- * KEY INSIGHT: Mapbox symbolrank correlates with city SIZE, not density.
- * - rank 1-4: Major metros (Boston, NYC) → URBAN
- * - rank 5-8: Large cities (Worcester, Springfield) → URBAN  
- * - rank 9-12: Medium towns (Auburn, Ludlow) → SUBURBAN
- * - rank 13+: Small towns, neighborhoods → RURAL (for our purposes)
- * 
- * @param {number} symbolrank - Mapbox symbolrank (1-19)
+ * @param {Object} placeInfo - Place info from queryPlaceLabel
  * @returns {string} 'urban', 'suburban', or 'rural'
  */
-function classifyDensity(symbolrank) {
-  if (symbolrank === null || symbolrank === undefined) return 'rural'
-  if (symbolrank <= URBAN_THRESHOLD) return 'urban'      // Cities (rank 1-8)
-  if (symbolrank <= SUBURBAN_THRESHOLD) return 'suburban' // Towns (rank 9-12)
-  return 'rural'  // Neighborhoods/hamlets (rank 13+)
+function classifyDensity(placeInfo) {
+  if (!placeInfo) return 'rural'
+  
+  // Use the flags we set during geocoding
+  if (placeInfo.isUrban) return 'urban'
+  if (placeInfo.isSuburban) return 'suburban'
+  
+  return 'rural'
 }
 
 /**
@@ -194,13 +198,14 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
     const sample = samples[i]
     const place = await queryPlaceLabel(sample.coord[0], sample.coord[1])
     
+    const density = classifyDensity(place)
+    
     results.push({
       mile: sample.mile,
-      place: place?.name || null,
-      symbolrank: place?.symbolrank ?? 99,
-      density: place ? classifyDensity(place.symbolrank) : 'rural',
-      nearestName: place?.nearestName || null,
-      nearestRank: place?.nearestRank || null
+      place: place?.cityName || place?.name || null,
+      neighborhood: place?.neighborhood || null,
+      density: density,
+      fullPlaceName: place?.fullPlaceName || null
     })
     
     // Rate limiting - 50ms delay between requests
@@ -209,15 +214,13 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
     }
   }
   
-  // Log sample results - show both city-level and neighborhood
+  // Log sample results - show city and neighborhood context
   console.log(`   Sample results:`)
   results.forEach(r => {
     const icon = r.density === 'urban' ? '🏙️' : r.density === 'suburban' ? '🏘️' : '🌲'
-    const cityInfo = r.place ? `${r.place} (rank ${r.symbolrank})` : ''
-    const neighborhoodInfo = r.nearestName && r.nearestName !== r.place 
-      ? ` [near ${r.nearestName}]` 
-      : ''
-    console.log(`      Mile ${r.mile.toFixed(1)}: ${icon} ${r.density}${cityInfo ? ` - ${cityInfo}` : ''}${neighborhoodInfo}`)
+    const cityInfo = r.place || ''
+    const neighborhoodInfo = r.neighborhood ? ` [${r.neighborhood}]` : ''
+    console.log(`      Mile ${r.mile.toFixed(1)}: ${icon} ${r.density.toUpperCase()} - ${cityInfo}${neighborhoodInfo}`)
   })
   
   // Consolidate consecutive samples with same density into sections
@@ -226,7 +229,7 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
     startMile: 0, 
     density: results[0]?.density || 'rural',
     placeName: results[0]?.place,
-    symbolrank: results[0]?.symbolrank
+    neighborhood: results[0]?.neighborhood
   }
   
   for (let i = 1; i < results.length; i++) {
@@ -244,12 +247,12 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
         startMile: results[i].mile,
         density: currDensity,
         placeName: results[i].place,
-        symbolrank: results[i].symbolrank
+        neighborhood: results[i].neighborhood
       }
     } else if (results[i].place && !currentSection.placeName) {
       // Update place name if we found one
       currentSection.placeName = results[i].place
-      currentSection.symbolrank = results[i].symbolrank
+      currentSection.neighborhood = results[i].neighborhood
     }
   }
   
@@ -262,7 +265,8 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
   sections.forEach((s, i) => {
     const icon = s.density === 'urban' ? '🏙️' : s.density === 'suburban' ? '🏘️' : '🌲'
     const length = (s.endMile - s.startMile).toFixed(1)
-    console.log(`      ${i + 1}. ${icon} ${s.density.toUpperCase()} (${s.startMile.toFixed(1)}-${s.endMile.toFixed(1)}mi, ${length}mi)${s.placeName ? ` near ${s.placeName}` : ''}`)
+    const placeInfo = s.placeName ? ` - ${s.placeName}` : ''
+    console.log(`      ${i + 1}. ${icon} ${s.density.toUpperCase()} (${s.startMile.toFixed(1)}-${s.endMile.toFixed(1)}mi, ${length}mi)${placeInfo}`)
   })
   
   return sections
@@ -300,12 +304,12 @@ export function applyUrbanOverlay(zones, urbanSections) {
     )
     
     if (urbanSection?.density === 'urban') {
-      console.log(`   ✓ Mile ${zone.start.toFixed(1)}-${zone.end.toFixed(1)}: TECHNICAL → URBAN (${urbanSection.placeName || 'urban area'}, rank ${urbanSection.symbolrank})`)
+      console.log(`   ✓ Mile ${zone.start.toFixed(1)}-${zone.end.toFixed(1)}: TECHNICAL → URBAN (in ${urbanSection.placeName || 'urban area'})`)
       result.push({ 
         ...zone, 
         character: 'urban',
         urbanPlace: urbanSection.placeName,
-        urbanRank: urbanSection.symbolrank
+        urbanNeighborhood: urbanSection.neighborhood
       })
       changesCount++
     } else {
@@ -328,27 +332,27 @@ export function applyUrbanOverlay(zones, urbanSections) {
  * 
  * @param {number} lng - Longitude
  * @param {number} lat - Latitude
- * @returns {Promise<Object>} { isUrban, density, placeName, symbolrank }
+ * @returns {Promise<Object>} { isUrban, density, placeName, neighborhood }
  */
 export async function isPointUrban(lng, lat) {
   const place = await queryPlaceLabel(lng, lat)
   
   if (!place) {
-    return { isUrban: false, density: 'rural', placeName: null, symbolrank: null }
+    return { isUrban: false, density: 'rural', placeName: null, neighborhood: null }
   }
   
-  const density = classifyDensity(place.symbolrank)
+  const density = classifyDensity(place)
   
   return {
     isUrban: density === 'urban',
     density,
-    placeName: place.name,
-    symbolrank: place.symbolrank
+    placeName: place.cityName || place.name,
+    neighborhood: place.neighborhood
   }
 }
 
-// Export thresholds for reference
-export const THRESHOLDS = {
-  URBAN: URBAN_THRESHOLD,
-  SUBURBAN: SUBURBAN_THRESHOLD
+// Export city lists for reference/extension
+export const CITIES = {
+  MAJOR: MAJOR_CITIES,
+  MEDIUM: MEDIUM_CITIES
 }
