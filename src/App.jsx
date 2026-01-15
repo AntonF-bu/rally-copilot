@@ -252,7 +252,7 @@ export default function App() {
       const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
       const distanceToCallout = calloutDist - userDist
       
-      return distanceToCallout > 0 && distanceToCallout < lookaheadDistance
+      return distanceToCallout > 15 && distanceToCallout < lookaheadDistance
     })
     
     if (!nextCallout) return
