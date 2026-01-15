@@ -27,11 +27,11 @@ import CopilotLoader from './CopilotLoader'
 import PreviewLoader from './PreviewLoader'
 
 // ================================
-// Route Preview - v35
-// UPDATED: simpleZoneClassifier v2 with curve-based gap filling
-// - Road names are AUTHORITATIVE (I-90 = transit, local = technical)
-// - Gaps filled using curve analysis
-// - State routes check curves to decide transit vs technical
+// Route Preview - v36
+// FIX: Zone coloring now works correctly
+// - Waits for zones before drawing route
+// - Properly cleans up and rebuilds layers
+// - Transit = gray, Technical = cyan
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -63,6 +63,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
+  
+  // Track if initial route has been drawn (to prevent premature drawing)
+  const initialRouteDrawnRef = useRef(false)
   
   // LLM Curve Enhancement state - NOW AI AGENT
   const [curveEnhanced, setCurveEnhanced] = useState(false)
@@ -618,6 +621,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     elevationFetchedRef.current = false
     characterFetchedRef.current = false
     highwayAnalyzedRef.current = false
+    initialRouteDrawnRef.current = false
     setHighwayBends([])
     setElevationData([])
     setLlmEnhanced(false)
@@ -788,7 +792,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [copilotProgress, setCopilotProgress] = useState(0)
   const [copilotReady, setCopilotReady] = useState(false)
   const [copilotStatus, setCopilotStatus] = useState('')
-  // HANDLE START - WITH LLM INTEGRATION
+
+// HANDLE START - WITH LLM INTEGRATION
   // ================================
   const handleStart = async () => { 
     await initAudio()
@@ -890,61 +895,62 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     onStartNavigation()
   }
 
-  // Build SLEEVE segments
-  // Build SLEEVE segments
+  // ================================
+  // BUILD SLEEVE SEGMENTS - FIXED v36
+  // Now properly extracts coordinates for each zone
+  // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    // DEBUG: Log what segments we receive
-    console.log('🎨 buildSleeveSegments called with', characterSegments?.length, 'segments:', 
-      characterSegments?.map(s => `${s.character}(${s.startMile?.toFixed(1)}-${s.endMile?.toFixed(1)}mi)`).join(', '))
-    console.log('🎨 First segment details:', characterSegments?.[0] ? JSON.stringify({
-      character: characterSegments[0].character,
-      start: characterSegments[0].start,
-      end: characterSegments[0].end,
-      startDistance: characterSegments[0].startDistance,
-      endDistance: characterSegments[0].endDistance,
-      startMile: characterSegments[0].startMile,
-      endMile: characterSegments[0].endMile
-    }) : 'none')
+    console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
     
-    if (!coords?.length) return []
-    if (!characterSegments?.length) {
-      console.log('🎨 No characterSegments - defaulting to all technical')
-      return [{ coords, color: CHARACTER_COLORS.technical.primary, character: 'technical' }]
+    if (!coords?.length) {
+      console.log('🎨 No coordinates provided')
+      return []
     }
     
+    // If no segments provided, DON'T default to anything - return empty
+    // This prevents the "all cyan" issue when called before zones are ready
+    if (!characterSegments?.length) {
+      console.log('🎨 No characterSegments - returning empty (will wait for zones)')
+      return []
+    }
+    
+    const totalDist = routeData?.distance || 15000
     const segments = []
     
     characterSegments.forEach((seg, i) => {
-      console.log(`🎨 Processing segment ${i}: ${seg.character}, startDist=${seg.startDistance}, endDist=${seg.endDistance}`)
-      let segCoords
+      // Get start/end distances - handle various formats
+      const startDist = seg.startDistance ?? seg.start ?? 0
+      const endDist = seg.endDistance ?? seg.end ?? totalDist
       
-      if (seg.coordinates?.length > 1) {
-        segCoords = seg.coordinates
-      } else if (seg.startIndex !== undefined && seg.endIndex !== undefined) {
-        segCoords = coords.slice(seg.startIndex, seg.endIndex + 1)
-      } else {
-        const totalDist = routeData?.distance || 15000
-        const startProgress = Math.max(0, seg.startDistance / totalDist)
-        const endProgress = Math.min(1, seg.endDistance / totalDist)
-        const startIdx = Math.floor(startProgress * coords.length)
-        const endIdx = Math.min(Math.ceil(endProgress * coords.length), coords.length)
-        segCoords = coords.slice(startIdx, endIdx + 1)
-      }
+      // Calculate coordinate indices based on distance
+      const startProgress = Math.max(0, startDist / totalDist)
+      const endProgress = Math.min(1, endDist / totalDist)
+      const startIdx = Math.floor(startProgress * (coords.length - 1))
+      const endIdx = Math.min(Math.ceil(endProgress * (coords.length - 1)), coords.length - 1)
       
-      if (segCoords?.length > 1) {
+      // Extract coordinates for this segment
+      const segCoords = coords.slice(startIdx, endIdx + 1)
+      
+      if (segCoords.length > 1) {
         const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
         segments.push({
           coords: segCoords,
           color: colors.primary,
-          character: seg.character
+          character: seg.character,
+          startIdx,
+          endIdx
         })
       }
     })
     
+    // Debug output
+    console.log('🎨 Built', segments.length, 'visual segments:', 
+      segments.map(s => `${s.character}:${s.color}(${s.coords?.length}pts)`).join(', '))
+    
     return segments
   }, [routeData?.distance])
 
-  // Build severity segments
+  // Build severity segments (unchanged)
   const buildSeveritySegments = useCallback((coords, curves) => {
     if (!coords?.length) return [{ coords, color: '#22c55e' }]
     if (!curves?.length) return [{ coords, color: '#22c55e' }]
@@ -1019,22 +1025,74 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
   }
 
+  // ================================
+  // ADD ROUTE - FIXED v36
+  // Now properly handles zone-colored segments
+  // ================================
   const addRoute = useCallback((map, coords, characterSegments, curves) => {
     if (!map || !coords?.length) return
     
-    // Build segments using ZONE colors (not severity)
+    // Build segments using ZONE colors
     const zoneSegs = buildSleeveSegments(coords, characterSegments)
     
-    // Add simple route line colored by zone
+    // If no segments yet (zones not ready), don't draw anything
+    if (!zoneSegs.length) {
+      console.log('🗺️ addRoute: No segments to draw (waiting for zones)')
+      return
+    }
+    
+    console.log('🗺️ addRoute: Drawing', zoneSegs.length, 'zone segments')
+    
+    // Add each segment as a separate layer
     zoneSegs.forEach((seg, i) => {
-      const src = `route-src-${i}`, glow = `glow-${i}`, line = `line-${i}`
-      if (!map.getSource(src)) {
-        map.addSource(src, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } })
-        // Subtle glow
-        map.addLayer({ id: glow, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 } })
-        // Main line
-        map.addLayer({ id: line, type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': seg.color, 'line-width': 4 } })
-      }
+      const srcId = `route-src-${i}`
+      const glowId = `glow-${i}`
+      const lineId = `line-${i}`
+      
+      // Remove existing if present
+      if (map.getLayer(glowId)) map.removeLayer(glowId)
+      if (map.getLayer(lineId)) map.removeLayer(lineId)
+      if (map.getSource(srcId)) map.removeSource(srcId)
+      
+      // Add source
+      map.addSource(srcId, { 
+        type: 'geojson', 
+        data: { 
+          type: 'Feature', 
+          geometry: { 
+            type: 'LineString', 
+            coordinates: seg.coords 
+          } 
+        } 
+      })
+      
+      // Add glow layer
+      map.addLayer({ 
+        id: glowId, 
+        type: 'line', 
+        source: srcId, 
+        layout: { 'line-join': 'round', 'line-cap': 'round' }, 
+        paint: { 
+          'line-color': seg.color, 
+          'line-width': 12, 
+          'line-blur': 5, 
+          'line-opacity': 0.4 
+        } 
+      })
+      
+      // Add main line layer
+      map.addLayer({ 
+        id: lineId, 
+        type: 'line', 
+        source: srcId, 
+        layout: { 'line-join': 'round', 'line-cap': 'round' }, 
+        paint: { 
+          'line-color': seg.color, 
+          'line-width': 4 
+        } 
+      })
+      
+      console.log(`🗺️ Added segment ${i}: ${seg.character} with color ${seg.color}`)
     })
   }, [buildSleeveSegments])
 
@@ -1170,28 +1228,56 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [showHighwayBends, curatedCallouts])
 
+  // ================================
+  // REBUILD ROUTE - FIXED v36
+  // Properly cleans up ALL old layers before adding new ones
+  // ================================
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
     
-    // Clean up old layers
-    for (let i = 0; i < 100; i++) {
-      ['glow-', 'line-'].forEach(p => { 
-        if (mapRef.current.getLayer(p + i)) mapRef.current.removeLayer(p + i) 
-      })
-      if (mapRef.current.getSource('route-src-' + i)) mapRef.current.removeSource('route-src-' + i)
+    console.log('🔄 rebuildRoute called with', charSegs?.length || 0, 'segments')
+    
+    // Don't rebuild if no segments (zones not ready yet)
+    if (!charSegs?.length) {
+      console.log('🔄 rebuildRoute: No segments, skipping')
+      return
     }
     
+    // Clean up ALL old layers first
+    let removedCount = 0
+    for (let i = 0; i < 100; i++) {
+      ['glow-', 'line-'].forEach(prefix => { 
+        const layerId = prefix + i
+        if (mapRef.current.getLayer(layerId)) {
+          mapRef.current.removeLayer(layerId)
+          removedCount++
+        }
+      })
+      const srcId = 'route-src-' + i
+      if (mapRef.current.getSource(srcId)) {
+        mapRef.current.removeSource(srcId)
+      }
+    }
+    console.log('🔄 Cleaned up', removedCount, 'old layers')
+    
+    // Now add the new route
     addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
     addMarkers(mapRef.current, data.curves, data.coordinates, charSegs)
     addHighwayBendMarkers(mapRef.current, curatedCallouts)
+    
+    initialRouteDrawnRef.current = true
   }, [routeData, routeCharacter.segments, addRoute, addMarkers, addHighwayBendMarkers, curatedCallouts])
 
-  // Rebuild route when character analysis completes
+  // ================================
+  // EFFECT: Rebuild route when zones are ready
+  // This is the KEY fix - only draw when we have zones
+  // ================================
   useEffect(() => {
-    if (mapLoaded && routeCharacter.segments.length > 0) {
+    if (mapLoaded && routeCharacter.segments?.length > 0) {
+      console.log('🗺️ Zones ready, rebuilding route with', routeCharacter.segments.length, 'segments')
       rebuildRoute(routeData, routeCharacter.segments)
     }
-  }, [routeCharacter.segments, mapLoaded])
+  }, [routeCharacter.segments, mapLoaded, rebuildRoute, routeData])
 
   // Add highway markers when curated callouts are ready
   useEffect(() => {
@@ -1201,18 +1287,46 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [curatedCallouts, mapLoaded, addHighwayBendMarkers])
 
-  // Initialize map
+  // ================================
+  // INITIALIZE MAP - FIXED v36
+  // DON'T draw route on load - wait for zones
+  // ================================
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
-    mapRef.current = new mapboxgl.Map({ container: mapContainer, style: MAP_STYLES[mapStyle], center: routeData.coordinates[0], zoom: 10, pitch: 0 })
+    
+    mapRef.current = new mapboxgl.Map({ 
+      container: mapContainer, 
+      style: MAP_STYLES[mapStyle], 
+      center: routeData.coordinates[0], 
+      zoom: 10, 
+      pitch: 0 
+    })
+    
     mapRef.current.on('load', () => {
       setMapLoaded(true)
-      addRoute(mapRef.current, routeData.coordinates, routeCharacter.segments, routeData.curves)
-      addMarkers(mapRef.current, routeData.curves, routeData.coordinates, routeCharacter.segments)
-      const bounds = routeData.coordinates.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0]))
-      mapRef.current.fitBounds(bounds, { padding: { top: 120, bottom: 160, left: 40, right: 40 }, duration: 1000 })
+      
+      // FIT BOUNDS immediately so user sees the route area
+      const bounds = routeData.coordinates.reduce(
+        (b, c) => b.extend(c), 
+        new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
+      )
+      mapRef.current.fitBounds(bounds, { 
+        padding: { top: 120, bottom: 160, left: 40, right: 40 }, 
+        duration: 1000 
+      })
+      
+      // DON'T draw route here - wait for zones to be ready
+      // The useEffect watching routeCharacter.segments will handle it
+      console.log('🗺️ Map loaded, waiting for zones before drawing route...')
     })
-    mapRef.current.on('style.load', () => rebuildRoute())
+    
+    mapRef.current.on('style.load', () => {
+      // Only rebuild if we have zones
+      if (routeCharacter.segments?.length > 0) {
+        rebuildRoute()
+      }
+    })
+    
     return () => { 
       markersRef.current.forEach(m => m.remove())
       highwayMarkersRef.current.forEach(m => m.remove())
@@ -1221,7 +1335,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       mapRef.current?.remove()
       mapRef.current = null 
     }
-  }, [mapContainer, routeData, mapStyle, addRoute, addMarkers, rebuildRoute, routeCharacter.segments])
+  }, [mapContainer, routeData, mapStyle])
 
   const handleStyleChange = () => {
     const next = mapStyle === 'dark' ? 'satellite' : 'dark'
