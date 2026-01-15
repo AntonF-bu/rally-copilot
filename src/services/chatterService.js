@@ -134,7 +134,30 @@ export async function generateChatterTimeline({ zones, callouts, routeData, elev
       method: useAnthropic ? 'claude' : 'openai'
     }
   } catch (err) {
-    console.warn('⚠️ LLM chatter failed, using templates:', err.message)
+    console.warn(`⚠️ ${useAnthropic ? 'Claude' : 'OpenAI'} chatter failed:`, err.message)
+    
+    // If Claude failed and we have OpenAI key, try that
+    if (useAnthropic && openaiApiKey) {
+      console.log('🔄 Falling back to OpenAI...')
+      try {
+        const llmChatter = await generateLLMChatterV2(triggerPoints, routeAnalysis, openaiApiKey, false)
+        
+        const elapsed = Date.now() - startTime
+        console.log(`🎙️ Chatter generation complete in ${elapsed}ms (OpenAI fallback)`)
+        console.log(`   Generated ${llmChatter.length} chatter items with speed variants`)
+        
+        return {
+          chatterTimeline: llmChatter,
+          stats: routeAnalysis,
+          method: 'openai_fallback'
+        }
+      } catch (openaiErr) {
+        console.warn('⚠️ OpenAI fallback also failed:', openaiErr.message)
+      }
+    }
+    
+    // Final fallback to templates
+    console.log('📝 Using template chatter as final fallback')
     const templateChatter = generateTemplateChatterV2(triggerPoints, routeAnalysis)
     return { 
       chatterTimeline: templateChatter, 
