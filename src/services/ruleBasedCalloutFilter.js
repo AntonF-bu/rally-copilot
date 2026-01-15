@@ -1,5 +1,8 @@
 // ================================
-// Rule-Based Callout Filter v1.1
+// Rule-Based Callout Filter v1.2
+// 
+// Fixes in v1.2:
+// - Zone-aware trigger distances (technical = closer)
 // 
 // Fixes in v1.1:
 // 1. Highway threshold: 25° → 20° (feelable bends)
@@ -17,7 +20,7 @@
  * @returns {Object} - Filtered callouts with analysis
  */
 export function filterEventsToCallouts(events, routeInfo, zones = []) {
-  console.log('📋 Rule-Based Callout Filter v1.1')
+  console.log('📋 Rule-Based Callout Filter v1.2')
   console.log(`   Input events: ${events.length}`)
   
   const totalMiles = routeInfo?.totalMiles || 0
@@ -270,6 +273,33 @@ function isActualExit(event, zoneLookup) {
 }
 
 /**
+ * Get lead distance (how far before apex to trigger callout)
+ * Technical = closer (130m), Highway = further (240-400m)
+ */
+function getLeadDistance(event) {
+  const { zoneType, type, totalAngle } = event
+  
+  // Danger curves need more warning
+  if (type === 'danger' || totalAngle >= 70) {
+    return zoneType === 'technical' ? 0.1 : 0.25  // 160m technical, 400m highway
+  }
+  
+  // Zone-specific lead distances
+  switch (zoneType) {
+    case 'technical':
+      // Technical: very close - ~100-130m (5-7 seconds at 40-50mph)
+      return 0.08
+    case 'urban':
+      // Urban: close - ~130m (slower speeds)
+      return 0.08
+    case 'transit':
+    default:
+      // Highway: further ahead - ~240m (8-10 seconds at 70mph)
+      return 0.15
+  }
+}
+
+/**
  * Generate final callouts with text
  */
 function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneLookup) {
@@ -314,16 +344,20 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
     // FIX #2: Danger curves ALWAYS get individual callouts, never bundled
     const isDanger = event.type === 'danger' || event.totalAngle >= 70
     
+    // Get zone-aware lead distance
+    const leadDistance = getLeadDistance(event)
+    
     // For sequences (non-danger, non-technical)
     if (isInSequence && !isDanger && event.zoneType !== 'technical') {
       // Only add sequence callout at the start
       if (isSequenceStart) {
         const seq = sequences.find(s => s.startMile === event.apexMile)
+        const seqLeadDistance = event.zoneType === 'transit' ? 0.2 : 0.1
         callouts.push({
           id: `sequence-${event.apexMile.toFixed(2)}`,
           mile: event.apexMile,
-          triggerMile: Math.max(event.apexMile - 0.3, 0),
-          triggerDistance: Math.max(event.apexMile - 0.3, 0) * 1609.34,
+          triggerMile: Math.max(event.apexMile - seqLeadDistance, 0),
+          triggerDistance: Math.max(event.apexMile - seqLeadDistance, 0) * 1609.34,
           type: 'sequence',
           text: generateSequenceText(seq),
           reason: `Sequence of ${seq.events.length} curves`,
@@ -348,8 +382,8 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
     callouts.push({
       id: `curve-${event.apexMile.toFixed(2)}`,
       mile: event.apexMile,
-      triggerMile: Math.max(event.apexMile - 0.3, 0),
-      triggerDistance: Math.max(event.apexMile - 0.3, 0) * 1609.34,
+      triggerMile: Math.max(event.apexMile - leadDistance, 0),
+      triggerDistance: Math.max(event.apexMile - leadDistance, 0) * 1609.34,
       type: event.type,
       text: calloutText,
       reason: generateReason(event, zoneLookup, wakeUpInfo),
@@ -386,7 +420,7 @@ function generateCalloutText(event, zoneLookup) {
     if (totalAngle >= 90) {
       return `CAUTION - Hard ${dir.toLowerCase()} ${totalAngle}°`
     }
-    return `CAUTION ${dir.toLowerCase()} ${totalAngle}°`
+    return `CAUTION - ${dir} ${totalAngle}°`
   }
   
   // Technical zone - short and precise
@@ -394,15 +428,15 @@ function generateCalloutText(event, zoneLookup) {
     if (totalAngle >= 45) {
       return `Hard ${dir.toLowerCase()} ${totalAngle}°`
     }
-    return `${dir} ${totalAngle}`
+    return `${dir} ${totalAngle}°`
   }
   
   // Highway - standard format
   if (totalAngle >= 40) {
-    return `${dir} ${totalAngle}, tightens`
+    return `${dir} ${totalAngle}°, tightens`
   }
   
-  return `${dir} ${totalAngle}`
+  return `${dir} ${totalAngle}°`
 }
 
 /**
@@ -416,7 +450,7 @@ function generateSequenceText(sequence) {
   const directions = pattern.split('-').map(d => d === 'R' ? 'right' : 'left')
   
   if (count === 3) {
-    return `${directions[0]}-${directions[1]}-${directions[2]}, max ${maxAngle}°`
+    return `${directions[0]}–${directions[1]}–${directions[2]}, max ${maxAngle}°`
   }
   
   if (count <= 5) {
@@ -424,7 +458,7 @@ function generateSequenceText(sequence) {
     if (uniqueDirs.length === 1) {
       return `${count} ${directions[0]}s, max ${maxAngle}°`
     }
-    return `${directions.join('-')}, stay tight`
+    return `${directions.join('–')}, stay tight`
   }
   
   return `${count} curves ahead, max ${maxAngle}°, stay focused`
