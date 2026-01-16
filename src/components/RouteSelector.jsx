@@ -197,7 +197,7 @@ export default function RouteSelector() {
     <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col">
       
       {/* Header - New Clean Design */}
-      <div className="relative pt-14 pb-8 px-6 safe-top">
+      <div className="relative pt-20 pb-8 px-6 safe-top">
         {/* Background accent */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[300px] rounded-full opacity-20 blur-[80px]"
