@@ -3,8 +3,8 @@ import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v14 - Howler with html5: true
-// Back to working version, no AudioContext hacking
+// Speech Hook v15 - Restore working Howler version
+// This version WAS working on iOS (just choppy)
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
@@ -61,48 +61,30 @@ export function useSpeech() {
   }, [])
 
   // ================================
-  // iOS AUDIO UNLOCK
+  // iOS AUDIO UNLOCK - Original working version
   // ================================
   const initAudio = useCallback(() => {
     console.log('🔊 initAudio called')
     
-    try {
-      // Resume Howler's AudioContext if suspended
-      if (Howler.ctx && Howler.ctx.state === 'suspended') {
-        Howler.ctx.resume().then(() => {
-          console.log('🔊 AudioContext resumed')
-        })
-      }
-      
-      // Play a silent sound to unlock audio on iOS
-      const silentHowl = new Howl({
-        src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
-        volume: 0.01,
-        html5: true,
-        onend: () => {
-          audioUnlockedRef.current = true
-          console.log('🔊 ✅ Audio unlocked via Howler')
-        },
-        onplayerror: () => {
-          console.log('🔊 Silent play error (ok)')
-        }
-      })
-      silentHowl.play()
-    } catch (e) {
-      console.log('🔊 Unlock error:', e?.message)
+    // Resume Howler's AudioContext if it exists and is suspended
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      Howler.ctx.resume().then(() => {
+        console.log('🔊 AudioContext resumed')
+      }).catch(() => {})
     }
     
     // Also unlock speech synthesis
-    try {
-      if (synthRef.current) {
+    if (synthRef.current) {
+      try {
         const u = new SpeechSynthesisUtterance('')
         u.volume = 0
         synthRef.current.speak(u)
         setTimeout(() => synthRef.current?.cancel(), 10)
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
     
     audioUnlockedRef.current = true
+    console.log('🔊 ✅ Audio initialized')
     return Promise.resolve(true)
   }, [])
 
@@ -143,7 +125,6 @@ export function useSpeech() {
 
   // ================================
   // ELEVENLABS TTS via Howler
-  // Use Web Audio (html5: false) with correct sample rate
   // ================================
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
@@ -152,7 +133,6 @@ export function useSpeech() {
     let audioUrl = BLOB_CACHE.get(cacheKey)
     
     if (!audioUrl) {
-      // Fetch from API
       if (!navigator.onLine) {
         console.log('🔊 Offline')
         return false
@@ -201,13 +181,15 @@ export function useSpeech() {
       currentHowlRef.current.unload()
     }
 
-    // Create new Howl for this playback
-    // Using html5: true for iOS compatibility
+    // Create new Howl - html5: true is KEY for iOS
     const howl = new Howl({
       src: [audioUrl],
-      format: ['mp3', 'mpeg'],
-      html5: true,  // Use HTML5 Audio for iOS
+      format: ['mp3'],
+      html5: true,
       volume: settings.volume || 1.0,
+      onplay: () => {
+        console.log(`🔊 Playing: "${text}"`)
+      },
       onend: () => {
         isPlayingRef.current = false
         setSpeaking(false, '')
@@ -219,8 +201,8 @@ export function useSpeech() {
       },
       onplayerror: (id, err) => {
         console.log('🔊 Play error:', err)
-        // Try unlock and play again
-        howl.once('unlock', () => howl.play())
+        isPlayingRef.current = false
+        setSpeaking(false, '')
       }
     })
     
@@ -229,7 +211,6 @@ export function useSpeech() {
     setSpeaking(true, text)
     howl.play()
     
-    console.log(`🔊 Playing: "${text}"`)
     return true
   }, [setSpeaking, settings.volume])
 
