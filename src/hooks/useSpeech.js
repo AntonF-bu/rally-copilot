@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v11 - Using Howler.js
-// Howler handles iOS Safari audio unlock automatically
+// Speech Hook v12 - Pure HTML5 Audio
+// NO Web Audio API - avoids iOS sample rate issues
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-// Audio cache using Howl instances
-const HOWL_CACHE = new Map()
+// Simple blob URL cache
+const AUDIO_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
 export function useSpeech() {
-  const { settings, setSpeaking, isRunning } = useStore()
+  const { settings, setSpeaking } = useStore()
   
-  const currentHowlRef = useRef(null)
+  // Single reusable audio element - key for iOS!
+  const audioRef = useRef(null)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
@@ -24,10 +24,31 @@ export function useSpeech() {
   const isPlayingRef = useRef(false)
   const audioUnlockedRef = useRef(false)
 
-  // Initialize native speech as fallback
+  // Initialize - create ONE audio element and reuse it
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // Create single audio element
+    const audio = document.createElement('audio')
+    audio.playsInline = true
+    audio.preload = 'auto'
+    audio.setAttribute('playsinline', '')
+    audio.setAttribute('webkit-playsinline', '')
+    
+    audio.onended = () => {
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+    }
+    
+    audio.onerror = () => {
+      console.log('🔊 Audio error')
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+    }
+    
+    audioRef.current = audio
+
+    // Native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -35,7 +56,7 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
         
-        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava', 'Alex']
+        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
@@ -55,49 +76,50 @@ export function useSpeech() {
     }
 
     return () => {
-      currentHowlRef.current?.stop()
+      audioRef.current?.pause()
       synthRef.current?.cancel()
     }
-  }, [])
+  }, [setSpeaking])
 
   // ================================
-  // iOS AUDIO UNLOCK
-  // Howler handles this automatically, but we can force it
+  // AUDIO UNLOCK - Simple approach
+  // Just play/pause the audio element from user tap
   // ================================
   const initAudio = useCallback(() => {
-    console.log('🔊 initAudio called (Howler)')
+    console.log('🔊 initAudio called')
     
-    // Howler's built-in mobile unlock
-    try {
-      // Create a tiny silent sound to trigger unlock
-      const silentHowl = new Howl({
-        src: ['data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'],
-        volume: 0.01,
-        onend: () => {
-          audioUnlockedRef.current = true
-          console.log('🔊 ✅ Howler audio unlocked')
-        },
-        onloaderror: () => {
-          console.log('🔊 Howler silent load error (ok)')
-        },
-        onplayerror: () => {
-          console.log('🔊 Howler silent play error (ok)')
+    if (audioRef.current && !audioUnlockedRef.current) {
+      try {
+        // Set a tiny data URI and play it
+        audioRef.current.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
+        audioRef.current.muted = true
+        
+        const playPromise = audioRef.current.play()
+        if (playPromise) {
+          playPromise.then(() => {
+            audioRef.current.pause()
+            audioRef.current.muted = false
+            audioRef.current.currentTime = 0
+            audioUnlockedRef.current = true
+            console.log('🔊 ✅ Audio unlocked')
+          }).catch(() => {
+            console.log('🔊 Audio unlock failed (ok)')
+          })
         }
-      })
-      silentHowl.play()
-    } catch (e) {
-      console.log('🔊 Howler init error:', e?.message)
+      } catch (e) {
+        console.log('🔊 Audio unlock error:', e?.message)
+      }
     }
     
     // Also unlock speech synthesis
-    try {
-      if (synthRef.current) {
+    if (synthRef.current) {
+      try {
         const u = new SpeechSynthesisUtterance('')
         u.volume = 0
         synthRef.current.speak(u)
         setTimeout(() => synthRef.current?.cancel(), 10)
-      }
-    } catch (e) {}
+      } catch (e) {}
+    }
     
     audioUnlockedRef.current = true
     return Promise.resolve(true)
@@ -107,10 +129,7 @@ export function useSpeech() {
   // NATIVE SPEECH (fallback)
   // ================================
   const speakNative = useCallback((text) => {
-    if (!synthRef.current) {
-      console.log('🔊 Native speech not available')
-      return false
-    }
+    if (!synthRef.current) return false
 
     try {
       synthRef.current.cancel()
@@ -137,37 +156,37 @@ export function useSpeech() {
       console.log(`🔊 Native: "${text}"`)
       return true
     } catch (err) {
-      console.log('🔊 Native error:', err?.message)
       return false
     }
   }, [setSpeaking, settings.volume])
 
   // ================================
-  // ELEVENLABS TTS via Howler
+  // ELEVENLABS TTS - Pure HTML5 Audio
   // ================================
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
     
     // Check cache
-    if (HOWL_CACHE.has(cacheKey)) {
+    if (AUDIO_CACHE.has(cacheKey)) {
       try {
-        const cachedHowl = HOWL_CACHE.get(cacheKey)
+        const cachedUrl = AUDIO_CACHE.get(cacheKey)
         
-        // Stop current audio
-        currentHowlRef.current?.stop()
-        currentHowlRef.current = cachedHowl
+        // Stop current playback
+        audioRef.current.pause()
         
-        cachedHowl.volume(settings.volume || 1.0)
-        cachedHowl.seek(0)
+        // Load cached audio
+        audioRef.current.src = cachedUrl
+        audioRef.current.volume = settings.volume || 1.0
+        audioRef.current.currentTime = 0
         
         isPlayingRef.current = true
         setSpeaking(true, text)
-        cachedHowl.play()
         
+        await audioRef.current.play()
         console.log(`🔊 Cached: "${text}"`)
         return true
       } catch (err) {
-        console.log('🔊 Cache play error:', err?.message)
+        console.log('🔊 Cache play failed:', err?.message)
       }
     }
 
@@ -207,42 +226,18 @@ export function useSpeech() {
       }
 
       const audioUrl = URL.createObjectURL(blob)
+      AUDIO_CACHE.set(cacheKey, audioUrl)
       
-      // Create Howl instance
-      const howl = new Howl({
-        src: [audioUrl],
-        format: ['mp3'],
-        html5: true, // Important for iOS - uses HTML5 Audio instead of Web Audio
-        volume: settings.volume || 1.0,
-        onend: () => {
-          isPlayingRef.current = false
-          setSpeaking(false, '')
-        },
-        onloaderror: (id, err) => {
-          console.log('🔊 Howl load error:', err)
-          isPlayingRef.current = false
-          setSpeaking(false, '')
-        },
-        onplayerror: (id, err) => {
-          console.log('🔊 Howl play error:', err)
-          // Try to unlock and play again
-          howl.once('unlock', () => {
-            howl.play()
-          })
-        }
-      })
-      
-      // Cache it
-      HOWL_CACHE.set(cacheKey, howl)
-      
-      // Stop current and play new
-      currentHowlRef.current?.stop()
-      currentHowlRef.current = howl
+      // Stop current and load new
+      audioRef.current.pause()
+      audioRef.current.src = audioUrl
+      audioRef.current.volume = settings.volume || 1.0
+      audioRef.current.currentTime = 0
       
       isPlayingRef.current = true
       setSpeaking(true, text)
-      howl.play()
       
+      await audioRef.current.play()
       console.log(`🔊 ElevenLabs: "${text}"`)
       return true
     } catch (err) {
@@ -263,17 +258,15 @@ export function useSpeech() {
     
     // Prevent duplicates
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 1500) {
-      console.log(`🔊 Skip duplicate: "${text}"`)
       return false
     }
 
     // Handle priority
     if (priority === 'high') {
-      currentHowlRef.current?.stop()
+      audioRef.current?.pause()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current) {
-      console.log(`🔊 Already playing, skip: "${text}"`)
       return false
     }
 
@@ -292,7 +285,7 @@ export function useSpeech() {
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {
-    currentHowlRef.current?.stop()
+    audioRef.current?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
@@ -312,19 +305,17 @@ export function useSpeech() {
 }
 
 // ================================
-// PRELOAD ESSENTIAL CALLOUTS
+// PRELOAD
 // ================================
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   const essentialCallouts = [
     'Left 2', 'Left 3', 'Left 4', 'Left 5',
     'Right 2', 'Right 3', 'Right 4', 'Right 5',
-    'Technical section', 'Highway', 'Urban area'
+    'Technical section', 'Highway'
   ]
   
   let cached = 0
   const total = essentialCallouts.length
-  
-  console.log(`🔊 Pre-caching ${total} callouts...`)
   
   for (const text of essentialCallouts) {
     try {
@@ -341,14 +332,7 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
       if (response.ok) {
         const blob = await response.blob()
         if (blob.size > 500) {
-          const audioUrl = URL.createObjectURL(blob)
-          const howl = new Howl({
-            src: [audioUrl],
-            format: ['mp3'],
-            html5: true,
-            preload: true
-          })
-          HOWL_CACHE.set(getCacheKey(text), howl)
+          AUDIO_CACHE.set(getCacheKey(text), URL.createObjectURL(blob))
           cached++
         }
       }
@@ -361,7 +345,7 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
   return { success: true, cached, total }
 }
 
-// Legacy exports for compatibility
+// Legacy exports
 export function generateCallout(curve) {
   if (!curve) return null
   const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
