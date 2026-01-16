@@ -3,9 +3,8 @@ import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v16 - HYBRID APPROACH
-// Howler for iOS unlock, plain HTML5 Audio for playback
-// This avoids Web Audio sample rate issues causing choppiness
+// Speech Hook v17 - Full Howler (working on iOS)
+// Using Howler for BOTH unlock AND playback
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
@@ -17,8 +16,7 @@ const getCacheKey = (text) => text.toLowerCase().trim()
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
   
-  // Plain HTML5 Audio element for playback (no Web Audio = no choppiness)
-  const audioRef = useRef(null)
+  const currentHowlRef = useRef(null)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
@@ -26,31 +24,10 @@ export function useSpeech() {
   const isPlayingRef = useRef(false)
   const audioUnlockedRef = useRef(false)
 
-  // Initialize
+  // Initialize native speech as fallback
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create plain HTML5 Audio element for playback
-    const audio = document.createElement('audio')
-    audio.playsInline = true
-    audio.preload = 'auto'
-    audio.setAttribute('playsinline', '')
-    audio.setAttribute('webkit-playsinline', '')
-    
-    audio.onended = () => {
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    }
-    
-    audio.onerror = (e) => {
-      console.log('🔊 Audio error:', e)
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    }
-    
-    audioRef.current = audio
-
-    // Native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -78,45 +55,23 @@ export function useSpeech() {
     }
 
     return () => {
-      audioRef.current?.pause()
+      currentHowlRef.current?.unload()
       synthRef.current?.cancel()
     }
-  }, [setSpeaking])
+  }, [])
 
   // ================================
-  // iOS AUDIO UNLOCK - Use Howler for this!
-  // Howler is great at unlocking iOS audio
+  // iOS AUDIO UNLOCK via Howler
   // ================================
   const initAudio = useCallback(() => {
-    console.log('🔊 initAudio called - using Howler for unlock')
+    console.log('🔊 initAudio called')
     
-    // Use Howler to unlock iOS audio
-    const unlockHowl = new Howl({
-      src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
-      volume: 0.01,
-      html5: true,
-      onplay: () => {
-        console.log('🔊 Howler unlock playing')
-      },
-      onend: () => {
-        console.log('🔊 ✅ Howler unlock complete')
-        audioUnlockedRef.current = true
-        
-        // Now also "prime" our HTML5 Audio element
-        if (audioRef.current) {
-          audioRef.current.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-          audioRef.current.play().then(() => {
-            audioRef.current.pause()
-            audioRef.current.currentTime = 0
-            console.log('🔊 ✅ HTML5 Audio primed')
-          }).catch(() => {})
-        }
-      },
-      onplayerror: (id, err) => {
-        console.log('🔊 Howler unlock error:', err)
-      }
-    })
-    unlockHowl.play()
+    // Resume Howler's AudioContext if suspended
+    if (Howler.ctx && Howler.ctx.state === 'suspended') {
+      Howler.ctx.resume().then(() => {
+        console.log('🔊 AudioContext resumed')
+      }).catch(() => {})
+    }
     
     // Also unlock speech synthesis
     if (synthRef.current) {
@@ -129,6 +84,7 @@ export function useSpeech() {
     }
     
     audioUnlockedRef.current = true
+    console.log('🔊 ✅ Audio initialized')
     return Promise.resolve(true)
   }, [])
 
@@ -168,8 +124,8 @@ export function useSpeech() {
   }, [setSpeaking, settings.volume])
 
   // ================================
-  // ELEVENLABS TTS - Plain HTML5 Audio (no Web Audio!)
-  // This should avoid the choppiness
+  // ELEVENLABS TTS via Howler
+  // html5: true is KEY for iOS to work
   // ================================
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
@@ -220,34 +176,43 @@ export function useSpeech() {
       }
     }
 
-    // Play using plain HTML5 Audio (NOT Howler - avoids Web Audio routing)
-    try {
-      const audio = audioRef.current
-      if (!audio) {
-        console.log('🔊 No audio element')
-        return false
-      }
-      
-      // Stop any current playback
-      audio.pause()
-      audio.currentTime = 0
-      
-      // Set new source and play
-      audio.src = audioUrl
-      audio.volume = settings.volume || 1.0
-      
-      isPlayingRef.current = true
-      setSpeaking(true, text)
-      
-      await audio.play()
-      console.log(`🔊 Playing (HTML5): "${text}"`)
-      return true
-    } catch (err) {
-      console.log('🔊 Play error:', err?.message)
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-      return false
+    // Stop current playback
+    if (currentHowlRef.current) {
+      currentHowlRef.current.stop()
+      currentHowlRef.current.unload()
     }
+
+    // Create new Howl - html5: true is what makes iOS work!
+    const howl = new Howl({
+      src: [audioUrl],
+      format: ['mp3'],
+      html5: true,
+      volume: settings.volume || 1.0,
+      onplay: () => {
+        console.log(`🔊 Playing: "${text}"`)
+      },
+      onend: () => {
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      },
+      onloaderror: (id, err) => {
+        console.log('🔊 Load error:', err)
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      },
+      onplayerror: (id, err) => {
+        console.log('🔊 Play error:', err)
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      }
+    })
+    
+    currentHowlRef.current = howl
+    isPlayingRef.current = true
+    setSpeaking(true, text)
+    howl.play()
+    
+    return true
   }, [setSpeaking, settings.volume])
 
   // ================================
@@ -267,7 +232,7 @@ export function useSpeech() {
 
     // Handle priority
     if (priority === 'high') {
-      audioRef.current?.pause()
+      currentHowlRef.current?.stop()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current) {
@@ -289,7 +254,7 @@ export function useSpeech() {
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {
-    audioRef.current?.pause()
+    currentHowlRef.current?.stop()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
