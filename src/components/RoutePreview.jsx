@@ -15,7 +15,8 @@ import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlo
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
-import { generateChatterTimeline } from '../services/chatterService'
+// NEW: Import the chunked chatter service
+import { generateChatterTimeline } from '../services/highwayChatterService'
 
 import { 
   classifyZones, 
@@ -26,14 +27,17 @@ import {
 } from '../services/simpleZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
-import PreviewLoader from './PreviewLoader'
+// NEW: Import mode selection and loading screen
+import ModeSelection from './ModeSelection'
+import LoadingScreen from './LoadingScreen'
 
 // ================================
-// Route Preview - v36
-// FIX: Zone coloring now works correctly
-// - Waits for zones before drawing route
-// - Properly cleans up and rebuilds layers
-// - Transit = gray, Technical = cyan
+// Route Preview - v37
+// NEW: Mode selection + improved loading
+// - ModeSelection screen after address
+// - LoadingScreen with progress stages
+// - Chunked chatter generation for long routes
+// - Basic mode skips chatter entirely
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -46,7 +50,6 @@ const MAP_STYLES = {
   satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
 }
 
-// Highway blue color for bend markers
 const HIGHWAY_BEND_COLOR = '#3b82f6'
 
 export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
@@ -66,17 +69,21 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [showShareModal, setShowShareModal] = useState(false)
   const [showSleeve, setShowSleeve] = useState(true)
   
-  // Track if initial route has been drawn (to prevent premature drawing)
+  // Track if initial route has been drawn
   const initialRouteDrawnRef = useRef(false)
   
-  // LLM Curve Enhancement state - NOW AI AGENT
+  // NEW: Mode selection state
+  const [showModeSelection, setShowModeSelection] = useState(true)
+  const [selectedMode, setSelectedMode] = useState(null)
+  
+  // LLM Curve Enhancement state
   const [curveEnhanced, setCurveEnhanced] = useState(false)
   const [curatedCallouts, setCuratedCallouts] = useState([])
   const [agentResult, setAgentResult] = useState(null)
   const [agentProgress, setAgentProgress] = useState(null)
   const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true)
   
-  // Highway bends - LOCAL state for UI (raw bends, before curation)
+  // Highway bends - LOCAL state for UI
   const [highwayBends, setHighwayBendsLocal] = useState([])
   const [showHighwayBends, setShowHighwayBends] = useState(true)
   
@@ -104,11 +111,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false)
   const [isLoadingAI, setIsLoadingAI] = useState(false)
   
-  // Preview loading stages
-  const [previewLoadingStages, setPreviewLoadingStages] = useState({})
+  // NEW: Improved loading stages
+  const [loadingStages, setLoadingStages] = useState({
+    route: 'pending',
+    curves: 'pending',
+    zones: 'pending',
+    highway: 'pending',
+    callouts: 'pending',
+    chatter: 'pending',
+    voices: 'pending'
+  })
   const [isPreviewLoading, setIsPreviewLoading] = useState(false)
   
-  // LLM enhancement state with toggle
+  // LLM enhancement state
   const [llmEnhanced, setLlmEnhanced] = useState(false)
   const [llmResult, setLlmResult] = useState(null)
   const [useEnhancedZones, setUseEnhancedZones] = useState(true)
@@ -120,12 +135,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     editedCurves, customCallouts
   } = useStore()
   
-  // Get setHighwayBends separately - may not exist in older store versions
   const setStoreHighwayBends = useStore((state) => state.setHighwayBends)
-  
   const { initAudio, preloadRouteAudio, speak } = useSpeech()
 
-  // Helper to set highway bends BOTH locally and in store
+  // Helper to set highway bends
   const setHighwayBends = useCallback((bends) => {
     setHighwayBendsLocal(bends)
     if (setStoreHighwayBends) {
@@ -134,10 +147,14 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [setStoreHighwayBends])
 
+  // Helper to update loading stages
+  const updateStage = useCallback((stage, status) => {
+    setLoadingStages(prev => ({ ...prev, [stage]: status }))
+  }, [])
+
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
   
-  // Check if route has edits
   const hasEdits = editedCurves?.length > 0 || customCallouts?.length > 0 || routeZoneOverrides?.length > 0
   
   const isRouteFavorite = routeData?.name ? isFavorite(routeData.name) : false
@@ -185,6 +202,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
     return Math.round(settings.units === 'metric' ? gain : gain * 3.28084)
   }, [elevationData, settings.units])
+
+  // ================================
+  // MODE SELECTION HANDLER
+  // ================================
+  const handleModeSelect = useCallback((mode) => {
+    console.log(`🎯 Mode selected: ${mode}`)
+    setSelectedMode(mode)
+    setHighwayMode(mode)
+    setShowModeSelection(false)
+    
+    // Start loading with the selected mode
+    setIsPreviewLoading(true)
+    updateStage('route', 'complete') // Route already loaded
+  }, [setHighwayMode, updateStage])
 
   // Fetch elevation
   const fetchElevationData = useCallback(async (coordinates) => {
@@ -239,97 +270,68 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }, [routeData?.coordinates, fetchElevationData])
 
   // ================================
-  // FETCH ROUTE CHARACTER - v35 with simpleZoneClassifier v2
+  // FETCH ROUTE CHARACTER - v37 with mode-aware chatter
   // ================================
   const fetchRouteCharacter = useCallback(async (coordinates, curves) => {
     if (!coordinates?.length || coordinates.length < 2 || characterFetchedRef.current) return
+    if (showModeSelection) return // Don't start until mode is selected
+    
     characterFetchedRef.current = true
     setIsLoadingCharacter(true)
-    setIsPreviewLoading(true)
-    
-    // Helper to update stages
-    const updateStage = (stage, status) => {
-      setPreviewLoadingStages(prev => ({ ...prev, [stage]: status }))
-    }
     
     try {
       // ========================================
-      // Step 1: Get Census-based zones (for urban detection at edges)
+      // Step 1: Census analysis
       // ========================================
       updateStage('zones', 'loading')
       const censusAnalysis = await analyzeRouteCharacter(coordinates, curves || [])
       const censusSegments = censusAnalysis.segments || []
-      console.log('📊 Census zones (reference):', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
+      console.log('📊 Census zones:', censusSegments.map(s => `${s.character}(${((s.end - s.start)/1609.34).toFixed(1)}mi)`).join(' → '))
       
       // ========================================
-      // Step 2: Extract road refs from Mapbox legs data
+      // Step 2: Extract road refs
       // ========================================
       let roadSegments = []
       if (routeData?.legs && routeData.legs.length > 0) {
-        console.log('\n🛣️ Extracting road refs from route legs...')
+        console.log('\n🛣️ Extracting road refs...')
         roadSegments = await extractRoadRefs(routeData.legs, routeData.distance, routeData.coordinates)
         
-        // Log road ref summary
         const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
         const usHighways = roadSegments.filter(s => s.roadClass === 'us_highway')
         const stateRoutes = roadSegments.filter(s => s.roadClass === 'state_route')
         const localRoads = roadSegments.filter(s => s.roadClass === 'local')
         console.log(`   Road coverage: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local`)
-      } else {
-        console.log('⚠️ No legs data available for road ref extraction')
       }
       
       // ========================================
-      // Step 3: Run Road Flow Analyzer with uniform sampling
+      // Step 3: Road Flow Analysis
       // ========================================
-      const uniformZones = [{
-        start: 0,
-        end: routeData.distance,
-        character: 'transit'
-      }]
-      
-      console.log('\n🌊 Running Road Flow Analyzer (uniform sampling for zone classification)...')
+      const uniformZones = [{ start: 0, end: routeData.distance, character: 'transit' }]
+      console.log('\n🌊 Running Road Flow Analyzer...')
       const flowResult = analyzeRoadFlow(coordinates, uniformZones, routeData.distance)
       window.__roadFlowData = flowResult
-      console.log('💡 Access road flow data: window.__roadFlowData')
       
       // ========================================
+      // Step 4: Zone Classification
       // ========================================
-      // Step 4: Classify zones with urban detection
-      // Uses simpleZoneClassifier v5 which handles urban overlay internally
-      // ========================================
-      console.log('\n🛣️ Classifying zones with simpleZoneClassifier v5...')
-      updateStage('zones', 'loading')
-      
+      console.log('\n🛣️ Classifying zones...')
       const totalMiles = routeData.distance / 1609.34
-      
-      // Extract curves for legacy compatibility (not used by v5 but may be needed elsewhere)
       const curvesForAnalysis = extractCurvesFromEvents(flowResult.events)
-      console.log(`   Extracted ${curvesForAnalysis.length} curves for analysis`)
       
-      // NEW: Single async call handles both road classification AND urban detection
       const activeZones = await classifyZones(
         roadSegments,
         totalMiles,
-        coordinates,           // Pass coordinates for urban detection
-        routeData.distance     // Pass total distance in meters
+        coordinates,
+        routeData.distance
       )
       
       updateStage('zones', 'complete')
-
-      
-      // Update state
       setRouteCharacter({ ...censusAnalysis, segments: activeZones })
       setRouteZones(activeZones)
-      updateStage('zones', 'complete')
       setIsLoadingCharacter(false)
       
-      // Skip LLM zone validation - road names are authoritative now
-      updateStage('aiZones', 'complete')
-      setIsLoadingAI(false)
-      
       // ========================================
-      // Step 5: Analyze highway bends (using classified zones)
+      // Step 5: Highway Bends
       // ========================================
       if (!highwayAnalyzedRef.current && activeZones?.length) {
         highwayAnalyzedRef.current = true
@@ -341,30 +343,22 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         setHighwayBends(rawBends)
         updateStage('highway', 'complete')
         
-        // DEBUG: Dump all highway data for analysis
-        console.log('🔍 Dumping highway data for analysis...')
         const debugData = dumpHighwayData(rawBends, activeZones, routeData)
         window.__highwayDebugData = debugData
         
         // ========================================
-        // Step 6: HYBRID CALLOUT SYSTEM - Rule-based + LLM Polish
+        // Step 6: Hybrid Callout System
         // ========================================
         if (flowResult.events.length > 0) {
-          updateStage('aiCurves', 'loading')
+          updateStage('callouts', 'loading')
           console.log('📋 Running Hybrid Callout System...')
           
-          // UPDATED: Use reassignEventZones from simpleZoneClassifier
           const eventsWithCorrectZones = reassignEventZones(flowResult.events, activeZones)
-          console.log(`📍 Reassigned zones to ${eventsWithCorrectZones.length} events`)
-          
-          // Update the global flow data with correct zones
           flowResult.events = eventsWithCorrectZones
           window.__roadFlowData = flowResult
           
           try {
-            // ========================================
-            // STAGE 6a: Rule-Based Filtering (always runs)
-            // ========================================
+            // Rule-based filtering
             console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
             const ruleBasedResult = filterEventsToCallouts(
               eventsWithCorrectZones,
@@ -373,18 +367,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             )
             
             console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
-            console.log(`   By zone: Urban=${ruleBasedResult.stats.byZone.urban}, Highway=${ruleBasedResult.stats.byZone.transit}, Technical=${ruleBasedResult.stats.byZone.technical}`)
-            console.log(`   Sequences: ${ruleBasedResult.sequences.length}`)
-            console.log(`   Transitions: ${ruleBasedResult.transitions.length}`)
-            console.log(`   Wake-ups: ${ruleBasedResult.wakeUps.length}`)
-            
-            // Store rule-based result for debugging
             window.__ruleBasedCallouts = ruleBasedResult
-            console.log('💡 Access rule-based callouts: window.__ruleBasedCallouts')
             
-            // ========================================
-            // STAGE 6b: LLM Polish (optional, can fail safely)
-            // ========================================
+            // LLM Polish (optional)
             let finalResult = ruleBasedResult
             
             if (hasLLMApiKey()) {
@@ -395,28 +380,18 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                   { totalMiles: routeData.distance / 1609.34 },
                   getLLMApiKey()
                 )
-                
                 if (finalResult.llmPolished) {
-                  console.log('✨ LLM polish applied successfully')
-                } else {
-                  console.log('ℹ️ Using rule-based callouts (LLM polish skipped or failed)')
+                  console.log('✨ LLM polish applied')
                 }
               } catch (polishErr) {
-                console.warn('⚠️ LLM polish failed, using rule-based:', polishErr.message)
-                finalResult = ruleBasedResult
+                console.warn('⚠️ LLM polish failed:', polishErr.message)
               }
-            } else {
-              console.log('ℹ️ No API key - using rule-based callouts only')
             }
             
-            // ========================================
-            // Format and store final callouts
-            // ========================================
+            // Format and store callouts
             if (finalResult.callouts.length > 0) {
-              console.log(`\n✅ HYBRID SYSTEM COMPLETE: ${finalResult.callouts.length} callouts`)
-              console.log(`   Analysis: ${finalResult.analysis}`)
+              console.log(`\n✅ HYBRID SYSTEM: ${finalResult.callouts.length} callouts`)
               
-              // Format callouts for display
               const formattedCallouts = finalResult.callouts.map(c => ({
                 id: c.id,
                 position: c.position,
@@ -434,105 +409,62 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 isLLMPolished: finalResult.llmPolished || false
               }))
               
-              // ========================================
-              // STAGE 6c: Speed-Based Grouping
-              // ========================================
+              // Speed-based grouping
               console.log('\n🎯 STAGE 3: Speed-Based Grouping')
               const groupedSets = generateGroupedCalloutSets(
                 formattedCallouts,
                 { totalMiles: routeData.distance / 1609.34 }
               )
               
-              console.log(`   Fast set: ${groupedSets.fast.length} callouts (${groupedSets.stats.fastReduction}% reduction)`)
-              console.log(`   Standard set: ${groupedSets.standard.length} callouts (${groupedSets.stats.standardReduction}% reduction)`)
-              
-              // Store grouped sets for runtime selection
+              console.log(`   Fast: ${groupedSets.fast.length}, Standard: ${groupedSets.standard.length}`)
               window.__groupedCallouts = groupedSets
-              console.log('💡 Access grouped callouts: window.__groupedCallouts')
               
-              // Log sample grouped callouts
-              console.log('\n📍 Standard set sample:')
-              groupedSets.standard.slice(0, 10).forEach(c => {
-                const mile = c.triggerMile ?? c.mile ?? 0
-                const grouped = c.groupedFrom ? ` [grouped ${c.groupedFrom.length}]` : ''
-                console.log(`   Mile ${mile.toFixed(1)}: "${c.text}" [${c.zone}/${c.type}]${grouped}`)
-              })
-              
-              // Use STANDARD set for preview display
               const displayCallouts = groupedSets.standard
-              
-              // Debug: Log technical zone callouts
-              const techCallouts = displayCallouts.filter(c => c.zone === 'technical')
-              console.log(`\n🔍 Technical callouts for display: ${techCallouts.length}`)
-              techCallouts.slice(0, 15).forEach(c => {
-                const isGrouped = c.groupedFrom ? `[GROUPED ${c.groupedFrom.length}]` : '[individual]'
-                console.log(`   Mile ${(c.triggerMile ?? c.mile ?? 0).toFixed(1)}: "${c.text}" ${isGrouped}`)
-              })
-              
               setCuratedCallouts(displayCallouts)
               setAgentResult({
-                summary: {
-                  summary: finalResult.analysis,
-                  rhythm: 'Hybrid Callout System v1.3 (simpleZoneClassifier v2)',
-                  difficulty: 'auto'
-                },
+                summary: { summary: finalResult.analysis },
                 reasoning: [
-                  `Road Flow detected ${flowResult.events.length} events`,
-                  `Rule-based filter: ${ruleBasedResult.callouts.length} callouts`,
-                  `After grouping: Fast=${groupedSets.fast.length}, Standard=${groupedSets.standard.length}`,
-                  finalResult.llmPolished ? 'LLM polish applied' : 'Rule-based text used'
+                  `${flowResult.events.length} events detected`,
+                  `${ruleBasedResult.callouts.length} callouts after filtering`,
+                  finalResult.llmPolished ? 'LLM polish applied' : 'Rule-based'
                 ],
                 confidence: 95
               })
               setCurveEnhanced(true)
               
-              // Store BOTH sets in global store for navigation runtime selection
-// Store BOTH sets in global store for navigation runtime selection
               useStore.getState().setCuratedHighwayCallouts(displayCallouts)
               useStore.getState().setGroupedCalloutSets?.(groupedSets)
               window.__hybridCallouts = finalResult
-              
-            } else {
-              console.warn('⚠️ Hybrid system returned no callouts!')
             }
             
           } catch (hybridErr) {
-            console.error('⚠️ Hybrid callout system error:', hybridErr)
-            
-            // Ultimate fallback: use simple rule-based from roadFlowAnalyzer
-            console.log('⚠️ Using emergency fallback callout generator')
+            console.error('⚠️ Hybrid system error:', hybridErr)
             const fallbackCallouts = generateCalloutsFromEvents(flowResult.events, activeZones, routeData.distance)
-            const formattedCallouts = fallbackCallouts.map(c => ({
-              id: c.id,
-              position: c.position,
-              triggerDistance: c.triggerDistance,
-              triggerMile: c.triggerMile,
-              text: c.text,
-              shortText: c.text.substring(0, 35),
-              type: c.type,
-              priority: c.severity,
-              isFlowBased: true
-            }))
-            setCuratedCallouts(formattedCallouts)
-            useStore.getState().setCuratedHighwayCallouts(formattedCallouts)
+            setCuratedCallouts(fallbackCallouts)
+            useStore.getState().setCuratedHighwayCallouts(fallbackCallouts)
           }
-          updateStage('aiCurves', 'complete')
+          
+          updateStage('callouts', 'complete')
           
           // ========================================
-          // Step 7: Generate Highway Companion Chatter
+          // Step 7: Chatter Generation (COMPANION MODE ONLY)
           // ========================================
-          if (hasLLMApiKey()) {
-            console.log('\n🎙️ STAGE 4: Highway Companion Chatter')
+          if (selectedMode === HIGHWAY_MODE.COMPANION && hasLLMApiKey()) {
+            updateStage('chatter', 'loading')
+            console.log('\n🎙️ STAGE 4: Highway Companion Chatter (Companion Mode)')
+            
             try {
-              const highwayDataDump = window.__highwayDataDump || null
-              
-              const chatterResult = await generateChatterTimeline({
-                zones: activeZones,
-                callouts: curatedCallouts,
-                routeData,
-                elevationData: null,
-                highwayDataDump
-              })
+              const chatterResult = await generateChatterTimeline(
+                {
+                  zones: activeZones,
+                  callouts: curatedCallouts,
+                  routeData
+                },
+                (progress) => {
+                  // Progress callback from chunked service
+                  console.log(`🎙️ Chatter progress: ${progress}%`)
+                }
+              )
               
               console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
               console.log(`   Method: ${chatterResult.method}`)
@@ -540,61 +472,64 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
               useStore.getState().setChatterTimeline?.(chatterResult.chatterTimeline)
               window.__chatterTimeline = chatterResult.chatterTimeline
               
-              console.log('💡 Access chatter: window.__chatterTimeline')
             } catch (chatterErr) {
               console.warn('⚠️ Chatter generation failed:', chatterErr.message)
             }
+            
+            updateStage('chatter', 'complete')
+          } else if (selectedMode === HIGHWAY_MODE.BASIC) {
+            console.log('ℹ️ Basic mode - skipping chatter generation')
+            updateStage('chatter', 'complete')
           }
         }
       }
       
+      updateStage('voices', 'complete')
       setIsLoadingAI(false)
       setIsPreviewLoading(false)
       
     } catch (err) {
-      console.error('Route character analysis error:', err)
+      console.error('Route analysis error:', err)
       setIsLoadingCharacter(false)
       setIsLoadingAI(false)
       setIsPreviewLoading(false)
     }
-  }, [setRouteZones, routeData, setHighwayBends])
+  }, [setRouteZones, routeData, setHighwayBends, showModeSelection, selectedMode, updateStage])
 
-  // CRITICAL: Detect curves if routeData doesn't have them
+  // Detect curves if needed
   useEffect(() => {
     if (routeData?.coordinates?.length > 0 && (!routeData.curves || routeData.curves.length === 0)) {
-      console.log('🔍 RoutePreview: No curves in routeData, detecting...')
-      
-      if (hasLLMApiKey()) {
-        setIsPreviewLoading(true)
-        setPreviewLoadingStages({ route: 'complete', curves: 'loading' })
-      }
+      console.log('🔍 Detecting curves...')
+      updateStage('curves', 'loading')
       
       const curves = detectCurves(routeData.coordinates)
-      console.log(`🔍 RoutePreview: Detected ${curves.length} curves`)
+      console.log(`🔍 Detected ${curves.length} curves`)
       
-      setPreviewLoadingStages(prev => ({ ...prev, curves: 'complete' }))
+      updateStage('curves', 'complete')
       
       useStore.getState().setRouteData({
         ...routeData,
         curves
       })
     }
-  }, [routeData?.coordinates, routeData?.curves])
+  }, [routeData?.coordinates, routeData?.curves, updateStage])
 
+  // Start analysis after mode selection
   useEffect(() => {
-    if (routeData?.coordinates?.length > 0 && routeData?.curves?.length > 0 && !characterFetchedRef.current) {
+    if (!showModeSelection && routeData?.coordinates?.length > 0 && routeData?.curves?.length > 0 && !characterFetchedRef.current) {
       fetchRouteCharacter(routeData.coordinates, routeData.curves)
     }
-  }, [routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
+  }, [showModeSelection, routeData?.coordinates, routeData?.curves, fetchRouteCharacter])
 
-  // Toggle sleeve visibility
+  // ================================
+  // SLEEVE TOGGLE
+  // ================================
   const handleToggleSleeve = useCallback(() => {
     const newVisibility = !showSleeve
     setShowSleeve(newVisibility)
     
     if (mapRef.current) {
       const visibility = newVisibility ? 'visible' : 'none'
-      
       for (let i = 0; i < 100; i++) {
         ['sleeve-', 'sleeve-border-top-', 'sleeve-border-bottom-'].forEach(prefix => {
           try {
@@ -607,17 +542,15 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [showSleeve])
 
-  // Toggle highway bend markers visibility
   const handleToggleHighwayBends = useCallback(() => {
     const newVisibility = !showHighwayBends
     setShowHighwayBends(newVisibility)
-    
     highwayMarkersRef.current.forEach(marker => {
       marker.getElement().style.display = newVisibility ? 'block' : 'none'
     })
   }, [showHighwayBends])
 
-  // Fetch demo route - NOW INCLUDES LEGS
+  // Fetch demo route
   const fetchDemoRoute = async () => {
     setIsLoadingRoute(true)
     try {
@@ -630,7 +563,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           curves, 
           distance: route.distance, 
           duration: route.duration,
-          legs: route.legs  // Include legs for road ref extraction
+          legs: route.legs
         })
       } else { 
         setLoadError('Could not load demo route') 
@@ -652,7 +585,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         direction: curve.direction === 'LEFT' ? 'RIGHT' : 'LEFT',
         distanceFromStart: (routeData.distance || 15000) - (curve.distanceFromStart || 0)
       })).reverse(),
-      legs: routeData.legs  // Keep legs (though they won't be accurate for reversed route)
+      legs: routeData.legs
     }
     setRouteData(reversed)
     elevationFetchedRef.current = false
@@ -666,17 +599,12 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current && mapLoaded) rebuildRoute(reversed)
   }
 
-  // Fly animation refs
+  // Fly animation
   const isPausedRef = useRef(false)
   const flySpeedRef = useRef(1)
   
-  useEffect(() => {
-    isPausedRef.current = isPaused
-  }, [isPaused])
-  
-  useEffect(() => {
-    flySpeedRef.current = flySpeed
-  }, [flySpeed])
+  useEffect(() => { isPausedRef.current = isPaused }, [isPaused])
+  useEffect(() => { flySpeedRef.current = flySpeed }, [flySpeed])
 
   const startFlyAnimation = useCallback(() => {
     if (!mapRef.current || !routeData?.coordinates) return
@@ -738,12 +666,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     isPausedRef.current = false
     flyIndexRef.current = 0
     
-    mapRef.current.easeTo({ 
-      center: routeData.coordinates[0], 
-      pitch: 60, 
-      zoom: 14, 
-      duration: 800 
-    })
+    mapRef.current.easeTo({ center: routeData.coordinates[0], pitch: 60, zoom: 14, duration: 800 })
     setTimeout(() => startFlyAnimation(), 850)
   }
 
@@ -752,11 +675,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     const newPaused = !isPaused
     setIsPaused(newPaused)
     isPausedRef.current = newPaused
-    console.log(`🎬 Fly-through ${newPaused ? 'paused' : 'resumed'}`)
   }
 
   const stopFlyThrough = useCallback(() => {
-    console.log('🎬 Stopping fly-through')
     if (flyAnimationRef.current) {
       cancelAnimationFrame(flyAnimationRef.current)
       flyAnimationRef.current = null
@@ -783,10 +704,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     }
   }, [routeData])
 
-  useEffect(() => {
-    // Speed changes are handled via ref
-  }, [flySpeed])
-
   const handleSampleCallout = async () => {
     await initAudio()
     const curve = routeData?.curves?.find(c => c.severity >= 3) || routeData?.curves?.[0]
@@ -805,13 +722,8 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     if (mapRef.current && curve.position) mapRef.current.flyTo({ center: curve.position, zoom: 16, pitch: 45, duration: 800 })
   }
 
-  // Handle highway bend click
   const handleHighwayBendClick = (bend) => {
-    setSelectedCurve({
-      ...bend,
-      severity: bend.severity || 1,
-      isHighwayBend: true
-    })
+    setSelectedCurve({ ...bend, severity: bend.severity || 1, isHighwayBend: true })
     if (mapRef.current && bend.position) {
       mapRef.current.flyTo({ center: bend.position, zoom: 15, pitch: 45, duration: 800 })
     }
@@ -824,29 +736,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     catch {} finally { setIsDownloading(false) }
   }
 
-  // Loading state for copilot
+  // Copilot loader state
   const [isPreparingCopilot, setIsPreparingCopilot] = useState(false)
   const [copilotProgress, setCopilotProgress] = useState(0)
   const [copilotReady, setCopilotReady] = useState(false)
   const [copilotStatus, setCopilotStatus] = useState('')
 
-// HANDLE START - WITH LLM INTEGRATION
-  // ================================
+  // Handle start
   const handleStart = async () => { 
     await initAudio()
-    
     setIsPreparingCopilot(true)
     setCopilotProgress(0)
     setCopilotStatus('Initializing...')
     
     try {
-      // ========================================
-      // PHASE 1: LLM Zone Validation (re-run for freshness)
-      // ========================================
+      // LLM zone validation
       if (hasLLMApiKey() && routeCharacter.segments?.length > 0 && !llmEnhanced) {
         setCopilotProgress(5)
-        setCopilotStatus('🤖 AI analyzing route zones...')
-        console.log('🤖 Starting LLM zone validation...')
+        setCopilotStatus('🤖 AI analyzing zones...')
         
         try {
           const llmResponse = await validateZonesWithLLM(
@@ -857,52 +764,31 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           )
           
           setLlmResult(llmResponse)
-          
-          const { enhanced, original, changes } = llmResponse
+          const { enhanced, changes } = llmResponse
           
           if (enhanced?.length > 0 && changes?.length > 0) {
-            console.log(`🤖 LLM made ${changes.length} change(s):`)
-            changes.forEach(c => console.log(`   - ${c}`))
-            
             setLlmEnhanced(true)
-            
             setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
             setRouteZones(enhanced)
-            
-            // Re-analyze highway bends with enhanced zones
             const bends = analyzeHighwayBends(routeData.coordinates, enhanced)
             setHighwayBends(bends)
-            console.log(`🛣️ Re-analyzed highway bends: ${bends.length}`)
-          } else {
-            console.log('🤖 LLM confirmed all zones are correct')
-            if (enhanced?.length > 0) {
-              setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
-              setRouteZones(enhanced)
-            }
+          } else if (enhanced?.length > 0) {
+            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+            setRouteZones(enhanced)
           }
         } catch (llmError) {
-          console.warn('⚠️ LLM validation failed, using rule-based zones:', llmError)
+          console.warn('⚠️ LLM validation failed:', llmError)
         }
         
         setCopilotProgress(20)
       } else {
-        if (!hasLLMApiKey()) {
-          console.log('ℹ️ No OpenAI API key - skipping LLM zone validation')
-        } else if (llmEnhanced) {
-          console.log('ℹ️ LLM already enhanced zones during preview')
-        }
         setCopilotProgress(20)
       }
       
-      // ========================================
-      // PHASE 2: Curve Enhancement (skip if already done in preview)
-      // ========================================
       setCopilotProgress(35)
       
-      // ========================================
-      // PHASE 3: Voice Preloading
-      // ========================================
-      setCopilotStatus('Loading voice callouts...')
+      // Voice preloading
+      setCopilotStatus('Loading voices...')
       const { preloadCopilotVoices } = await import('../hooks/useSpeech')
       
       await preloadCopilotVoices(
@@ -933,27 +819,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
-  // ================================
-  // BUILD SLEEVE SEGMENTS - v39 FIX
-  // Uses actual distance calculation, not linear interpolation
+  // BUILD SLEEVE SEGMENTS
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    console.log('🎨 buildSleeveSegments called with', characterSegments?.length || 0, 'segments')
-    
-    if (!coords?.length || !characterSegments?.length) {
-      return []
-    }
+    if (!coords?.length || !characterSegments?.length) return []
     
     const totalDist = routeData?.distance || 15000
     
-    // ========================================
-    // STEP 1: Calculate cumulative distance for each coordinate
-    // ========================================
     const coordDistances = [0]
     for (let i = 1; i < coords.length; i++) {
       const [lng1, lat1] = coords[i - 1]
       const [lng2, lat2] = coords[i]
-      // Haversine distance in meters
       const R = 6371000
       const dLat = (lat2 - lat1) * Math.PI / 180
       const dLng = (lng2 - lng1) * Math.PI / 180
@@ -961,130 +837,35 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
                 Math.sin(dLng/2) * Math.sin(dLng/2)
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-      const dist = R * c
-      coordDistances.push(coordDistances[i-1] + dist)
+      coordDistances.push(coordDistances[i-1] + R * c)
     }
     
     const calculatedTotal = coordDistances[coordDistances.length - 1]
-    console.log(`🎨 Calculated route distance: ${(calculatedTotal/1609.34).toFixed(1)}mi vs reported ${(totalDist/1609.34).toFixed(1)}mi`)
     
-    // ========================================
-    // STEP 2: Find coordinate index for a given distance
-    // ========================================
     const findCoordIndexAtDistance = (targetDist) => {
-      // Scale target distance if there's a mismatch
       const scaledTarget = targetDist * (calculatedTotal / totalDist)
-      
       for (let i = 0; i < coordDistances.length; i++) {
-        if (coordDistances[i] >= scaledTarget) {
-          return Math.max(0, i - 1)
-        }
+        if (coordDistances[i] >= scaledTarget) return Math.max(0, i - 1)
       }
       return coords.length - 1
     }
     
-    // ========================================
-    // STEP 3: Build segments using actual distances
-    // ========================================
     const segments = []
-    
-    console.log('📊 ZONE SEGMENTS (distance-based):')
     characterSegments.forEach((seg, i) => {
       const startDist = seg.startDistance ?? (seg.start * 1609.34) ?? 0
       const endDist = seg.endDistance ?? (seg.end * 1609.34) ?? totalDist
       
       const startIdx = findCoordIndexAtDistance(startDist)
       const endIdx = findCoordIndexAtDistance(endDist)
-      
-      const actualStartMile = coordDistances[startIdx] / 1609.34
-      const actualEndMile = coordDistances[endIdx] / 1609.34
-      
-      console.log(`   Segment ${i}: ${seg.character.toUpperCase()}`)
-      console.log(`      Target: mile ${(startDist/1609.34).toFixed(1)} - ${(endDist/1609.34).toFixed(1)}`)
-      console.log(`      Actual: mile ${actualStartMile.toFixed(1)} - ${actualEndMile.toFixed(1)}`)
-      console.log(`      Coords: ${startIdx} - ${endIdx}`)
-      
       const segCoords = coords.slice(startIdx, endIdx + 1)
       
       if (segCoords.length > 1) {
         const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
-        segments.push({
-          coords: segCoords,
-          color: colors.primary,
-          character: seg.character,
-          startIdx,
-          endIdx
-        })
-        console.log(`      ✓ Created with ${segCoords.length} coords, color ${colors.primary}`)
+        segments.push({ coords: segCoords, color: colors.primary, character: seg.character, startIdx, endIdx })
       }
     })
     
     return segments
-  }, [routeData?.distance])
-
-  // Build severity segments (unchanged)
-  const buildSeveritySegments = useCallback((coords, curves) => {
-    if (!coords?.length) return [{ coords, color: '#22c55e' }]
-    if (!curves?.length) return [{ coords, color: '#22c55e' }]
-
-    const totalDist = routeData?.distance || 15000
-    const gradientDist = 150
-    
-    const severityColors = {
-      0: '#22c55e', 1: '#22c55e', 2: '#84cc16',
-      3: '#eab308', 4: '#f97316', 5: '#ef4444', 6: '#dc2626',
-    }
-    
-    const coordColors = coords.map(() => severityColors[0])
-    
-    curves.forEach(curve => {
-      if (!curve.distanceFromStart) return
-      
-      const curveDist = curve.distanceFromStart
-      const severity = curve.severity || 3
-      const curveColor = severityColors[Math.min(severity, 6)]
-      
-      const warningStart = curveDist - gradientDist
-      const warningEnd = curveDist
-      const curveStart = curveDist
-      const curveEnd = curveDist + (curve.length || 50)
-      const recoveryStart = curveEnd
-      const recoveryEnd = curveEnd + (gradientDist * 0.5)
-      
-      coords.forEach((coord, i) => {
-        const coordDist = (i / coords.length) * totalDist
-        
-        if (coordDist >= warningStart && coordDist < warningEnd) {
-          const progress = (coordDist - warningStart) / gradientDist
-          coordColors[i] = interpolateColor(severityColors[0], curveColor, progress)
-        }
-        
-        if (coordDist >= curveStart && coordDist < curveEnd) {
-          coordColors[i] = curveColor
-        }
-        
-        if (coordDist >= recoveryStart && coordDist < recoveryEnd) {
-          const progress = (coordDist - recoveryStart) / (gradientDist * 0.5)
-          coordColors[i] = interpolateColor(curveColor, severityColors[0], progress)
-        }
-      })
-    })
-    
-    const segments = []
-    let currentSegment = { coords: [coords[0]], color: coordColors[0] }
-    
-    for (let i = 1; i < coords.length; i++) {
-      if (coordColors[i] === currentSegment.color) {
-        currentSegment.coords.push(coords[i])
-      } else {
-        currentSegment.coords.push(coords[i])
-        segments.push(currentSegment)
-        currentSegment = { coords: [coords[i]], color: coordColors[i] }
-      }
-    }
-    segments.push(currentSegment)
-    
-    return segments.filter(s => s.coords.length > 1)
   }, [routeData?.distance])
 
   const interpolateColor = (color1, color2, progress) => {
@@ -1098,146 +879,84 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
-  // ADD ROUTE - FIXED v36
-  // Now properly handles zone-colored segments
+  // ADD ROUTE
   // ================================
   const addRoute = useCallback((map, coords, characterSegments, curves) => {
     if (!map || !coords?.length) return
     
-    // Build segments using ZONE colors
     const zoneSegs = buildSleeveSegments(coords, characterSegments)
+    if (!zoneSegs.length) return
     
-    // If no segments yet (zones not ready), don't draw anything
-    if (!zoneSegs.length) {
-      console.log('🗺️ addRoute: No segments to draw (waiting for zones)')
-      return
-    }
-    
-    console.log('🗺️ addRoute: Drawing', zoneSegs.length, 'zone segments')
-    
-    // Add each segment as a separate layer
     zoneSegs.forEach((seg, i) => {
       const srcId = `route-src-${i}`
       const glowId = `glow-${i}`
       const lineId = `line-${i}`
       
-      // Remove existing if present
       if (map.getLayer(glowId)) map.removeLayer(glowId)
       if (map.getLayer(lineId)) map.removeLayer(lineId)
       if (map.getSource(srcId)) map.removeSource(srcId)
       
-      // Add source
       map.addSource(srcId, { 
         type: 'geojson', 
-        data: { 
-          type: 'Feature', 
-          geometry: { 
-            type: 'LineString', 
-            coordinates: seg.coords 
-          } 
-        } 
+        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } } 
       })
       
-      // Add glow layer
       map.addLayer({ 
-        id: glowId, 
-        type: 'line', 
-        source: srcId, 
+        id: glowId, type: 'line', source: srcId, 
         layout: { 'line-join': 'round', 'line-cap': 'round' }, 
-        paint: { 
-          'line-color': seg.color, 
-          'line-width': 12, 
-          'line-blur': 5, 
-          'line-opacity': 0.4 
-        } 
+        paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 } 
       })
       
-      // Add main line layer
       map.addLayer({ 
-        id: lineId, 
-        type: 'line', 
-        source: srcId, 
+        id: lineId, type: 'line', source: srcId, 
         layout: { 'line-join': 'round', 'line-cap': 'round' }, 
-        paint: { 
-          'line-color': seg.color, 
-          'line-width': 4 
-        } 
+        paint: { 'line-color': seg.color, 'line-width': 4 } 
       })
-      
-      console.log(`🗺️ Added segment ${i}: ${seg.character} with color ${seg.color}`)
     })
   }, [buildSleeveSegments])
 
-  // Add curve markers - DISABLED: curated callouts handle all zones now
   const addMarkers = useCallback((map, curves, coords, segments) => {
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
-    // Old marker system disabled - curated callouts handle everything
   }, [])
 
-  // Add highway markers - NOW SHOWS CURATED CALLOUTS (not raw bends)
+  // Add highway markers
   const addHighwayBendMarkers = useCallback((map, callouts) => {
     highwayMarkersRef.current.forEach(m => m.remove())
     highwayMarkersRef.current = []
     
     if (!showHighwayBends) return
     
-    // Helper to create short label for marker
     const getShortLabel = (callout) => {
       const text = callout.text || ''
-      
-      // Check if this is a grouped callout
       const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
       
       if (isGrouped) {
-        // For grouped callouts, show pattern-based short text
-        if (text.toLowerCase().includes('hairpin')) {
-          return text.includes('DOUBLE') ? '2xHP' : 'HP'
-        } else if (text.toLowerCase().includes('chicane')) {
-          return 'CHI'
-        } else if (text.toLowerCase().includes('esses')) {
-          return 'ESS'
-        } else if (text.includes('HARD')) {
-          const hardMatch = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
-          return hardMatch ? `H${hardMatch[1][0]}${hardMatch[2]}` : 'HRD'
-        } else if (text.match(/\d+\s*(left|right)s/i)) {
-          const countMatch = text.match(/(\d+)\s*(left|right)s/i)
-          return countMatch ? `${countMatch[1]}${countMatch[2][0].toUpperCase()}` : text.substring(0, 4)
-        } else if (text.toLowerCase().includes('tightens')) {
-          return 'TGT'
-        } else {
-          return `G${callout.groupedFrom.length}`
+        if (text.toLowerCase().includes('hairpin')) return text.includes('DOUBLE') ? '2xHP' : 'HP'
+        if (text.toLowerCase().includes('chicane')) return 'CHI'
+        if (text.toLowerCase().includes('esses')) return 'ESS'
+        if (text.includes('HARD')) {
+          const match = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
+          return match ? `H${match[1][0]}${match[2]}` : 'HRD'
         }
+        return `G${callout.groupedFrom.length}`
       }
       
-      // Individual callout handling
       if (callout.type === 'wake_up') return '!'
       if (callout.type === 'sequence') return 'SEQ'
       
-      // Extract direction (L/R) and angle if present
       const dirMatch = text.match(/\b(left|right|L|R)\b/i)
-      const angleMatch = text.match(/(\d+)/);
+      const angleMatch = text.match(/(\d+)/)
       
-      if (dirMatch && angleMatch) {
-        const dir = dirMatch[1][0].toUpperCase()
-        return `${dir}${angleMatch[1]}`
-      }
-      
+      if (dirMatch && angleMatch) return `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}`
       if (angleMatch) return angleMatch[1]
       if (dirMatch) return dirMatch[1][0].toUpperCase()
       
       return callout.type?.[0]?.toUpperCase() || '•'
     }
     
-    // Use curated callouts if available, otherwise show nothing on highway
     const markersToShow = callouts || curatedCallouts || []
-    
-    if (!markersToShow.length) {
-      console.log('🗺️ No curated callouts to display')
-      return
-    }
-    
-    console.log(`🗺️ Rendering ${markersToShow.length} curated highway callouts`)
+    if (!markersToShow.length) return
     
     markersToShow.forEach(callout => {
       if (!callout.position) return
@@ -1245,51 +964,29 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
       
-      // Short label
       const shortLabel = getShortLabel(callout)
-      
-      // Highway uses blue, Technical/Urban use severity colors
-      let color
       const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
       
+      let color
       if (callout.zone === 'transit' || callout.zone === 'highway') {
-        color = '#3b82f6' // Blue for highway
+        color = '#3b82f6'
       } else {
-        // Technical/Urban use severity-based colors
         const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
-        if (angle >= 70 || callout.text?.toLowerCase().includes('hairpin')) {
-          color = '#ef4444' // Red - danger
-        } else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane') || callout.text?.toLowerCase().includes('esses')) {
-          color = '#f97316' // Orange - significant
-        } else {
-          color = '#22c55e' // Green - moderate
-        }
+        if (angle >= 70 || callout.text?.toLowerCase().includes('hairpin')) color = '#ef4444'
+        else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane')) color = '#f97316'
+        else color = '#22c55e'
       }
       
-      // Style matching the screenshot - solid bg, colored border, white text for non-highway
       const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
       el.innerHTML = `
-        <div style="
-          background: ${isHighway ? color + '30' : color};
-          padding: ${isGrouped ? '4px 12px' : '4px 10px'};
-          border-radius: ${isGrouped ? '12px' : '6px'};
-          border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color};
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-        " 
-        title="${callout.text}&#10;Mile ${callout.triggerMile?.toFixed(1) || '?'}&#10;Zone: ${callout.zone}&#10;${callout.reason || ''}${isGrouped ? '&#10;(' + callout.groupedFrom.length + ' curves grouped)' : ''}">
-          <span style="font-size:${isGrouped ? '12px' : '11px'};font-weight:${isGrouped ? '700' : '600'};color:${isHighway ? color : '#fff'};">${shortLabel}</span>
+        <div style="background: ${isHighway ? color + '30' : color}; padding: ${isGrouped ? '4px 12px' : '4px 10px'}; border-radius: ${isGrouped ? '12px' : '6px'}; border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color}; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">
+          <span style="font-size:${isGrouped ? '12px' : '11px'}; font-weight:${isGrouped ? '700' : '600'}; color:${isHighway ? color : '#fff'};">${shortLabel}</span>
         </div>
       `
       
       el.onclick = () => {
-        setSelectedCurve({
-          ...callout,
-          isCuratedCallout: true
-        })
-        if (mapRef.current) {
-          mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
-        }
+        setSelectedCurve({ ...callout, isCuratedCallout: true })
+        if (mapRef.current) mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
       }
       
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
@@ -1300,22 +997,11 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     })
   }, [showHighwayBends, curatedCallouts])
 
-  // ================================
-  // REBUILD ROUTE - FIXED v36
-  // Properly cleans up ALL old layers before adding new ones
-  // ================================
+  // Rebuild route
   const rebuildRoute = useCallback((data = routeData, charSegs = routeCharacter.segments) => {
     if (!mapRef.current || !data?.coordinates) return
+    if (!charSegs?.length) return
     
-    console.log('🔄 rebuildRoute called with', charSegs?.length || 0, 'segments')
-    
-    // Don't rebuild if no segments (zones not ready yet)
-    if (!charSegs?.length) {
-      console.log('🔄 rebuildRoute: No segments, skipping')
-      return
-    }
-    
-    // Clean up ALL old layers first
     let removedCount = 0
     for (let i = 0; i < 100; i++) {
       ['glow-', 'line-'].forEach(prefix => { 
@@ -1326,13 +1012,9 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         }
       })
       const srcId = 'route-src-' + i
-      if (mapRef.current.getSource(srcId)) {
-        mapRef.current.removeSource(srcId)
-      }
+      if (mapRef.current.getSource(srcId)) mapRef.current.removeSource(srcId)
     }
-    console.log('🔄 Cleaned up', removedCount, 'old layers')
     
-    // Now add the new route
     addRoute(mapRef.current, data.coordinates, charSegs, data.curves)
     addMarkers(mapRef.current, data.curves, data.coordinates, charSegs)
     addHighwayBendMarkers(mapRef.current, curatedCallouts)
@@ -1340,31 +1022,24 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     initialRouteDrawnRef.current = true
   }, [routeData, routeCharacter.segments, addRoute, addMarkers, addHighwayBendMarkers, curatedCallouts])
 
-  // ================================
-  // EFFECT: Rebuild route when zones are ready
-  // This is the KEY fix - only draw when we have zones
-  // ================================
+  // Rebuild when zones ready
   useEffect(() => {
     if (mapLoaded && routeCharacter.segments?.length > 0) {
-      console.log('🗺️ Zones ready, rebuilding route with', routeCharacter.segments.length, 'segments')
       rebuildRoute(routeData, routeCharacter.segments)
     }
   }, [routeCharacter.segments, mapLoaded, rebuildRoute, routeData])
 
-  // Add highway markers when curated callouts are ready
+  // Add highway markers when callouts ready
   useEffect(() => {
     if (mapRef.current && mapLoaded && curatedCallouts.length > 0) {
-      console.log('🗺️ Curated callouts ready, rendering markers...')
       addHighwayBendMarkers(mapRef.current, curatedCallouts)
     }
   }, [curatedCallouts, mapLoaded, addHighwayBendMarkers])
 
-  // ================================
-  // INITIALIZE MAP - FIXED v36
-  // DON'T draw route on load - wait for zones
-  // ================================
+  // Initialize map
   useEffect(() => {
     if (!mapContainer || !routeData?.coordinates || mapRef.current) return
+    if (showModeSelection) return // Don't initialize map until mode selected
     
     mapRef.current = new mapboxgl.Map({ 
       container: mapContainer, 
@@ -1377,7 +1052,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     mapRef.current.on('load', () => {
       setMapLoaded(true)
       
-      // FIT BOUNDS immediately so user sees the route area
       const bounds = routeData.coordinates.reduce(
         (b, c) => b.extend(c), 
         new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
@@ -1386,28 +1060,20 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         padding: { top: 120, bottom: 160, left: 40, right: 40 }, 
         duration: 1000 
       })
-      
-      // DON'T draw route here - wait for zones to be ready
-      // The useEffect watching routeCharacter.segments will handle it
-      console.log('🗺️ Map loaded, waiting for zones before drawing route...')
     })
     
     mapRef.current.on('style.load', () => {
-      // Only rebuild if we have zones
-      if (routeCharacter.segments?.length > 0) {
-        rebuildRoute()
-      }
+      if (routeCharacter.segments?.length > 0) rebuildRoute()
     })
     
     return () => { 
       markersRef.current.forEach(m => m.remove())
       highwayMarkersRef.current.forEach(m => m.remove())
-      zoneLayersRef.current = []
       if (flyAnimationRef.current) cancelAnimationFrame(flyAnimationRef.current)
       mapRef.current?.remove()
       mapRef.current = null 
     }
-  }, [mapContainer, routeData, mapStyle])
+  }, [mapContainer, routeData, mapStyle, showModeSelection])
 
   const handleStyleChange = () => {
     const next = mapStyle === 'dark' ? 'satellite' : 'dark'
@@ -1416,10 +1082,57 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
   }
 
   // ================================
-  // LOADING / ERROR STATES
+  // RENDER STATES
   // ================================
-  if (isLoadingRoute) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center"><div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>
-  if (loadError) return <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4"><p className="text-red-400">{loadError}</p><button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button></div>
+  
+  if (isLoadingRoute) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+  
+  if (loadError) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4">
+        <p className="text-red-400">{loadError}</p>
+        <button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button>
+      </div>
+    )
+  }
+  
+  // ================================
+  // NEW: Show Mode Selection first
+  // ================================
+  if (showModeSelection && routeData?.coordinates) {
+    return (
+      <ModeSelection 
+        routeData={routeData}
+        onSelect={handleModeSelect}
+        onBack={onBack}
+      />
+    )
+  }
+  
+  // ================================
+  // NEW: Show Loading Screen while processing
+  // ================================
+  if (isPreviewLoading) {
+    return (
+      <LoadingScreen 
+        stages={loadingStages}
+        mode={selectedMode}
+        routeData={routeData}
+        onCancel={() => {
+          setIsPreviewLoading(false)
+          setShowModeSelection(true)
+          characterFetchedRef.current = false
+          highwayAnalyzedRef.current = false
+        }}
+      />
+    )
+  }
   
   if (isPreparingCopilot) {
     return (
@@ -1432,22 +1145,10 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     )
   }
 
-  // Show preview loader while analyzing route
-  if (isPreviewLoading && hasLLMApiKey()) {
-    return (
-      <PreviewLoader 
-        isLoading={true}
-        stages={previewLoadingStages}
-        routeName={routeData?.name || 'Analyzing route...'}
-      />
-    )
-  }
-
-  // Check if route has highway sections
   const hasHighwaySections = routeCharacter.segments?.some(s => s.character === 'transit')
 
   // ================================
-  // MAIN RENDER
+  // MAIN PREVIEW RENDER
   // ================================
   return (
     <div className="fixed inset-0 bg-[#0a0a0f]">
@@ -1455,7 +1156,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
       {/* TOP BAR */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent">
-        {/* Navigation row */}
         <div className="flex items-center justify-between p-2 pt-10">
           <div className="flex items-center gap-1.5">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
@@ -1464,23 +1164,19 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
             <button onClick={handleStyleChange} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">{mapStyle === 'dark' ? <><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></> : <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>}</svg>
             </button>
-            {/* Sleeve toggle */}
             <button 
               onClick={handleToggleSleeve} 
               className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showSleeve ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-black/70 border border-white/10'}`}
-              title="Toggle density layer"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? '#00d4ff' : 'white'} strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <path d="M3 9h18M9 21V9"/>
               </svg>
             </button>
-            {/* Highway bends toggle */}
             {hasHighwaySections && highwayBends.length > 0 && (
               <button 
                 onClick={handleToggleHighwayBends} 
                 className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showHighwayBends ? 'bg-blue-500/20 border border-blue-500/50' : 'bg-black/70 border border-white/10'}`}
-                title={`Toggle highway bends (${highwayBends.length})`}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showHighwayBends ? HIGHWAY_BEND_COLOR : 'white'} strokeWidth="2">
                   <path d="M4 19h16M4 15l4-8h8l4 8"/>
@@ -1490,16 +1186,17 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Elevation mini */}
+            {/* Mode indicator */}
+            <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${selectedMode === HIGHWAY_MODE.COMPANION ? 'bg-amber-500/20 text-amber-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+              {selectedMode === HIGHWAY_MODE.COMPANION ? '🎙️ COMPANION' : '🎯 BASIC'}
+            </span>
             <div className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
               <span className="text-[10px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
             </div>
-            {/* Difficulty badge */}
             <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: `${difficultyRating.color}30`, color: difficultyRating.color }}>
               {difficultyRating.label}
             </span>
-            {/* Favorite */}
             {routeData?.name && (
               <button onClick={handleToggleFavorite} className={`w-9 h-9 rounded-full flex items-center justify-center border ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -1508,7 +1205,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         </div>
 
-        {/* Stats row */}
         <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-3 px-3 py-1.5 hover:bg-white/5">
           <span className="text-white font-bold text-lg">{routeStats.distance}</span>
           <span className="text-white/50 text-sm">{routeStats.distanceUnit}</span>
@@ -1525,7 +1221,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         </button>
       </div>
 
-      {/* ELEVATION - Right side mini widget */}
+      {/* Elevation mini widget */}
       {elevationData.length > 0 && (
         <div className="absolute right-2 z-20" style={{ top: '180px' }}>
           <div className="bg-black/80 rounded-lg p-1.5 border border-white/10 w-24">
@@ -1535,7 +1231,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
         </div>
       )}
 
-      {/* FLY CONTROLS */}
+      {/* Fly controls */}
       {isFlying && (
         <div className="absolute left-1/2 -translate-x-1/2 z-30" style={{ top: '200px' }}>
           <div className="flex items-center gap-2 bg-black/90 rounded-full px-3 py-2 border border-white/20 shadow-lg">
@@ -1546,19 +1242,13 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
               )}
             </button>
-            
             <div className="flex items-center gap-1 border-l border-white/20 pl-2">
               {[0.5, 1, 2].map(s => (
-                <button 
-                  key={s} 
-                  onClick={() => setFlySpeed(s)} 
-                  className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all ${flySpeed === s ? 'bg-cyan-500 text-black' : 'text-white/60 hover:text-white'}`}
-                >
+                <button key={s} onClick={() => setFlySpeed(s)} className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all ${flySpeed === s ? 'bg-cyan-500 text-black' : 'text-white/60 hover:text-white'}`}>
                   {s}x
                 </button>
               ))}
             </div>
-            
             <button onClick={stopFlyThrough} className="w-9 h-9 rounded-full bg-red-500/30 flex items-center justify-center hover:bg-red-500/50 border-l border-white/20 ml-1">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="#f87171"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
             </button>
@@ -1568,7 +1258,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 
       {/* BOTTOM BAR */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
-        {/* Route Character - Compact single line */}
+        {/* Route Character */}
         {routeCharacter.summary && (
           <div className="flex items-center gap-2 mb-2 overflow-x-auto">
             {isLoadingCharacter ? (
@@ -1583,27 +1273,16 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
                     ? `${(data.distance / 1000).toFixed(1)}km`
                     : `${(data.distance / 1609.34).toFixed(1)}mi`
                   return (
-                    <span 
-                      key={char}
-                      className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
-                      style={{ background: `${colors.primary}20`, color: colors.primary, border: `1px solid ${colors.primary}40` }}
-                    >
+                    <span key={char} className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                      style={{ background: `${colors.primary}20`, color: colors.primary, border: `1px solid ${colors.primary}40` }}>
                       {colors.label} {dist}
                     </span>
                   )
                 })}
-                {/* Highway bends count */}
                 {highwayBends.length > 0 && (
-                  <span 
-                    className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
-                    style={{ background: `${HIGHWAY_BEND_COLOR}20`, color: HIGHWAY_BEND_COLOR, border: `1px solid ${HIGHWAY_BEND_COLOR}40` }}
-                  >
+                  <span className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
+                    style={{ background: `${HIGHWAY_BEND_COLOR}20`, color: HIGHWAY_BEND_COLOR, border: `1px solid ${HIGHWAY_BEND_COLOR}40` }}>
                     {highwayBends.length} sweeps
-                  </span>
-                )}
-                {routeCharacter.summary.funPercentage > 0 && (
-                  <span className="flex-shrink-0 text-[10px] font-bold ml-auto" style={{ color: routeCharacter.summary.funPercentage > 50 ? '#22c55e' : '#fbbf24' }}>
-                    {routeCharacter.summary.funPercentage}% fun
                   </span>
                 )}
               </>
@@ -1611,241 +1290,86 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* AI LOADING - Compact inline */}
-        {isLoadingAI && (
-          <div className="mb-2 flex items-center gap-2 px-2 py-1.5 bg-purple-500/10 rounded-full border border-purple-500/30">
-            <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-[10px] text-purple-300">Analyzing zones...</span>
-          </div>
-        )}
-
-        {/* AI ZONE TOGGLE - Compact inline style */}
-        {!isLoadingAI && llmEnhanced && llmResult && llmResult.changes?.length > 0 && (
-          <div className="mb-2 flex items-center gap-2">
-            {/* Toggle pill */}
-            <div className="flex bg-black/60 rounded-full p-0.5 border border-purple-500/30">
-              <button 
-                onClick={() => {
-                  setUseEnhancedZones(false)
-                  const zones = llmResult.original
-                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
-                  setRouteZones(zones)
-                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
-                  setHighwayBends(bends)
-                }}
-                className="px-2.5 py-1 rounded-full text-[9px] font-bold transition-all"
-                style={{ 
-                  background: !useEnhancedZones ? '#64748b' : 'transparent', 
-                  color: !useEnhancedZones ? '#fff' : '#fff5' 
-                }}
-              >
-                Original
-              </button>
-              <button 
-                onClick={() => {
-                  setUseEnhancedZones(true)
-                  const zones = llmResult.enhanced
-                  setRouteCharacter(prev => ({ ...prev, segments: zones }))
-                  setRouteZones(zones)
-                  const bends = analyzeHighwayBends(routeData.coordinates, zones)
-                  setHighwayBends(bends)
-                }}
-                className="px-2.5 py-1 rounded-full text-[9px] font-bold transition-all flex items-center gap-1"
-                style={{ 
-                  background: useEnhancedZones ? '#8b5cf6' : 'transparent', 
-                  color: useEnhancedZones ? '#fff' : '#fff5' 
-                }}
-              >
-                <span>AI Zones</span>
-                <span className="opacity-70">({llmResult.changes?.length})</span>
-              </button>
-            </div>
-            
-            {/* Expandable changes - click to show */}
-            <button 
-              onClick={() => {
-                const details = llmResult.changes?.join('\n')
-                if (details) alert(details)
-              }}
-              className="text-[9px] text-purple-400/60 hover:text-purple-400 transition-colors"
-              title={llmResult.changes?.join('\n')}
-            >
-              view
-            </button>
-          </div>
-        )}
-
-        {/* AI CO-DRIVER - Compact widget */}
+        {/* AI Co-Driver widget */}
         {curveEnhanced && agentResult && (
           <div className="mb-2">
-            <button 
-              onClick={() => setAiSectionCollapsed(!aiSectionCollapsed)}
-              className="flex items-center gap-2 px-2.5 py-1.5 bg-black/70 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50 transition-all"
-            >
+            <button onClick={() => setAiSectionCollapsed(!aiSectionCollapsed)}
+              className="flex items-center gap-2 px-2.5 py-1.5 bg-black/70 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50 transition-all">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
               <span className="text-[10px] text-emerald-400 font-semibold">AI Co-Driver</span>
               <span className="text-[9px] text-white/40">{curatedCallouts.length} callouts</span>
-              <svg 
-                width="10" 
-                height="10" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2"
-                className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}
-              >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}>
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </button>
             
-            {/* Expanded content */}
             {!aiSectionCollapsed && (
               <div className="mt-2 p-2.5 bg-black/80 rounded-lg border border-emerald-500/20 max-w-md">
-                {/* Analysis */}
                 <div className="text-[10px] text-white/70 leading-relaxed mb-2">
-                  {agentResult.summary?.summary || agentResult.analysis || 'Route analyzed'}
+                  {agentResult.summary?.summary || 'Route analyzed'}
                 </div>
-                
-                {/* Callout pills */}
                 <div className="flex flex-wrap gap-1">
-                  {curatedCallouts.map((callout, i) => {
+                  {curatedCallouts.slice(0, 20).map((callout, i) => {
                     const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
                     let color = '#22c55e'
                     if (angle >= 70) color = '#ef4444'
                     else if (angle >= 45) color = '#f97316'
                     
                     const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
-                    
                     const text = callout.text || ''
                     let shortText = ''
                     
                     if (isGrouped) {
-                      if (text.toLowerCase().includes('hairpin')) {
-                        shortText = text.includes('DOUBLE') ? '2xHP' : 'HP'
-                        color = '#ef4444'
-                      } else if (text.toLowerCase().includes('chicane')) {
-                        shortText = 'CHI'
-                        color = '#f97316'
-                      } else if (text.toLowerCase().includes('esses')) {
-                        shortText = 'ESS'
-                        color = '#f97316'
-                      } else if (text.includes('HARD')) {
-                        const hardMatch = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
-                        shortText = hardMatch ? `H${hardMatch[1][0]}${hardMatch[2]}` : 'HRD'
-                        color = '#ef4444'
-                      } else if (text.match(/\d+\s*(left|right)s/i)) {
-                        const countMatch = text.match(/(\d+)\s*(left|right)s/i)
-                        shortText = countMatch ? `${countMatch[1]}${countMatch[2][0].toUpperCase()}` : text.substring(0, 4)
-                      } else if (text.toLowerCase().includes('tightens')) {
-                        shortText = 'TGT'
-                      } else {
-                        shortText = `G${callout.groupedFrom.length}`
-                      }
+                      if (text.toLowerCase().includes('hairpin')) shortText = text.includes('DOUBLE') ? '2xHP' : 'HP'
+                      else if (text.toLowerCase().includes('chicane')) shortText = 'CHI'
+                      else shortText = `G${callout.groupedFrom.length}`
                     } else {
                       const dirMatch = text.match(/\b(left|right)\b/i)
                       const angleMatch = text.match(/(\d+)/)
-                      shortText = dirMatch && angleMatch 
-                        ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` 
-                        : callout.type === 'sequence' ? text.substring(0, 8) : text.substring(0, 6)
+                      shortText = dirMatch && angleMatch ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` : text.substring(0, 6)
                     }
                     
                     return (
-                      <button
-                        key={callout.id || i}
+                      <button key={callout.id || i}
                         onClick={() => {
                           setSelectedCurve({ ...callout, isCuratedCallout: true })
-                          if (mapRef.current && callout.position) {
-                            mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
-                          }
+                          if (mapRef.current && callout.position) mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
                         }}
                         className="px-1.5 py-0.5 rounded text-[9px] font-semibold"
-                        style={{ 
-                          background: color, 
-                          color: '#fff',
-                          border: isGrouped ? '2px solid #fff' : 'none'
-                        }}
-                        title={`${callout.text}\nMile ${callout.triggerMile?.toFixed(1)}${isGrouped ? `\n(${callout.groupedFrom.length} curves grouped)` : ''}`}
-                      >
+                        style={{ background: color, color: '#fff', border: isGrouped ? '2px solid #fff' : 'none' }}>
                         {shortText}
                       </button>
                     )
                   })}
+                  {curatedCallouts.length > 20 && (
+                    <span className="px-1.5 py-0.5 text-[9px] text-white/40">+{curatedCallouts.length - 20} more</span>
+                  )}
                 </div>
               </div>
             )}
           </div>
         )}
-        
-        {/* Agent loading state */}
-        {isLoadingAI && agentProgress && (
-          <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-cyan-500/10 rounded-lg border border-cyan-500/30">
-            <div className="w-3 h-3 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-[10px] text-cyan-300">
-              AI Agent analyzing... (step {agentProgress.iteration})
-            </span>
-          </div>
-        )}
 
-        {/* Mode + Highway Mode + Actions */}
+        {/* Mode + Actions */}
         <div className="flex items-center justify-between mb-2">
-          {/* Mode selector */}
           <div className="flex items-center gap-2">
-            {/* Driving mode */}
             <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
               {[{ id: 'cruise', l: 'CRUISE', c: '#00d4ff' }, { id: 'fast', l: 'FAST', c: '#ffd500' }, { id: 'race', l: 'RACE', c: '#ff3366' }].map(m => (
-                <button 
-                  key={m.id} 
-                  onClick={() => setMode(m.id)} 
+                <button key={m.id} onClick={() => setMode(m.id)} 
                   className="px-3 py-1 rounded-full text-[10px] font-bold transition-all"
-                  style={{ background: mode === m.id ? m.c : 'transparent', color: mode === m.id ? (m.id === 'fast' ? '#000' : '#fff') : '#fff6' }}
-                >
+                  style={{ background: mode === m.id ? m.c : 'transparent', color: mode === m.id ? (m.id === 'fast' ? '#000' : '#fff') : '#fff6' }}>
                   {m.l}
                 </button>
               ))}
             </div>
-
-            {/* Highway mode toggle */}
-            {hasHighwaySections && (
-              <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
-                <button 
-                  onClick={() => setHighwayMode(HIGHWAY_MODE.BASIC)} 
-                  className="px-2 py-1 rounded-full text-[9px] font-bold transition-all flex items-center gap-1"
-                  style={{ 
-                    background: highwayMode === HIGHWAY_MODE.BASIC ? HIGHWAY_BEND_COLOR : 'transparent', 
-                    color: highwayMode === HIGHWAY_MODE.BASIC ? '#fff' : '#fff6' 
-                  }}
-                  title="Basic highway mode - sweeper callouts only"
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 6v6l4 2"/>
-                  </svg>
-                  HWY
-                </button>
-                <button 
-                  onClick={() => setHighwayMode(HIGHWAY_MODE.COMPANION)} 
-                  className="px-2 py-1 rounded-full text-[9px] font-bold transition-all flex items-center gap-1"
-                  style={{ 
-                    background: highwayMode === HIGHWAY_MODE.COMPANION ? '#f59e0b' : 'transparent', 
-                    color: highwayMode === HIGHWAY_MODE.COMPANION ? '#000' : '#fff6' 
-                  }}
-                  title="Companion mode - full coaching + chatter"
-                >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  +
-                </button>
-              </div>
-            )}
           </div>
 
-          {/* Actions */}
           <div className="flex gap-1.5">
-            <Btn icon="edit" onClick={onEdit} tip="Edit Route" highlight={hasEdits} />
+            <Btn icon="edit" onClick={onEdit} tip="Edit" highlight={hasEdits} />
             <Btn icon="reverse" onClick={handleReverseRoute} tip="Reverse" />
             <Btn icon="fly" onClick={handleFlyThrough} disabled={isFlying} tip="Preview" />
-            <Btn icon="voice" onClick={handleSampleCallout} tip="Test Voice" />
+            <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
             <Btn icon="share" onClick={handleShare} tip="Share" />
             <Btn icon={downloadComplete ? 'check' : 'download'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} loading={isDownloading} tip="Download" />
           </div>
@@ -1862,7 +1386,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
       {showCurveList && <CurveList curves={routeData?.curves || []} highwayBends={highwayBends} mode={mode} settings={settings} onSelect={handleCurveClick} onSelectBend={handleHighwayBendClick} onClose={() => setShowCurveList(false)} />}
       {selectedCurve && !showCurveList && <CurvePopup curve={selectedCurve} mode={mode} settings={settings} onClose={() => setSelectedCurve(null)} />}
       {showShareModal && <ShareModal name={routeData?.name} onClose={() => setShowShareModal(false)} />}
-      {!mapLoaded && <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-40"><div className="w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>}
+      {!mapLoaded && !showModeSelection && <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-40"><div className="w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" /></div>}
     </div>
   )
 }
@@ -1871,7 +1395,6 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
 // HELPER COMPONENTS
 // ================================
 
-// Mini elevation widget
 function MiniElevation({ data, color }) {
   if (!data?.length) return null
   const max = Math.max(...data.map(d => d.elevation)), min = Math.min(...data.map(d => d.elevation)), range = max - min || 1
@@ -1884,7 +1407,6 @@ function MiniElevation({ data, color }) {
   )
 }
 
-// Action button
 function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   const icons = {
     edit: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
@@ -1902,7 +1424,6 @@ function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   )
 }
 
-// Curve list modal
 function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSelectBend, onClose }) {
   const [showTab, setShowTab] = useState('curves')
   
@@ -1919,18 +1440,8 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
           <h2 className="text-lg font-bold text-white">{curves.length} Curves</h2>
           {highwayBends.length > 0 && (
             <div className="flex bg-white/10 rounded-full p-0.5">
-              <button 
-                onClick={() => setShowTab('curves')} 
-                className={`px-3 py-1 rounded-full text-xs font-medium ${showTab === 'curves' ? 'bg-white/20 text-white' : 'text-white/50'}`}
-              >
-                Curves
-              </button>
-              <button 
-                onClick={() => setShowTab('highway')} 
-                className={`px-3 py-1 rounded-full text-xs font-medium ${showTab === 'highway' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50'}`}
-              >
-                Highway ({highwayBends.length})
-              </button>
+              <button onClick={() => setShowTab('curves')} className={`px-3 py-1 rounded-full text-xs font-medium ${showTab === 'curves' ? 'bg-white/20 text-white' : 'text-white/50'}`}>Curves</button>
+              <button onClick={() => setShowTab('highway')} className={`px-3 py-1 rounded-full text-xs font-medium ${showTab === 'highway' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50'}`}>Highway ({highwayBends.length})</button>
             </div>
           )}
         </div>
@@ -1942,17 +1453,10 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
         {showTab === 'curves' ? (
           curves.map((curve, i) => (
             <button key={curve.id || i} onClick={() => onSelect(curve)} className="w-full p-3 mb-1 rounded-lg bg-white/5 hover:bg-white/10 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: getCurveColor(curve.severity), color: '#000' }}>
-                {curve.severity}
-              </div>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: getCurveColor(curve.severity), color: '#000' }}>{curve.severity}</div>
               <div className="flex-1 text-left">
-                <div className="text-white text-sm font-medium">
-                  {curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}
-                  {curve.modifier && <span className="text-white/50 ml-1">{curve.modifier}</span>}
-                </div>
-                <div className="text-white/40 text-xs">
-                  {((curve.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}
-                </div>
+                <div className="text-white text-sm font-medium">{curve.isChicane ? `${curve.chicaneType} ${curve.startDirection}` : `${curve.direction} ${curve.severity}`}{curve.modifier && <span className="text-white/50 ml-1">{curve.modifier}</span>}</div>
+                <div className="text-white/40 text-xs">{((curve.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}</div>
               </div>
               <div className="text-right">
                 <div className="text-white/80 text-sm font-mono">{getSpd(curve.severity)}</div>
@@ -1962,36 +1466,11 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
           ))
         ) : (
           highwayBends.map((bend, i) => (
-            <button 
-              key={bend.id || i} 
-              onClick={() => onSelectBend(bend)} 
-              className={`w-full p-3 mb-1 rounded-lg flex items-center gap-3 border ${
-                bend.isSection 
-                  ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20' 
-                  : 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20'
-              }`}
-            >
-              <div 
-                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" 
-                style={{ background: bend.isSection ? '#f59e0b' : '#3b82f6', color: '#fff' }}
-              >
-                {bend.isSection ? bend.bendCount : bend.isSSweep ? 'S' : 'SW'}
-              </div>
+            <button key={bend.id || i} onClick={() => onSelectBend(bend)} className={`w-full p-3 mb-1 rounded-lg flex items-center gap-3 border ${bend.isSection ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20' : 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20'}`}>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: bend.isSection ? '#f59e0b' : '#3b82f6', color: '#fff' }}>{bend.isSection ? bend.bendCount : bend.isSSweep ? 'S' : 'SW'}</div>
               <div className="flex-1 text-left">
-                <div className="text-white text-sm font-medium">
-                  {bend.isSection ? (
-                    `Active Section: ${bend.bendCount} bends`
-                  ) : bend.isSSweep ? (
-                    `S-Sweep: ${bend.firstBend.direction} ${bend.firstBend.angle}° → ${bend.secondBend.direction} ${bend.secondBend.angle}°`
-                  ) : (
-                    `${bend.direction} ${bend.angle}°`
-                  )}
-                  {bend.modifier && <span className={`ml-1 ${bend.isSection ? 'text-amber-400/70' : 'text-blue-400/70'}`}>{bend.modifier}</span>}
-                </div>
-                <div className="text-white/40 text-xs">
-                  {((bend.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}
-                  {bend.length && ` • ${bend.length}m`}
-                </div>
+                <div className="text-white text-sm font-medium">{bend.isSection ? `Active Section: ${bend.bendCount} bends` : bend.isSSweep ? `S-Sweep: ${bend.firstBend.direction} ${bend.firstBend.angle}° → ${bend.secondBend.direction} ${bend.secondBend.angle}°` : `${bend.direction} ${bend.angle}°`}</div>
+                <div className="text-white/40 text-xs">{((bend.distanceFromStart || 0) / (settings.units === 'metric' ? 1000 : 1609.34)).toFixed(1)} {settings.units === 'metric' ? 'km' : 'mi'}</div>
               </div>
               <div className="text-right">
                 <div className={`text-sm font-mono ${bend.isSection ? 'text-amber-400' : 'text-blue-400'}`}>{bend.optimalSpeed || 70}</div>
@@ -2005,7 +1484,6 @@ function CurveList({ curves, highwayBends = [], mode, settings, onSelect, onSele
   )
 }
 
-// Curve popup
 function CurvePopup({ curve, mode, settings, onClose }) {
   const getSpd = (s) => { 
     const b = { 1: 60, 2: 50, 3: 40, 4: 32, 5: 25, 6: 18 }, m = { cruise: 1, fast: 1.15, race: 1.3 }
@@ -2013,19 +1491,10 @@ function CurvePopup({ curve, mode, settings, onClose }) {
     return settings.units === 'metric' ? Math.round(v * 1.6) : v
   }
   
-  // Check if this is an LLM-curated callout
   const isCurated = curve.isCuratedCallout || curve.isLLMCurated || curve.isFlowBased
   
   if (isCurated) {
-    // Curated callout popup
-    const colors = {
-      danger: '#ef4444',
-      significant: '#f59e0b',
-      sweeper: '#3b82f6',
-      wake_up: '#10b981',
-      section: '#8b5cf6',
-      sequence: '#ec4899'
-    }
+    const colors = { danger: '#ef4444', significant: '#f59e0b', sweeper: '#3b82f6', wake_up: '#10b981', section: '#8b5cf6', sequence: '#ec4899' }
     const color = colors[curve.type] || '#3b82f6'
     
     return (
@@ -2033,7 +1502,6 @@ function CurvePopup({ curve, mode, settings, onClose }) {
         <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
-        
         <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: color, color: '#fff' }}>
             {curve.type === 'wake_up' ? '!' : curve.type === 'sequence' ? 'S' : curve.type?.[0]?.toUpperCase() || '•'}
@@ -2043,96 +1511,53 @@ function CurvePopup({ curve, mode, settings, onClose }) {
             <div className="text-white/50 text-xs">Mile {curve.triggerMile?.toFixed(1) || '?'} • {curve.type || 'info'}</div>
           </div>
         </div>
-        
-        {/* Reason from LLM */}
         {curve.reason && (
           <div className="mb-3 p-2 bg-white/5 rounded-lg border border-white/10">
-            <div className="text-[10px] text-white/40 mb-1">WHY THIS CALLOUT</div>
+            <div className="text-[10px] text-white/40 mb-1">WHY</div>
             <div className="text-white/80 text-xs leading-relaxed">{curve.reason}</div>
           </div>
         )}
-        
-        {/* Speed recommendation */}
         <div className="flex justify-between text-sm border-t border-white/10 pt-2">
-          <span className="text-white/50">Target Speed</span>
-          <span className="text-white font-mono">
-            {curve.type === 'danger' ? getSpd(5) : curve.type === 'significant' ? getSpd(4) : getSpd(3)} {settings.units === 'metric' ? 'km/h' : 'mph'}
-          </span>
+          <span className="text-white/50">Target</span>
+          <span className="text-white font-mono">{curve.type === 'danger' ? getSpd(5) : curve.type === 'significant' ? getSpd(4) : getSpd(3)} {settings.units === 'metric' ? 'km/h' : 'mph'}</span>
         </div>
       </div>
     )
   }
   
-  // Original popup for regular curves
-  const isSection = curve.isSection
-  const isHighwayBend = curve.isHighwayBend || curve.isSSweep || isSection
-  const color = isSection ? '#f59e0b' : isHighwayBend ? '#3b82f6' : getCurveColor(curve.severity)
+  const color = curve.isSection ? '#f59e0b' : curve.isHighwayBend ? '#3b82f6' : getCurveColor(curve.severity)
   
   return (
-    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-30 bg-black/90 rounded-xl p-4 border border-white/20 min-w-[280px] max-w-[340px]" style={{ borderColor: isHighwayBend ? `${color}40` : undefined }}>
+    <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-30 bg-black/90 rounded-xl p-4 border border-white/20 min-w-[280px] max-w-[340px]">
       <button onClick={onClose} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
       <div className="flex items-center gap-3 mb-2">
         <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: color, color: '#fff' }}>
-          {isSection ? curve.bendCount : curve.isSSweep ? 'S' : isHighwayBend ? 'SW' : curve.severity}
+          {curve.isSection ? curve.bendCount : curve.isSSweep ? 'S' : curve.isHighwayBend ? 'SW' : curve.severity}
         </div>
         <div>
-          <div className="text-white font-bold">
-            {isSection ? 'Active Section' : curve.isSSweep ? 'S-Sweep' : curve.isHighwayBend ? `${curve.direction} Sweep` : curve.isChicane ? curve.chicaneType : `${curve.direction} ${curve.severity}`}
-          </div>
-          {isSection ? (
-            <div className="text-amber-400/70 text-sm">{curve.bendCount} bends • {curve.length}m</div>
-          ) : curve.angle ? (
-            <div className="text-white/50 text-sm">{curve.angle}°{curve.length ? ` • ${curve.length}m` : ''}</div>
-          ) : curve.modifier ? (
-            <div className="text-white/50 text-sm">{curve.modifier}</div>
-          ) : null}
+          <div className="text-white font-bold">{curve.isSection ? 'Active Section' : curve.isSSweep ? 'S-Sweep' : curve.isHighwayBend ? `${curve.direction} Sweep` : `${curve.direction} ${curve.severity}`}</div>
+          {curve.angle && <div className="text-white/50 text-sm">{curve.angle}°{curve.length ? ` • ${curve.length}m` : ''}</div>}
         </div>
       </div>
-      
-      {/* Callout preview for sections */}
-      {isSection && curve.calloutDetailed && (
-        <div className="mb-2 p-2 bg-amber-500/10 rounded-lg border border-amber-500/20">
-          <div className="text-[10px] text-amber-400/60 mb-1">CALLOUT PREVIEW</div>
-          <div className="text-amber-200 text-xs leading-relaxed">{curve.calloutDetailed}</div>
-        </div>
-      )}
-      
-      {/* Speed recommendation */}
       <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2">
-        <span className="text-white/50">Target Speed</span>
+        <span className="text-white/50">Target</span>
         <span className="text-white font-mono">{curve.optimalSpeed || getSpd(curve.severity)} {settings.units === 'metric' ? 'km/h' : 'mph'}</span>
       </div>
-      
-      {/* Throttle advice for highway bends */}
-      {curve.throttleAdvice && (
-        <div className="mt-2 pt-2 border-t border-white/10">
-          <div style={{ color }} className="text-xs">{curve.throttleAdvice}</div>
-        </div>
-      )}
     </div>
   )
 }
 
-// Share modal
 function ShareModal({ name, onClose }) {
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href)
-    onClose()
-  }
-  
+  const copyLink = () => { navigator.clipboard.writeText(window.location.href); onClose() }
   return (
     <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
       <div className="bg-[#1a1a24] rounded-2xl p-6 w-full max-w-sm">
         <h3 className="text-lg font-bold text-white mb-4">Share Route</h3>
         <p className="text-white/60 text-sm mb-4">{name || 'Rally Route'}</p>
-        <button onClick={copyLink} className="w-full py-3 bg-cyan-500 text-black font-bold rounded-xl mb-2">
-          Copy Link
-        </button>
-        <button onClick={onClose} className="w-full py-3 bg-white/10 text-white rounded-xl">
-          Cancel
-        </button>
+        <button onClick={copyLink} className="w-full py-3 bg-cyan-500 text-black font-bold rounded-xl mb-2">Copy Link</button>
+        <button onClick={onClose} className="w-full py-3 bg-white/10 text-white rounded-xl">Cancel</button>
       </div>
     </div>
   )
