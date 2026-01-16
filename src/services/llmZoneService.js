@@ -346,6 +346,23 @@ function applyDecisions(originalSegments, llmDecisions) {
       // No decision for this segment, keep as-is
       return seg
     }
+
+    // ================================================================
+    // NEW: PROTECT INTERSTATE/HIGHWAY SEGMENTS
+    // Check if this segment is an interstate - if so, DON'T allow override
+    // ================================================================
+    const roadName = seg.road || seg.details?.roadNames?.[0] || ''
+    const isInterstate = /^I[\s-]?\d+/i.test(roadName) || roadName.toLowerCase().includes('interstate')
+    const isUSHighway = /^US[\s-]?\d+/i.test(roadName)
+    
+    if (seg.character === 'transit' && (isInterstate || isUSHighway)) {
+      console.log(`   Seg ${i}: PROTECTED - ${roadName} is interstate/highway, ignoring LLM override`)
+      return {
+        ...seg,
+        llmProtected: true,
+        llmReason: `Protected: ${roadName} is a highway`
+      }
+    }
     
     // Map classification names - handle various formats
     let newChar = seg.character
