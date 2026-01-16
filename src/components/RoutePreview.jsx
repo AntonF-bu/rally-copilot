@@ -1188,7 +1188,7 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
           <div className="flex items-center gap-1.5">
             {/* Mode indicator */}
             <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${selectedMode === HIGHWAY_MODE.COMPANION ? 'bg-amber-500/20 text-amber-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
-              {selectedMode === HIGHWAY_MODE.COMPANION ? '🎙️ COMPANION' : '🎯 BASIC'}
+              {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMPANION' : 'BASIC'}
             </span>
             <div className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
