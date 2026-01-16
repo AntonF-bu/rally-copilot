@@ -92,94 +92,90 @@ export function useSpeech() {
 
   // ================================
   // iOS AUDIO UNLOCK using Web Audio API
-  // This is the most reliable method for iOS
+  // Fully defensive - never throws, never blocks
   // ================================
-  const initAudio = useCallback(async () => {
-    console.log('🔊 Initializing audio for iOS (Web Audio API)...')
+  const initAudio = useCallback(() => {
+    console.log('🔊 initAudio called')
     
-    try {
-      // Create or resume AudioContext
-      if (!globalAudioContext) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext
-        if (AudioContext) {
-          globalAudioContext = new AudioContext()
-          console.log('🔊 Created AudioContext')
+    // Return a promise that always resolves (never rejects)
+    return new Promise((resolve) => {
+      try {
+        // Web Audio API unlock
+        try {
+          if (!globalAudioContext) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext
+            if (AudioContext) {
+              globalAudioContext = new AudioContext()
+              console.log('🔊 Created AudioContext')
+            }
+          }
+          
+          audioContextRef.current = globalAudioContext
+          
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().then(() => {
+              console.log('🔊 AudioContext resumed')
+            }).catch(() => {})
+          }
+          
+          if (audioContextRef.current) {
+            const buffer = audioContextRef.current.createBuffer(1, 1, 22050)
+            const source = audioContextRef.current.createBufferSource()
+            source.buffer = buffer
+            source.connect(audioContextRef.current.destination)
+            source.start(0)
+            audioUnlockedRef.current = true
+            console.log('🔊 ✅ Web Audio unlocked')
+          }
+        } catch (e) {
+          console.log('🔊 Web Audio error:', e?.message || e)
         }
+        
+        // Audio element unlock (non-blocking)
+        try {
+          if (audioRef.current) {
+            const wavHeader = new Uint8Array([
+              0x52,0x49,0x46,0x46,0x24,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+              0x66,0x6D,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+              0x44,0xAC,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+              0x64,0x61,0x74,0x61,0x00,0x00,0x00,0x00
+            ])
+            const blob = new Blob([wavHeader], { type: 'audio/wav' })
+            const url = URL.createObjectURL(blob)
+            audioRef.current.src = url
+            audioRef.current.volume = 0.01
+            audioRef.current.play().then(() => {
+              audioRef.current.pause()
+              URL.revokeObjectURL(url)
+              audioUnlockedRef.current = true
+              console.log('🔊 ✅ Audio element unlocked')
+            }).catch(() => {
+              URL.revokeObjectURL(url)
+            })
+          }
+        } catch (e) {
+          console.log('🔊 Audio element error:', e?.message || e)
+        }
+        
+        // Speech synthesis unlock
+        try {
+          if (synthRef.current) {
+            const u = new SpeechSynthesisUtterance('')
+            u.volume = 0
+            synthRef.current.speak(u)
+            setTimeout(() => synthRef.current?.cancel(), 10)
+            console.log('🔊 ✅ Speech synthesis unlocked')
+          }
+        } catch (e) {
+          console.log('🔊 Speech error:', e?.message || e)
+        }
+      } catch (e) {
+        console.log('🔊 initAudio outer error:', e?.message || e)
       }
       
-      audioContextRef.current = globalAudioContext
-      
-      if (audioContextRef.current) {
-        // Resume if suspended (iOS requires this)
-        if (audioContextRef.current.state === 'suspended') {
-          await audioContextRef.current.resume()
-          console.log('🔊 AudioContext resumed')
-        }
-        
-        // Play a tiny silent buffer to fully unlock
-        const buffer = audioContextRef.current.createBuffer(1, 1, 22050)
-        const source = audioContextRef.current.createBufferSource()
-        source.buffer = buffer
-        source.connect(audioContextRef.current.destination)
-        source.start(0)
-        
-        audioUnlockedRef.current = true
-        console.log('🔊 ✅ Web Audio API unlocked!')
-      }
-    } catch (e) {
-      console.log('🔊 Web Audio unlock error:', e.message)
-    }
-    
-    // Also unlock the Audio element by loading a tiny valid audio
-    if (audioRef.current) {
-      try {
-        // Create a tiny valid WAV file (44 bytes - smallest valid WAV)
-        const wavHeader = new Uint8Array([
-          0x52, 0x49, 0x46, 0x46, // "RIFF"
-          0x24, 0x00, 0x00, 0x00, // file size - 8
-          0x57, 0x41, 0x56, 0x45, // "WAVE"
-          0x66, 0x6D, 0x74, 0x20, // "fmt "
-          0x10, 0x00, 0x00, 0x00, // chunk size (16)
-          0x01, 0x00,             // audio format (1 = PCM)
-          0x01, 0x00,             // num channels (1)
-          0x44, 0xAC, 0x00, 0x00, // sample rate (44100)
-          0x88, 0x58, 0x01, 0x00, // byte rate
-          0x02, 0x00,             // block align
-          0x10, 0x00,             // bits per sample (16)
-          0x64, 0x61, 0x74, 0x61, // "data"
-          0x00, 0x00, 0x00, 0x00  // data size (0 - silent)
-        ])
-        
-        const blob = new Blob([wavHeader], { type: 'audio/wav' })
-        const url = URL.createObjectURL(blob)
-        
-        audioRef.current.src = url
-        audioRef.current.volume = 0.01
-        await audioRef.current.play()
-        audioRef.current.pause()
-        
-        URL.revokeObjectURL(url)
-        console.log('🔊 ✅ Audio element unlocked!')
-        audioUnlockedRef.current = true
-      } catch (e) {
-        console.log('🔊 Audio element unlock failed:', e.message)
-      }
-    }
-    
-    // Unlock speech synthesis
-    if (synthRef.current) {
-      try {
-        const u = new SpeechSynthesisUtterance('')
-        u.volume = 0
-        synthRef.current.speak(u)
-        setTimeout(() => synthRef.current?.cancel(), 10)
-        console.log('🔊 ✅ Speech synthesis unlocked')
-      } catch (e) {
-        console.log('🔊 Speech synthesis unlock failed:', e.message)
-      }
-    }
-    
-    return audioUnlockedRef.current
+      // Always resolve immediately - don't wait for async operations
+      resolve(audioUnlockedRef.current)
+    })
   }, [])
 
   // ================================
