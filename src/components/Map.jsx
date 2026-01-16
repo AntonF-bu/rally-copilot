@@ -4,9 +4,9 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v21
-// NEW: Zone-based route coloring (matches Preview exactly)
-// Colors: Technical=Cyan, Transit=Blue, Urban=Pink
+// Map Component - v22
+// FIXED: Callout markers now show angles properly
+// Uses callout.angle directly instead of parsing text
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -71,77 +71,68 @@ export default function Map() {
 
   // ================================
   // Build zone-based segments for route coloring
-  // This matches how Preview colors the route
   // ================================
   const buildZoneSegments = useCallback((coords) => {
-    if (!coords?.length) return [{ coords, color: ZONE_COLORS.technical }]
-    if (!routeZones?.length) return [{ coords, color: ZONE_COLORS.technical }]
+    if (!coords?.length || !routeZones?.length) {
+      return [{ coords, color: ZONE_COLORS.technical }]
+    }
 
-    const totalDist = routeData?.distance || 15000
     const segments = []
-    
-    // Sort zones by start distance
-    const sortedZones = [...routeZones].sort((a, b) => a.startDistance - b.startDistance)
-    
-    console.log(`🗺️ Building zone segments: ${sortedZones.length} zones, ${coords.length} coords`)
+    let currentIdx = 0
+    let cumulativeDistance = 0
 
-    sortedZones.forEach((zone, zoneIdx) => {
-      const color = ZONE_COLORS[zone.character] || ZONE_COLORS.technical
-      
-      // Find coord indices for this zone
-      const startRatio = zone.startDistance / totalDist
-      const endRatio = zone.endDistance / totalDist
-      
-      const startIdx = Math.floor(startRatio * (coords.length - 1))
-      const endIdx = Math.min(Math.ceil(endRatio * (coords.length - 1)), coords.length - 1)
-      
-      if (endIdx > startIdx) {
-        const segmentCoords = coords.slice(startIdx, endIdx + 1)
-        if (segmentCoords.length >= 2) {
-          segments.push({
-            coords: segmentCoords,
-            color,
-            zone: zone.character
-          })
-        }
+    routeZones.forEach((zone) => {
+      const zoneColor = ZONE_COLORS[zone.character] || ZONE_COLORS.technical
+      const segmentCoords = []
+
+      while (currentIdx < coords.length - 1 && cumulativeDistance < zone.endDistance) {
+        segmentCoords.push(coords[currentIdx])
+        
+        const dx = coords[currentIdx + 1][0] - coords[currentIdx][0]
+        const dy = coords[currentIdx + 1][1] - coords[currentIdx][1]
+        const segDist = Math.sqrt(dx * dx + dy * dy) * 111000
+        
+        cumulativeDistance += segDist
+        currentIdx++
+      }
+
+      if (segmentCoords.length > 1) {
+        segments.push({ coords: segmentCoords, color: zoneColor })
       }
     })
 
-    console.log(`🗺️ Built ${segments.length} zone segments:`, 
-      segments.map(s => `${s.zone}(${s.coords.length} pts)`).join(', '))
+    if (currentIdx < coords.length) {
+      const remaining = coords.slice(currentIdx)
+      if (remaining.length > 1) {
+        const lastColor = segments.length > 0 ? segments[segments.length - 1].color : ZONE_COLORS.technical
+        segments.push({ coords: remaining, color: lastColor })
+      }
+    }
 
     return segments.length > 0 ? segments : [{ coords, color: ZONE_COLORS.technical }]
-  }, [routeData?.distance, routeZones])
+  }, [routeZones])
 
   // ================================
-  // Add route to map with zone-based coloring
+  // Add route to map with zone coloring
   // ================================
   const addRouteToMap = useCallback(() => {
     if (!map.current || !routeData?.coordinates?.length) return false
-
-    console.log('🗺️ Adding route to map...', routeData.coordinates.length, 'points')
+    if (routeAddedRef.current) return true
 
     try {
-      // Clean up old layers
       routeLayersRef.current.forEach(id => {
-        try {
-          if (map.current.getLayer(id)) map.current.removeLayer(id)
-          if (map.current.getSource(id)) map.current.removeSource(id)
-        } catch (e) {}
+        if (map.current.getLayer(id)) map.current.removeLayer(id)
+        if (map.current.getSource(id)) map.current.removeSource(id)
       })
       routeLayersRef.current = []
 
-      const coords = routeData.coordinates
+      const zoneSegs = buildZoneSegments(routeData.coordinates)
       
-      // Build zone-based segments (matches Preview)
-      const zoneSegs = buildZoneSegments(coords)
-
-      // Add outline layer
+      // Add dark outline
       map.current.addSource('route-outline-src', {
         type: 'geojson',
-        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }
+        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: routeData.coordinates } }
       })
-
       map.current.addLayer({
         id: 'route-outline',
         type: 'line',
@@ -194,6 +185,7 @@ export default function Map() {
 
   // ================================
   // Add curve markers (technical zones only)
+  // Only used when NO curated callouts exist
   // ================================
   const addCurveMarkers = useCallback(() => {
     if (!map.current || !routeData?.curves?.length) return
@@ -237,7 +229,7 @@ export default function Map() {
 
   // ================================
   // Add curated callout markers (from Preview)
-  // These replace both curve markers and highway bend markers
+  // FIXED: Now uses callout.angle directly for display
   // ================================
   const addCalloutMarkers = useCallback(() => {
     if (!map.current || !mapLoaded) return
@@ -259,16 +251,32 @@ export default function Map() {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
 
-      // Determine color based on type and zone
-      let color
+      // Get the angle - try multiple sources
+      const angle = callout.angle || 
+                    callout.originalAngle || 
+                    parseInt(callout.text?.match(/(\d+)°?/)?.[1]) || 
+                    0
+      
+      // Get direction
+      const direction = callout.direction || 
+                       (callout.text?.toLowerCase().includes('left') ? 'left' : 
+                        callout.text?.toLowerCase().includes('right') ? 'right' : null)
+
+      // Determine color based on angle and type
       const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
+      let color
       
       if (callout.zone === 'transit') {
-        // Highway callouts - blue themed
-        color = CALLOUT_COLORS[callout.type] || '#3b82f6'
+        // Highway callouts - blue themed unless danger
+        if (angle >= 40 || callout.type === 'danger') {
+          color = CALLOUT_COLORS.danger
+        } else if (angle >= 25 || callout.type === 'significant') {
+          color = CALLOUT_COLORS.significant
+        } else {
+          color = CALLOUT_COLORS.sweeper
+        }
       } else {
         // Technical/Urban - severity-based colors
-        const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
         if (angle >= 70 || callout.text?.toLowerCase().includes('caution') || callout.type === 'danger') {
           color = CALLOUT_COLORS.danger
         } else if (angle >= 45 || callout.type === 'significant') {
@@ -278,20 +286,38 @@ export default function Map() {
         }
       }
 
-      // Get short label for marker
+      // Get short label for marker - FIXED to use angle directly
       const getShortLabel = () => {
         const text = callout.text || ''
         
+        // Grouped callouts
         if (isGrouped) {
           const count = callout.groupedFrom.length
-          return `${count}×`
+          return `${count}+`
         }
         
+        // Special types
         if (callout.type === 'wake_up') return '!'
         if (callout.type === 'sequence') return 'SEQ'
         if (callout.type === 'transition') return '→'
         
-        // Extract direction and angle
+        // If we have angle AND direction, show both (e.g., "L45")
+        if (direction && angle > 0) {
+          const dirChar = direction[0].toUpperCase()
+          return `${dirChar}${angle}`
+        }
+        
+        // If we have just angle, show it
+        if (angle > 0) {
+          return `${angle}°`
+        }
+        
+        // If we have just direction, show it
+        if (direction) {
+          return direction[0].toUpperCase()
+        }
+        
+        // Fall back to parsing text
         const dirMatch = text.match(/\b(left|right|L|R)\b/i)
         const angleMatch = text.match(/(\d+)/)
         
@@ -300,7 +326,7 @@ export default function Map() {
           return `${dir}${angleMatch[1]}`
         }
         
-        if (angleMatch) return angleMatch[1]
+        if (angleMatch) return `${angleMatch[1]}°`
         if (dirMatch) return dirMatch[1][0].toUpperCase()
         
         return '•'
@@ -309,6 +335,7 @@ export default function Map() {
       const shortLabel = getShortLabel()
       const isHighway = callout.zone === 'transit'
       
+      // Create marker with proper styling
       el.innerHTML = `
         <div style="
           background: ${isHighway ? color + '30' : color};
