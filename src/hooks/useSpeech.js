@@ -180,37 +180,31 @@ export function useSpeech() {
 
   // ================================
   // KEEP AUDIO SESSION ALIVE
+  // Less aggressive - only ping if nothing played recently
   // ================================
+  const lastPlayTimeRef = useRef(Date.now())
+  
   const startKeepAlive = useCallback(() => {
     if (keepAliveIntervalRef.current) return
     
     console.log('🔊 Starting audio keep-alive...')
     
-    keepAliveIntervalRef.current = setInterval(async () => {
+    // Ping every 45 seconds, but only if no audio played in last 30 seconds
+    keepAliveIntervalRef.current = setInterval(() => {
+      // Skip if currently playing or recently played
       if (isPlayingRef.current) return
+      if (Date.now() - lastPlayTimeRef.current < 30000) return
       
       try {
-        // Use Web Audio API for keep-alive (more reliable)
-        if (audioContextRef.current) {
-          if (audioContextRef.current.state === 'suspended') {
-            await audioContextRef.current.resume()
-          }
-          
-          // Play silent buffer
-          const buffer = audioContextRef.current.createBuffer(1, 1, 22050)
-          const source = audioContextRef.current.createBufferSource()
-          source.buffer = buffer
-          source.connect(audioContextRef.current.destination)
-          source.start(0)
-          
-          console.log('🔊 Keep-alive ping (Web Audio)')
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+          audioContextRef.current.resume().catch(() => {})
         }
+        console.log('🔊 Keep-alive ping')
       } catch (e) {
-        console.log('🔊 Keep-alive failed, re-init...')
-        await initAudio()
+        // Ignore errors
       }
-    }, 20000) // Every 20 seconds
-  }, [initAudio])
+    }, 45000) // Every 45 seconds (less aggressive)
+  }, [])
 
   const stopKeepAlive = useCallback(() => {
     if (keepAliveIntervalRef.current) {
@@ -394,6 +388,9 @@ export function useSpeech() {
     lastSpokenTimeRef.current = now
 
     console.log(`🔊 Speaking: "${text}" (${priority})`)
+
+    // Track play time for keep-alive logic
+    lastPlayTimeRef.current = Date.now()
 
     // Try ElevenLabs first
     const success = await speakElevenLabs(text)
