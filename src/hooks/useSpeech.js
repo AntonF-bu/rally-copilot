@@ -472,4 +472,25 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
   return { success: true, cached, total }
 }
 
+// Legacy exports for compatibility
+export function generateCallout(curve) {
+  if (!curve) return null
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  let text = `${dir} ${curve.severity}`
+  if (curve.modifier) {
+    const mods = { 'TIGHTENS': 'tightens', 'OPENS': 'opens', 'LONG': 'long', 'HAIRPIN': 'hairpin' }
+    text += ` ${mods[curve.modifier] || curve.modifier.toLowerCase()}`
+  }
+  return text
+}
+
+export function generateFinalWarning(curve) {
+  if (!curve) return null
+  const dir = curve.direction === 'LEFT' ? 'Left' : 'Right'
+  return curve.severity >= 5 ? `${dir} now` : null
+}
+
+export function generateStraightCallout() { return null }
+export function generateZoneTransitionCallout(from, to) { return null }
+
 export default useSpeech
