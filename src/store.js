@@ -33,6 +33,7 @@ const useStore = create(
       // Trip tracking stats
       tripStats: {
         startTime: null,
+        endTime: null,
         distance: 0,
         maxSpeed: 0,
         curvesCompleted: 0,
