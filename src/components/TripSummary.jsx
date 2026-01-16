@@ -71,7 +71,7 @@ export default function TripSummary() {
     const height = maxLat - minLat || 0.01
     
     const viewWidth = 320
-    const viewHeight = 180
+    const viewHeight = 140
     const scale = Math.min(
       (viewWidth * (1 - padding * 2)) / width,
       (viewHeight * (1 - padding * 2)) / height
@@ -187,10 +187,10 @@ export default function TripSummary() {
 
       {/* Header with route visualization */}
       <div className="relative flex-shrink-0">
-        <div className="relative h-56 overflow-hidden">
+        <div className="relative h-44 overflow-hidden">
           {/* Route SVG */}
           <svg 
-            viewBox={`0 0 ${routePath?.viewWidth || 320} ${routePath?.viewHeight || 180}`} 
+            viewBox={`0 0 ${routePath?.viewWidth || 320} ${routePath?.viewHeight || 140}`} 
             className="absolute inset-0 w-full h-full"
             preserveAspectRatio="xMidYMid meet"
           >
@@ -263,7 +263,7 @@ export default function TripSummary() {
                 </g>
               </>
             ) : (
-              <text x="160" y="90" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="14">
+              <text x="160" y="70" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="14">
                 Route Complete
               </text>
             )}
@@ -301,7 +301,7 @@ export default function TripSummary() {
       <div className="flex-1 overflow-auto px-4 pb-6">
         
         {/* Hero Stats */}
-        <div className="grid grid-cols-2 gap-3 mb-4 -mt-8 relative z-10">
+        <div className="grid grid-cols-2 gap-3 mb-4 relative z-10">
           {/* Distance */}
           <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10">
             <div className="text-white/40 text-[10px] tracking-widest mb-1">DISTANCE</div>
@@ -319,7 +319,7 @@ export default function TripSummary() {
             <div className="text-4xl font-bold text-white tabular-nums">
               {summary.durationFormatted}
             </div>
-            {performanceInsights?.estimatedMins && (
+            {performanceInsights?.estimatedMins && performanceInsights.timeDiffMins !== 0 && (
               <div className={`text-[10px] mt-1 ${performanceInsights.faster ? 'text-green-400' : 'text-orange-400'}`}>
                 {performanceInsights.faster ? '▼' : '▲'} {Math.abs(performanceInsights.timeDiffMins)}m vs estimate
               </div>
@@ -368,7 +368,7 @@ export default function TripSummary() {
         </div>
 
         {/* Zone Breakdown */}
-        {zoneInsights && (
+        {zoneInsights && zoneInsights.total > 0 && (
           <div 
             className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-100 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
           >
