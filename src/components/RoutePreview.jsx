@@ -751,41 +751,41 @@ export default function RoutePreview({ onStartNavigation, onBack, onEdit }) {
     
     try {
       // LLM zone validation
-      if (hasLLMApiKey() && routeCharacter.segments?.length > 0 && !llmEnhanced) {
-        setCopilotProgress(5)
-        setCopilotStatus('🤖 AI analyzing zones...')
+      // if (hasLLMApiKey() && routeCharacter.segments?.length > 0 && !llmEnhanced) {
+      //   setCopilotProgress(5)
+      //   setCopilotStatus('🤖 AI analyzing zones...')
         
-        try {
-          const llmResponse = await validateZonesWithLLM(
-            routeCharacter.segments,
-            routeData,
-            getLLMApiKey(),
-            routeData.curves || []
-          )
+      //   try {
+      //     const llmResponse = await validateZonesWithLLM(
+      //       routeCharacter.segments,
+      //       routeData,
+      //       getLLMApiKey(),
+      //       routeData.curves || []
+      //     )
           
-          setLlmResult(llmResponse)
-          const { enhanced, changes } = llmResponse
+      //     setLlmResult(llmResponse)
+      //     const { enhanced, changes } = llmResponse
           
-          if (enhanced?.length > 0 && changes?.length > 0) {
-            setLlmEnhanced(true)
-            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
-            setRouteZones(enhanced)
-            const bends = analyzeHighwayBends(routeData.coordinates, enhanced)
-            setHighwayBends(bends)
-          } else if (enhanced?.length > 0) {
-            setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
-            setRouteZones(enhanced)
-          }
-        } catch (llmError) {
-          console.warn('⚠️ LLM validation failed:', llmError)
-        }
+      //     if (enhanced?.length > 0 && changes?.length > 0) {
+      //       setLlmEnhanced(true)
+      //       setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+      //       setRouteZones(enhanced)
+      //       const bends = analyzeHighwayBends(routeData.coordinates, enhanced)
+      //       setHighwayBends(bends)
+      //     } else if (enhanced?.length > 0) {
+      //       setRouteCharacter(prev => ({ ...prev, segments: enhanced }))
+      //       setRouteZones(enhanced)
+      //     }
+      //   } catch (llmError) {
+      //     console.warn('⚠️ LLM validation failed:', llmError)
+      //   }
         
-        setCopilotProgress(20)
-      } else {
-        setCopilotProgress(20)
-      }
+      //   setCopilotProgress(20)
+      // } else {
+      //   setCopilotProgress(20)
+      // }
       
-      setCopilotProgress(35)
+      // setCopilotProgress(35)
       
       // Voice preloading
       setCopilotStatus('Loading voices...')
