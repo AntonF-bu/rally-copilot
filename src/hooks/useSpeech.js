@@ -3,11 +3,19 @@ import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v17 - Full Howler (working on iOS)
-// Using Howler for BOTH unlock AND playback
+// Speech Hook v18 - iOS Audio Fix
+// Key fixes:
+// 1. Increase HTML5 audio pool size
+// 2. Proper unlock with waiting
+// 3. Add zone callouts to preload
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
+
+// Increase Howler's HTML5 audio pool (default is 5)
+if (typeof window !== 'undefined') {
+  Howler.html5PoolSize = 20
+}
 
 // Cache blob URLs
 const BLOB_CACHE = new Map()
@@ -62,30 +70,69 @@ export function useSpeech() {
 
   // ================================
   // iOS AUDIO UNLOCK via Howler
+  // MUST play a sound during user tap to unlock!
+  // Returns a promise that resolves when unlock is complete
   // ================================
   const initAudio = useCallback(() => {
     console.log('🔊 initAudio called')
     
-    // Resume Howler's AudioContext if suspended
-    if (Howler.ctx && Howler.ctx.state === 'suspended') {
-      Howler.ctx.resume().then(() => {
-        console.log('🔊 AudioContext resumed')
-      }).catch(() => {})
-    }
-    
-    // Also unlock speech synthesis
-    if (synthRef.current) {
-      try {
-        const u = new SpeechSynthesisUtterance('')
-        u.volume = 0
-        synthRef.current.speak(u)
-        setTimeout(() => synthRef.current?.cancel(), 10)
-      } catch (e) {}
-    }
-    
-    audioUnlockedRef.current = true
-    console.log('🔊 ✅ Audio initialized')
-    return Promise.resolve(true)
+    return new Promise((resolve) => {
+      // If already unlocked, resolve immediately
+      if (audioUnlockedRef.current) {
+        console.log('🔊 Already unlocked')
+        resolve(true)
+        return
+      }
+      
+      // THIS IS THE KEY: Play a silent Howl during user interaction
+      // This unlocks iOS audio for subsequent programmatic playback
+      const unlockHowl = new Howl({
+        src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
+        volume: 0.01,
+        html5: true,
+        onplay: () => {
+          console.log('🔊 Unlock sound playing')
+          // Set unlocked immediately when play starts (this is when iOS unlocks)
+          audioUnlockedRef.current = true
+        },
+        onend: () => {
+          console.log('🔊 ✅ Audio unlocked via Howler')
+          resolve(true)
+        },
+        onplayerror: (id, err) => {
+          console.log('🔊 Unlock play error:', err)
+          // Even on error, try to continue
+          resolve(false)
+        }
+      })
+      unlockHowl.play()
+      
+      // Resume Howler's AudioContext if suspended
+      if (Howler.ctx && Howler.ctx.state === 'suspended') {
+        Howler.ctx.resume().then(() => {
+          console.log('🔊 AudioContext resumed')
+        }).catch(() => {})
+      }
+      
+      // Also unlock speech synthesis
+      if (synthRef.current) {
+        try {
+          const u = new SpeechSynthesisUtterance('')
+          u.volume = 0
+          synthRef.current.speak(u)
+          setTimeout(() => synthRef.current?.cancel(), 10)
+        } catch (e) {}
+      }
+      
+      // Timeout fallback - don't wait forever
+      setTimeout(() => {
+        if (!audioUnlockedRef.current) {
+          console.log('🔊 Unlock timeout, continuing anyway')
+          audioUnlockedRef.current = true
+        }
+        resolve(true)
+      }, 500)
+    })
   }, [])
 
   // ================================
@@ -278,9 +325,12 @@ export function useSpeech() {
 // ================================
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   const essentialCallouts = [
+    // Curve callouts
     'Left 2', 'Left 3', 'Left 4', 'Left 5',
     'Right 2', 'Right 3', 'Right 4', 'Right 5',
-    'Technical section', 'Highway'
+    // Zone transitions - these play immediately on navigation start!
+    'Technical section', 'Highway', 'Urban area',
+    'Entering technical section', 'Highway ahead'
   ]
   
   let cached = 0
