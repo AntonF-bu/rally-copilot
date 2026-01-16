@@ -3,39 +3,46 @@ import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v18 - iOS Audio Fix
-// Key fixes:
-// 1. Increase HTML5 audio pool size
-// 2. Proper unlock with waiting
-// 3. Add zone callouts to preload
+// Speech Hook v19 - iOS Safari Fix
+// Key insight: Use Howler ONLY for the initial unlock
+// Then use a plain HTML5 Audio element for playback
+// This avoids pool exhaustion issues
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
-
-// Increase Howler's HTML5 audio pool (default is 5)
-if (typeof window !== 'undefined') {
-  Howler.html5PoolSize = 20
-}
 
 // Cache blob URLs
 const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
+// Global unlock state - shared across hook instances
+let globalAudioElement = null
+let globalUnlocked = false
+
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
   
-  const currentHowlRef = useRef(null)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
   const lastSpokenTimeRef = useRef(0)
   const isPlayingRef = useRef(false)
-  const audioUnlockedRef = useRef(false)
 
-  // Initialize native speech as fallback
+  // Initialize
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    // Create a single global audio element if not exists
+    if (!globalAudioElement) {
+      globalAudioElement = document.createElement('audio')
+      globalAudioElement.playsInline = true
+      globalAudioElement.preload = 'auto'
+      globalAudioElement.setAttribute('playsinline', '')
+      globalAudioElement.setAttribute('webkit-playsinline', '')
+      console.log('🔊 Global audio element created')
+    }
+
+    // Native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -63,58 +70,74 @@ export function useSpeech() {
     }
 
     return () => {
-      currentHowlRef.current?.unload()
       synthRef.current?.cancel()
     }
   }, [])
 
   // ================================
-  // iOS AUDIO UNLOCK via Howler
-  // MUST play a sound during user tap to unlock!
-  // Returns a promise that resolves when unlock is complete
+  // iOS AUDIO UNLOCK
+  // Use Howler just for unlock, then switch to plain audio
   // ================================
   const initAudio = useCallback(() => {
-    console.log('🔊 initAudio called')
+    console.log('🔊 initAudio called, globalUnlocked:', globalUnlocked)
     
+    // Already unlocked? Just return
+    if (globalUnlocked) {
+      console.log('🔊 Already unlocked, skipping')
+      return Promise.resolve(true)
+    }
+
     return new Promise((resolve) => {
-      // If already unlocked, resolve immediately
-      if (audioUnlockedRef.current) {
-        console.log('🔊 Already unlocked')
-        resolve(true)
-        return
+      // Method 1: Try Howler unlock
+      try {
+        const unlockHowl = new Howl({
+          src: ['data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+1DEAAAGAAGn9AAAIiEMcj8xAABCBACAIAgTB8HwfB8EAQBA4PvygIAgCAIHB8Hw/5cEAQBAnf/y4f8QBAEAfB8Hwf/l+XBAEAQBAEAf5fl//Lg+CAIAgD//y/L//y4fggCAYP///y4fggGD/////KAAJAkhYSEiGiaIgoSMhQwDDTTQqBQiJiAgDLBAHAwFBQIBQoKDBQSFiZ0CDA8SHiAsIEBwuMJxkcYGGR4AAAA//tQxBCAAADSAAAAAAAAANIAAAAA0mSzMoAAAAHAGQYAAAYY4jz/8x5ni0MjEAAc/+Y8i0rQAABnI850nRR9d3d3d0YhCEREd0iIqohCIjukRFVEIiI7pERURCEREd0iIqIhCIiO4iKuIQiIjuIiriEIiI7iIqohCIiO4iKqIQh3d3d3SAAAH//7UMQHg8AAAaQAAAAAAAA0gAAAAApMlU1QAAAAAwxgAMgAAMMHxBj/5jyR2PvnOZ8u/85zy4t/84py8AABM5zmd8Mf/3fDH/++ckTuf/+d/OKI7E7n/znM4ojsAAETu//+c5nF3/93/+c5nFEdj/5zmcUR2J3P/nOZxRHYnc/+c5nFEdidzn/OcYojsTuc/5z//+1DECIPAAAGkAAAAAAAANIAAAABjFEdidy/ec5nFEZwA//93+XcioAAAA7pEVVu7u7oqIhCHdIiKqIQiIjuIiqiEIiO6REVEJ3d3d3REREIqIhCIiO6REVUQhERHcRFVEIiI7pERVRCEREd0iIqohCIjuIiriEIiI7iIqohCIiO4iKuIQiIjuIiriEIiI7iIqohC'],
+          volume: 0.01,
+          html5: true,
+          onplay: () => {
+            console.log('🔊 Howler unlock playing')
+            globalUnlocked = true
+          },
+          onend: () => {
+            console.log('🔊 Howler unlock ended')
+          },
+          onplayerror: (id, err) => {
+            console.log('🔊 Howler unlock error:', err)
+          }
+        })
+        unlockHowl.play()
+      } catch (e) {
+        console.log('🔊 Howler unlock exception:', e)
       }
-      
-      // THIS IS THE KEY: Play a silent Howl during user interaction
-      // This unlocks iOS audio for subsequent programmatic playback
-      const unlockHowl = new Howl({
-        src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
-        volume: 0.01,
-        html5: true,
-        onplay: () => {
-          console.log('🔊 Unlock sound playing')
-          // Set unlocked immediately when play starts (this is when iOS unlocks)
-          audioUnlockedRef.current = true
-        },
-        onend: () => {
-          console.log('🔊 ✅ Audio unlocked via Howler')
-          resolve(true)
-        },
-        onplayerror: (id, err) => {
-          console.log('🔊 Unlock play error:', err)
-          // Even on error, try to continue
-          resolve(false)
+
+      // Method 2: Also try to unlock our global audio element directly
+      if (globalAudioElement) {
+        try {
+          globalAudioElement.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+1DEAAAGAAGn9AAAIiEMcj8xAABCBACAIAgTB8HwfB8EAQBA4PvygIAgCAIHB8Hw/5cEAQBAnf/y4f8QBAEAfB8Hwf/l+XBAEAQBAEAf5fl//Lg+CAIAgD//y/L//y4fggCAYP///y4fggGD/////KAAJAkhYSEiGiaIgoSMhQwDDTTQqBQiJiAgDLBAHAwFBQIBQoKDBQSFiZ0CDA8SHiAsIEBwuMJxkcYGGR4AAAA//tQxBCAAADSAAAAAAAAANIAAAAA0mSzMoAAAAHAGQYAAAYY4jz/8x5ni0MjEAAc/+Y8i0rQAABnI850nRR9d3d3d0YhCEREd0iIqohCIjukRFVEIiI7pERURCEREd0iIqIhCIiO4iKuIQiIjuIiriEIiI7iIqohCIiO4iKqIQh3d3d3SAAAH//7UMQHg8AAAaQAAAAAAAA0gAAAAApMlU1QAAAAAwxgAMgAAMMHxBj/5jyR2PvnOZ8u/85zy4t/84py8AABM5zmd8Mf/3fDH/++ckTuf/+d/OKI7E7n/znM4ojsAAETu//+c5nF3/93/+c5nFEdj/5zmcUR2J3P/nOZxRHYnc/+c5nFEdidzn/OcYojsTuc/5z//+1DECIPAAAGkAAAAAAAANIAAAABjFEdidy/ec5nFEZwA//93+XcioAAAA7pEVVu7u7oqIhCHdIiKqIQiIjuIiqiEIiO6REVEJ3d3d3REREIqIhCIiO6REVUQhERHcRFVEIiI7pERVRCEREd0iIqohCIjuIiriEIiI7iIqohCIiO4iKuIQiIjuIiriEIiI7iIqohC'
+          globalAudioElement.volume = 0.01
+          const playPromise = globalAudioElement.play()
+          if (playPromise) {
+            playPromise.then(() => {
+              console.log('🔊 Direct audio element unlocked')
+              globalUnlocked = true
+              globalAudioElement.pause()
+            }).catch(e => {
+              console.log('🔊 Direct audio unlock failed:', e?.message)
+            })
+          }
+        } catch (e) {
+          console.log('🔊 Direct audio exception:', e)
         }
-      })
-      unlockHowl.play()
-      
-      // Resume Howler's AudioContext if suspended
+      }
+
+      // Method 3: Resume AudioContext
       if (Howler.ctx && Howler.ctx.state === 'suspended') {
         Howler.ctx.resume().then(() => {
           console.log('🔊 AudioContext resumed')
         }).catch(() => {})
       }
-      
-      // Also unlock speech synthesis
+
+      // Method 4: Unlock speech synthesis
       if (synthRef.current) {
         try {
           const u = new SpeechSynthesisUtterance('')
@@ -123,15 +146,13 @@ export function useSpeech() {
           setTimeout(() => synthRef.current?.cancel(), 10)
         } catch (e) {}
       }
-      
-      // Timeout fallback - don't wait forever
+
+      // Give it a moment, then resolve
       setTimeout(() => {
-        if (!audioUnlockedRef.current) {
-          console.log('🔊 Unlock timeout, continuing anyway')
-          audioUnlockedRef.current = true
-        }
+        globalUnlocked = true
+        console.log('🔊 ✅ Audio unlock complete')
         resolve(true)
-      }, 500)
+      }, 100)
     })
   }, [])
 
@@ -171,8 +192,7 @@ export function useSpeech() {
   }, [setSpeaking, settings.volume])
 
   // ================================
-  // ELEVENLABS TTS via Howler
-  // html5: true is KEY for iOS to work
+  // ELEVENLABS TTS - Using global audio element
   // ================================
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
@@ -223,43 +243,51 @@ export function useSpeech() {
       }
     }
 
-    // Stop current playback
-    if (currentHowlRef.current) {
-      currentHowlRef.current.stop()
-      currentHowlRef.current.unload()
+    // Play using global audio element
+    if (!globalAudioElement) {
+      console.log('🔊 No global audio element')
+      return false
     }
 
-    // Create new Howl - html5: true is what makes iOS work!
-    const howl = new Howl({
-      src: [audioUrl],
-      format: ['mp3'],
-      html5: true,
-      volume: settings.volume || 1.0,
-      onplay: () => {
-        console.log(`🔊 Playing: "${text}"`)
-      },
-      onend: () => {
+    try {
+      // Stop current playback
+      globalAudioElement.pause()
+      globalAudioElement.currentTime = 0
+      
+      // Set up event handlers
+      const onEnded = () => {
         isPlayingRef.current = false
         setSpeaking(false, '')
-      },
-      onloaderror: (id, err) => {
-        console.log('🔊 Load error:', err)
-        isPlayingRef.current = false
-        setSpeaking(false, '')
-      },
-      onplayerror: (id, err) => {
-        console.log('🔊 Play error:', err)
-        isPlayingRef.current = false
-        setSpeaking(false, '')
+        globalAudioElement.removeEventListener('ended', onEnded)
+        globalAudioElement.removeEventListener('error', onError)
       }
-    })
-    
-    currentHowlRef.current = howl
-    isPlayingRef.current = true
-    setSpeaking(true, text)
-    howl.play()
-    
-    return true
+      const onError = (e) => {
+        console.log('🔊 Playback error:', e)
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+        globalAudioElement.removeEventListener('ended', onEnded)
+        globalAudioElement.removeEventListener('error', onError)
+      }
+      
+      globalAudioElement.addEventListener('ended', onEnded)
+      globalAudioElement.addEventListener('error', onError)
+      
+      // Set source and play
+      globalAudioElement.src = audioUrl
+      globalAudioElement.volume = settings.volume || 1.0
+      
+      isPlayingRef.current = true
+      setSpeaking(true, text)
+      
+      await globalAudioElement.play()
+      console.log(`🔊 Playing: "${text}"`)
+      return true
+    } catch (err) {
+      console.log('🔊 Play error:', err?.message)
+      isPlayingRef.current = false
+      setSpeaking(false, '')
+      return false
+    }
   }, [setSpeaking, settings.volume])
 
   // ================================
@@ -279,7 +307,7 @@ export function useSpeech() {
 
     // Handle priority
     if (priority === 'high') {
-      currentHowlRef.current?.stop()
+      globalAudioElement?.pause()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current) {
@@ -301,14 +329,14 @@ export function useSpeech() {
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {
-    currentHowlRef.current?.stop()
+    globalAudioElement?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
   }, [setSpeaking])
 
   const isSpeaking = useCallback(() => isPlayingRef.current, [])
-  const isAudioUnlocked = useCallback(() => audioUnlockedRef.current, [])
+  const isAudioUnlocked = useCallback(() => globalUnlocked, [])
 
   return { 
     speak, 
@@ -321,14 +349,12 @@ export function useSpeech() {
 }
 
 // ================================
-// PRELOAD
+// PRELOAD - Just fetch blob URLs, don't create Howls
 // ================================
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   const essentialCallouts = [
-    // Curve callouts
     'Left 2', 'Left 3', 'Left 4', 'Left 5',
     'Right 2', 'Right 3', 'Right 4', 'Right 5',
-    // Zone transitions - these play immediately on navigation start!
     'Technical section', 'Highway', 'Urban area',
     'Entering technical section', 'Highway ahead'
   ]
