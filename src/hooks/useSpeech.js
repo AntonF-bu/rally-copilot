@@ -1,22 +1,36 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v12 - Pure HTML5 Audio
-// NO Web Audio API - avoids iOS sample rate issues
+// Speech Hook v13 - Howler with iOS fixes
+// Force 44.1kHz sample rate for iOS compatibility
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-// Simple blob URL cache
-const AUDIO_CACHE = new Map()
+// Cache blob URLs (not Howl instances - create fresh each time)
+const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
+
+// Force AudioContext to 44.1kHz for iOS
+if (typeof window !== 'undefined') {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext
+    if (AudioContext && !Howler.ctx) {
+      // Create AudioContext with 44.1kHz sample rate (iOS compatible)
+      Howler.ctx = new AudioContext({ sampleRate: 44100 })
+      console.log('🔊 AudioContext created at 44.1kHz')
+    }
+  } catch (e) {
+    console.log('🔊 Could not set AudioContext sample rate')
+  }
+}
 
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
   
-  // Single reusable audio element - key for iOS!
-  const audioRef = useRef(null)
+  const currentHowlRef = useRef(null)
   const synthRef = useRef(null)
   const voiceRef = useRef(null)
   const lastSpokenRef = useRef(null)
@@ -24,31 +38,10 @@ export function useSpeech() {
   const isPlayingRef = useRef(false)
   const audioUnlockedRef = useRef(false)
 
-  // Initialize - create ONE audio element and reuse it
+  // Initialize native speech as fallback
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Create single audio element
-    const audio = document.createElement('audio')
-    audio.playsInline = true
-    audio.preload = 'auto'
-    audio.setAttribute('playsinline', '')
-    audio.setAttribute('webkit-playsinline', '')
-    
-    audio.onended = () => {
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    }
-    
-    audio.onerror = () => {
-      console.log('🔊 Audio error')
-      isPlayingRef.current = false
-      setSpeaking(false, '')
-    }
-    
-    audioRef.current = audio
-
-    // Native speech as fallback
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis
 
@@ -56,7 +49,7 @@ export function useSpeech() {
         const voices = synthRef.current.getVoices()
         if (voices.length === 0) return
         
-        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava']
+        const preferred = ['Samantha', 'Daniel', 'Karen', 'Moira', 'Ava', 'Alex']
         for (const name of preferred) {
           const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'))
           if (found) {
@@ -76,50 +69,47 @@ export function useSpeech() {
     }
 
     return () => {
-      audioRef.current?.pause()
+      currentHowlRef.current?.unload()
       synthRef.current?.cancel()
     }
-  }, [setSpeaking])
+  }, [])
 
   // ================================
-  // AUDIO UNLOCK - Simple approach
-  // Just play/pause the audio element from user tap
+  // iOS AUDIO UNLOCK
   // ================================
   const initAudio = useCallback(() => {
     console.log('🔊 initAudio called')
     
-    if (audioRef.current && !audioUnlockedRef.current) {
-      try {
-        // Set a tiny data URI and play it
-        audioRef.current.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='
-        audioRef.current.muted = true
-        
-        const playPromise = audioRef.current.play()
-        if (playPromise) {
-          playPromise.then(() => {
-            audioRef.current.pause()
-            audioRef.current.muted = false
-            audioRef.current.currentTime = 0
-            audioUnlockedRef.current = true
-            console.log('🔊 ✅ Audio unlocked')
-          }).catch(() => {
-            console.log('🔊 Audio unlock failed (ok)')
-          })
-        }
-      } catch (e) {
-        console.log('🔊 Audio unlock error:', e?.message)
+    try {
+      // Resume AudioContext if suspended
+      if (Howler.ctx && Howler.ctx.state === 'suspended') {
+        Howler.ctx.resume()
       }
+      
+      // Create a tiny silent Howl to trigger unlock
+      const silentHowl = new Howl({
+        src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
+        volume: 0.01,
+        html5: false, // Use Web Audio for unlock
+        onend: () => {
+          audioUnlockedRef.current = true
+          console.log('🔊 ✅ Audio unlocked')
+        }
+      })
+      silentHowl.play()
+    } catch (e) {
+      console.log('🔊 Unlock error:', e?.message)
     }
     
     // Also unlock speech synthesis
-    if (synthRef.current) {
-      try {
+    try {
+      if (synthRef.current) {
         const u = new SpeechSynthesisUtterance('')
         u.volume = 0
         synthRef.current.speak(u)
         setTimeout(() => synthRef.current?.cancel(), 10)
-      } catch (e) {}
-    }
+      }
+    } catch (e) {}
     
     audioUnlockedRef.current = true
     return Promise.resolve(true)
@@ -161,89 +151,95 @@ export function useSpeech() {
   }, [setSpeaking, settings.volume])
 
   // ================================
-  // ELEVENLABS TTS - Pure HTML5 Audio
+  // ELEVENLABS TTS via Howler
+  // Use Web Audio (html5: false) with correct sample rate
   // ================================
   const speakElevenLabs = useCallback(async (text) => {
     const cacheKey = getCacheKey(text)
     
-    // Check cache
-    if (AUDIO_CACHE.has(cacheKey)) {
+    // Get blob URL from cache or fetch new
+    let audioUrl = BLOB_CACHE.get(cacheKey)
+    
+    if (!audioUrl) {
+      // Fetch from API
+      if (!navigator.onLine) {
+        console.log('🔊 Offline')
+        return false
+      }
+
       try {
-        const cachedUrl = AUDIO_CACHE.get(cacheKey)
+        console.log(`🔊 Fetching: "${text}"`)
         
-        // Stop current playback
-        audioRef.current.pause()
-        
-        // Load cached audio
-        audioRef.current.src = cachedUrl
-        audioRef.current.volume = settings.volume || 1.0
-        audioRef.current.currentTime = 0
-        
-        isPlayingRef.current = true
-        setSpeaking(true, text)
-        
-        await audioRef.current.play()
-        console.log(`🔊 Cached: "${text}"`)
-        return true
+        const response = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            text, 
+            voiceId: ELEVENLABS_VOICE_ID,
+            voiceSettings: {
+              stability: 0.90,
+              similarity_boost: 0.80,
+              style: 0.05,
+              use_speaker_boost: true
+            }
+          }),
+        })
+
+        if (!response.ok) {
+          console.log(`🔊 TTS error: ${response.status}`)
+          return false
+        }
+
+        const blob = await response.blob()
+        if (blob.size < 500) {
+          console.log('🔊 TTS too small')
+          return false
+        }
+
+        audioUrl = URL.createObjectURL(blob)
+        BLOB_CACHE.set(cacheKey, audioUrl)
       } catch (err) {
-        console.log('🔊 Cache play failed:', err?.message)
-      }
-    }
-
-    // Fetch from API
-    if (!navigator.onLine) {
-      console.log('🔊 Offline')
-      return false
-    }
-
-    try {
-      console.log(`🔊 Fetching: "${text}"`)
-      
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text, 
-          voiceId: ELEVENLABS_VOICE_ID,
-          voiceSettings: {
-            stability: 0.90,
-            similarity_boost: 0.80,
-            style: 0.05,
-            use_speaker_boost: true
-          }
-        }),
-      })
-
-      if (!response.ok) {
-        console.log(`🔊 TTS error: ${response.status}`)
+        console.log('🔊 Fetch error:', err?.message)
         return false
       }
-
-      const blob = await response.blob()
-      if (blob.size < 500) {
-        console.log('🔊 TTS too small')
-        return false
-      }
-
-      const audioUrl = URL.createObjectURL(blob)
-      AUDIO_CACHE.set(cacheKey, audioUrl)
-      
-      // Stop current and load new
-      audioRef.current.pause()
-      audioRef.current.src = audioUrl
-      audioRef.current.volume = settings.volume || 1.0
-      audioRef.current.currentTime = 0
-      
-      isPlayingRef.current = true
-      setSpeaking(true, text)
-      
-      await audioRef.current.play()
-      console.log(`🔊 ElevenLabs: "${text}"`)
-      return true
-    } catch (err) {
-      console.log('🔊 ElevenLabs error:', err?.message)
-      return false
     }
+
+    // Stop current playback
+    if (currentHowlRef.current) {
+      currentHowlRef.current.stop()
+      currentHowlRef.current.unload()
+    }
+
+    // Create new Howl for this playback
+    // Using html5: false (Web Audio) since we set 44.1kHz sample rate
+    const howl = new Howl({
+      src: [audioUrl],
+      format: ['mp3', 'mpeg'],
+      html5: false,  // Use Web Audio with our 44.1kHz context
+      volume: settings.volume || 1.0,
+      onend: () => {
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      },
+      onloaderror: (id, err) => {
+        console.log('🔊 Load error:', err)
+        isPlayingRef.current = false
+        setSpeaking(false, '')
+      },
+      onplayerror: (id, err) => {
+        console.log('🔊 Play error:', err)
+        // Try unlock and play again
+        howl.once('unlock', () => howl.play())
+      }
+    })
+    
+    currentHowlRef.current = howl
+    isPlayingRef.current = true
+    setSpeaking(true, text)
+    howl.play()
+    
+    console.log(`🔊 Playing: "${text}"`)
+    return true
   }, [setSpeaking, settings.volume])
 
   // ================================
@@ -263,7 +259,7 @@ export function useSpeech() {
 
     // Handle priority
     if (priority === 'high') {
-      audioRef.current?.pause()
+      currentHowlRef.current?.stop()
       synthRef.current?.cancel()
       isPlayingRef.current = false
     } else if (isPlayingRef.current) {
@@ -285,7 +281,7 @@ export function useSpeech() {
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {
-    audioRef.current?.pause()
+    currentHowlRef.current?.stop()
     synthRef.current?.cancel()
     isPlayingRef.current = false
     setSpeaking(false, '')
@@ -332,7 +328,7 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
       if (response.ok) {
         const blob = await response.blob()
         if (blob.size > 500) {
-          AUDIO_CACHE.set(getCacheKey(text), URL.createObjectURL(blob))
+          BLOB_CACHE.set(getCacheKey(text), URL.createObjectURL(blob))
           cached++
         }
       }
