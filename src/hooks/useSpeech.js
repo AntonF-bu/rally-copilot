@@ -3,29 +3,15 @@ import { Howl, Howler } from 'howler'
 import useStore from '../store'
 
 // ================================
-// Speech Hook v13 - Howler with iOS fixes
-// Force 44.1kHz sample rate for iOS compatibility
+// Speech Hook v14 - Howler with html5: true
+// Back to working version, no AudioContext hacking
 // ================================
 
 const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 
-// Cache blob URLs (not Howl instances - create fresh each time)
+// Cache blob URLs
 const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
-
-// Force AudioContext to 44.1kHz for iOS
-if (typeof window !== 'undefined') {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext
-    if (AudioContext && !Howler.ctx) {
-      // Create AudioContext with 44.1kHz sample rate (iOS compatible)
-      Howler.ctx = new AudioContext({ sampleRate: 44100 })
-      console.log('🔊 AudioContext created at 44.1kHz')
-    }
-  } catch (e) {
-    console.log('🔊 Could not set AudioContext sample rate')
-  }
-}
 
 export function useSpeech() {
   const { settings, setSpeaking } = useStore()
@@ -81,19 +67,24 @@ export function useSpeech() {
     console.log('🔊 initAudio called')
     
     try {
-      // Resume AudioContext if suspended
+      // Resume Howler's AudioContext if suspended
       if (Howler.ctx && Howler.ctx.state === 'suspended') {
-        Howler.ctx.resume()
+        Howler.ctx.resume().then(() => {
+          console.log('🔊 AudioContext resumed')
+        })
       }
       
-      // Create a tiny silent Howl to trigger unlock
+      // Play a silent sound to unlock audio on iOS
       const silentHowl = new Howl({
         src: ['data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA='],
         volume: 0.01,
-        html5: false, // Use Web Audio for unlock
+        html5: true,
         onend: () => {
           audioUnlockedRef.current = true
-          console.log('🔊 ✅ Audio unlocked')
+          console.log('🔊 ✅ Audio unlocked via Howler')
+        },
+        onplayerror: () => {
+          console.log('🔊 Silent play error (ok)')
         }
       })
       silentHowl.play()
@@ -211,11 +202,11 @@ export function useSpeech() {
     }
 
     // Create new Howl for this playback
-    // Using html5: false (Web Audio) since we set 44.1kHz sample rate
+    // Using html5: true for iOS compatibility
     const howl = new Howl({
       src: [audioUrl],
       format: ['mp3', 'mpeg'],
-      html5: false,  // Use Web Audio with our 44.1kHz context
+      html5: true,  // Use HTML5 Audio for iOS
       volume: settings.volume || 1.0,
       onend: () => {
         isPlayingRef.current = false
