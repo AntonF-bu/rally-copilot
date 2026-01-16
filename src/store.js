@@ -33,7 +33,7 @@ const useStore = create(
       // Trip tracking stats
       tripStats: {
         startTime: null,
-        endTime: null,
+        endTime: null,  // NEW: Track when trip ends so duration stops counting
         distance: 0,
         maxSpeed: 0,
         curvesCompleted: 0,
@@ -61,18 +61,12 @@ const useStore = create(
       highwayBends: [],
       
       // LLM-curated highway callouts (not persisted - computed by curator)
-      // These are the FINAL callouts to show, after LLM merges/filters raw bends
       curatedHighwayCallouts: [],
-      
-      // Highway companion chatter timeline (pre-generated in Preview)
-      // Only plays in companion mode, during highway zones
-      chatterTimeline: [],
       
       // AI Agent briefing result (full analysis)
       agentBriefing: null,
       
       // LLM-generated callout variants (not persisted - computed in Preview)
-      // Format: { "curve-id": ["variant1", "variant2", "variant3"] }
       calloutVariants: {},
       
       // Route editor state
@@ -193,48 +187,17 @@ const useStore = create(
         set({ routeZoneOverrides: routeZoneOverrides.filter(o => o.zoneId !== zoneId) })
       },
       
-      clearRouteZones: () => set({ routeZones: [], routeZoneOverrides: [] }),
-      
-      // ========== Highway Bends Actions ==========
+      // ========== Highway Actions ==========
       setHighwayBends: (bends) => set({ highwayBends: bends }),
-      
-      clearHighwayBends: () => set({ highwayBends: [] }),
-      
-      // ========== Curated Highway Callouts Actions ==========
       setCuratedHighwayCallouts: (callouts) => set({ curatedHighwayCallouts: callouts }),
-      
-      clearCuratedHighwayCallouts: () => set({ curatedHighwayCallouts: [] }),
-      
-      // ========== Chatter Timeline Actions ==========
-      setChatterTimeline: (timeline) => set({ chatterTimeline: timeline }),
-      
-      clearChatterTimeline: () => set({ chatterTimeline: [] }),
-      
-      // ========== AI Agent Briefing Actions ==========
       setAgentBriefing: (briefing) => set({ agentBriefing: briefing }),
-      
-      clearAgentBriefing: () => set({ agentBriefing: null }),
-      
-      // ========== Callout Variants Actions ==========
       setCalloutVariants: (variants) => set({ calloutVariants: variants }),
       
-      clearCalloutVariants: () => set({ calloutVariants: {} }),
-      
-      // Get a random variant for a curve (or first one if no variants)
-      getCalloutVariant: (curveId) => {
-        const { calloutVariants } = get()
-        const variants = calloutVariants[curveId]
-        if (!variants || variants.length === 0) return null
-        // Return random variant
-        return variants[Math.floor(Math.random() * variants.length)]
-      },
-      
       // ========== Route Editor Actions ==========
-      setShowRouteEditor: (show) => set({ showRouteEditor: show }),
+      goToEditor: () => set({ showRouteEditor: true, showRoutePreview: false }),
+      closeEditor: () => set({ showRouteEditor: false }),
       
-      setEditedCurves: (curves) => set({ editedCurves: curves }),
-      
-      updateEditedCurve: (curveId, updates) => {
+      updateCurve: (curveId, updates) => {
         const { editedCurves, routeData } = get()
         const existing = editedCurves.find(c => c.id === curveId)
         if (existing) {
@@ -303,6 +266,7 @@ const useStore = create(
           showRouteSelector: true, 
           showRoutePreview: false,
           showTripSummary: false,
+          showRouteEditor: false,
           isRunning: false,
           simulationProgress: 0,
           activeCurve: null,
@@ -316,6 +280,7 @@ const useStore = create(
           showRouteSelector: false, 
           showRoutePreview: true,
           showTripSummary: false,
+          showRouteEditor: false,
           isRunning: false,
           simulationProgress: 0,
           activeCurve: null,
@@ -329,11 +294,13 @@ const useStore = create(
           showRouteSelector: false, 
           showRoutePreview: false,
           showTripSummary: false,
+          showRouteEditor: false,
           isRunning: true,
           simulationProgress: 0,
           lastAnnouncedCurveId: null,
           tripStats: {
             startTime: Date.now(),
+            endTime: null,  // NEW: Reset end time for new trip
             distance: 0,
             maxSpeed: 0,
             curvesCompleted: 0,
@@ -367,11 +334,16 @@ const useStore = create(
       },
       
       endTrip: () => {
+        const { tripStats } = get()
         set({
           isRunning: false,
           showTripSummary: true,
           simulationProgress: 0,
           simulationPaused: false,
+          tripStats: {
+            ...tripStats,
+            endTime: Date.now()  // NEW: Capture end time so duration stops counting
+          }
         })
       },
       
@@ -429,8 +401,7 @@ const useStore = create(
         upcomingCurves: [],
         activeCurve: null,
         highwayBends: [],
-        calloutVariants: {},
-        chatterTimeline: []  // Also clear chatter when route is cleared
+        calloutVariants: {}
       }),
       
       setActiveCurve: (curve) => set({ activeCurve: curve }),
@@ -491,7 +462,10 @@ const useStore = create(
         const { tripStats, settings, routeData } = get()
         if (!tripStats.startTime) return null
         
-        const duration = Date.now() - tripStats.startTime
+        // NEW: Use endTime if trip has ended, otherwise use current time (for live updates)
+        const endTime = tripStats.endTime || Date.now()
+        const duration = endTime - tripStats.startTime
+        
         const avgSpeed = tripStats.speedSamples.length > 0
           ? tripStats.speedSamples.reduce((a, b) => a + b, 0) / tripStats.speedSamples.length
           : 0
