@@ -194,7 +194,6 @@ export default function LoadingScreen({
         {/* Quote */}
         <div className="text-center mb-8">
           <p className="text-white/40 text-sm italic">"{quote}"</p>
-          <p className="text-white/20 text-xs mt-1">🏎️</p>
         </div>
         
         {/* Elapsed Time */}
