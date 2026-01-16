@@ -21,6 +21,7 @@ export default function TripSummary() {
   const [showDetails, setShowDetails] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
   const [shareSuccess, setShareSuccess] = useState(false)
+  const shareCardRef = useRef(null)
   
   const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
@@ -34,7 +35,7 @@ export default function TripSummary() {
     const animate = () => {
       const elapsed = Date.now() - start
       const progress = Math.min(elapsed / duration, 1)
-      const eased = 1 - Math.pow(1 - progress, 3) // ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
       
       setAnimatedStats({
         distance: summary.distance * eased,
@@ -53,7 +54,7 @@ export default function TripSummary() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Generate SVG path from route coordinates
+  // Generate SVG path string for route
   const routePath = useMemo(() => {
     const coords = routeData?.coordinates
     if (!coords || coords.length < 2) return null
@@ -68,11 +69,11 @@ export default function TripSummary() {
       maxLat = Math.max(maxLat, lat)
     })
     
-    const padding = 0.12
+    const padding = 0.15
     const width = maxLng - minLng || 0.01
     const height = maxLat - minLat || 0.01
     
-    const viewWidth = 320
+    const viewWidth = 280
     const viewHeight = 140
     const scale = Math.min(
       (viewWidth * (1 - padding * 2)) / width,
@@ -82,7 +83,7 @@ export default function TripSummary() {
     const offsetX = (viewWidth - width * scale) / 2
     const offsetY = (viewHeight - height * scale) / 2
     
-    const sampleRate = Math.max(1, Math.floor(coords.length / 150))
+    const sampleRate = Math.max(1, Math.floor(coords.length / 120))
     const points = coords
       .filter((_, i) => i % sampleRate === 0 || i === coords.length - 1)
       .map(([lng, lat]) => [
@@ -110,8 +111,7 @@ export default function TripSummary() {
       easy: curves.filter(c => (c.severity || 1) <= 2).length,
       medium: curves.filter(c => (c.severity || 1) >= 3 && (c.severity || 1) <= 4).length,
       hard: curves.filter(c => (c.severity || 1) >= 5).length,
-      sharpest: Math.max(...angles),
-      avgAngle: Math.round(angles.reduce((a, b) => a + b, 0) / angles.length),
+      sharpest: angles.length > 0 ? Math.max(...angles) : 0,
       chicanes: curves.filter(c => c.isChicane).length,
     }
   }, [routeData, summary])
@@ -146,7 +146,6 @@ export default function TripSummary() {
     
     const estimatedDuration = routeData.duration
     const actualDuration = summary.duration / 1000
-    
     const timeDiff = estimatedDuration ? actualDuration - estimatedDuration : 0
     
     return {
@@ -162,7 +161,6 @@ export default function TripSummary() {
     const origin = routeData?.origin || routeData?.name?.split(' to ')?.[0] || 'Start'
     const destination = routeData?.destination || routeData?.name?.split(' to ')?.[1] || 'Finish'
     
-    // Clean up names - take first part before comma for brevity
     const cleanName = (name) => {
       if (!name) return ''
       const parts = name.split(',')
@@ -175,166 +173,81 @@ export default function TripSummary() {
     }
   }, [routeData])
 
-  // Share functionality - generates PNG
+  // Share functionality using html2canvas
   const handleShare = async () => {
     setIsSharing(true)
     
     try {
-      // Create a canvas for the share image
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-      const scale = 2 // Retina quality
+      // Dynamically import html2canvas
+      const html2canvas = (await import('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/+esm')).default
       
-      canvas.width = 400 * scale
-      canvas.height = 500 * scale
-      ctx.scale(scale, scale)
-      
-      // Background
-      const gradient = ctx.createLinearGradient(0, 0, 0, 500)
-      gradient.addColorStop(0, '#0a0a0f')
-      gradient.addColorStop(1, '#12121a')
-      ctx.fillStyle = gradient
-      ctx.fillRect(0, 0, 400, 500)
-      
-      // Accent glow
-      ctx.fillStyle = modeColor + '15'
-      ctx.beginPath()
-      ctx.arc(200, 80, 150, 0, Math.PI * 2)
-      ctx.fill()
-      
-      // Route path
-      if (routePath) {
-        const pathScale = 0.9
-        const offsetX = 40
-        const offsetY = 30
-        
-        ctx.strokeStyle = modeColor
-        ctx.lineWidth = 3
-        ctx.lineCap = 'round'
-        ctx.lineJoin = 'round'
-        ctx.globalAlpha = 0.4
-        ctx.beginPath()
-        
-        const coords = routeData?.coordinates || []
-        const sampleRate = Math.max(1, Math.floor(coords.length / 100))
-        
-        let minLng = Infinity, maxLng = -Infinity
-        let minLat = Infinity, maxLat = -Infinity
-        coords.forEach(([lng, lat]) => {
-          minLng = Math.min(minLng, lng)
-          maxLng = Math.max(maxLng, lng)
-          minLat = Math.min(minLat, lat)
-          maxLat = Math.max(maxLat, lat)
+      if (shareCardRef.current) {
+        const canvas = await html2canvas(shareCardRef.current, {
+          backgroundColor: '#0a0a0f',
+          scale: 2,
+          logging: false,
+          useCORS: true,
         })
         
-        const width = maxLng - minLng || 0.01
-        const height = maxLat - minLat || 0.01
-        const drawScale = Math.min(320 / width, 120 / height) * pathScale
-        
-        coords.filter((_, i) => i % sampleRate === 0).forEach(([lng, lat], i) => {
-          const x = offsetX + (lng - minLng) * drawScale
-          const y = offsetY + 120 - (lat - minLat) * drawScale
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        })
-        ctx.stroke()
-        ctx.globalAlpha = 1
-      }
-      
-      // Route names
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText(`${routeNames.from} → ${routeNames.to}`, 200, 180)
-      
-      // Date
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'
-      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif'
-      ctx.fillText(new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }), 200, 200)
-      
-      // Stats boxes
-      const drawStatBox = (x, y, label, value, unit, color = '#ffffff') => {
-        // Box background
-        ctx.fillStyle = 'rgba(255,255,255,0.05)'
-        ctx.beginPath()
-        ctx.roundRect(x, y, 160, 80, 12)
-        ctx.fill()
-        
-        // Label
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'
-        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'
-        ctx.textAlign = 'left'
-        ctx.fillText(label, x + 16, y + 24)
-        
-        // Value
-        ctx.fillStyle = color
-        ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, sans-serif'
-        ctx.fillText(value, x + 16, y + 56)
-        
-        // Unit
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'
-        ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif'
-        const valueWidth = ctx.measureText(value).width
-        ctx.fillText(unit, x + 20 + valueWidth, y + 56)
-      }
-      
-      // Draw stat boxes
-      drawStatBox(20, 220, 'DISTANCE', summary.distance.toFixed(1), summary.distanceUnit)
-      drawStatBox(220, 220, 'DURATION', summary.durationFormatted, '')
-      drawStatBox(20, 310, 'AVG SPEED', Math.round(summary.avgSpeed).toString(), summary.speedUnit, modeColor)
-      drawStatBox(220, 310, 'TOP SPEED', Math.round(summary.maxSpeed).toString(), summary.speedUnit, '#f97316')
-      
-      // Curves section
-      if (curveInsights && curveInsights.total > 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.4)'
-        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText(`${curveInsights.total} CURVES • ${curveInsights.easy} Easy • ${curveInsights.medium} Medium • ${curveInsights.hard} Hard`, 200, 420)
-      }
-      
-      // App branding
-      ctx.fillStyle = modeColor
-      ctx.font = 'bold 14px -apple-system, BlinkMacSystemFont, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('RALLY CO-PILOT', 200, 470)
-      
-      ctx.fillStyle = 'rgba(255,255,255,0.3)'
-      ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'
-      ctx.fillText(mode.toUpperCase() + ' MODE', 200, 485)
-      
-      // Convert to blob and share/download
-      canvas.toBlob(async (blob) => {
-        const file = new File([blob], `rally-copilot-${Date.now()}.png`, { type: 'image/png' })
-        
-        // Try native share first (mobile)
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'Rally Co-Pilot Drive',
-              text: `${routeNames.from} → ${routeNames.to} • ${summary.distance.toFixed(1)} ${summary.distanceUnit} • ${summary.durationFormatted}`
-            })
-            setShareSuccess(true)
-          } catch (err) {
-            if (err.name !== 'AbortError') {
-              // Fallback to download
-              downloadImage(blob)
-            }
+        canvas.toBlob(async (blob) => {
+          if (!blob) {
+            setIsSharing(false)
+            return
           }
-        } else {
-          // Fallback to download
-          downloadImage(blob)
-          setShareSuccess(true)
-        }
-        
-        setIsSharing(false)
-        setTimeout(() => setShareSuccess(false), 2000)
-      }, 'image/png')
-      
+          
+          const file = new File([blob], `rally-copilot-${Date.now()}.png`, { type: 'image/png' })
+          
+          // Try native share first (mobile)
+          if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'Rally Co-Pilot Drive',
+                text: `${routeNames.from} → ${routeNames.to}`
+              })
+              setShareSuccess(true)
+            } catch (err) {
+              if (err.name !== 'AbortError') {
+                downloadImage(blob)
+                setShareSuccess(true)
+              }
+            }
+          } else {
+            downloadImage(blob)
+            setShareSuccess(true)
+          }
+          
+          setIsSharing(false)
+          setTimeout(() => setShareSuccess(false), 2000)
+        }, 'image/png')
+      }
     } catch (err) {
       console.error('Share failed:', err)
-      setIsSharing(false)
+      // Fallback to simple canvas if html2canvas fails
+      fallbackShare()
     }
+  }
+  
+  const fallbackShare = async () => {
+    // Simple fallback that just downloads basic info
+    const text = `🏁 Rally Co-Pilot\n${routeNames.from} → ${routeNames.to}\n📏 ${summary.distance.toFixed(1)} ${summary.distanceUnit}\n⏱ ${summary.durationFormatted}\n🏎 Top: ${Math.round(summary.maxSpeed)} ${summary.speedUnit}`
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({ text })
+        setShareSuccess(true)
+      } catch (err) {
+        // Copy to clipboard as last resort
+        navigator.clipboard?.writeText(text)
+        setShareSuccess(true)
+      }
+    } else {
+      navigator.clipboard?.writeText(text)
+      setShareSuccess(true)
+    }
+    
+    setIsSharing(false)
+    setTimeout(() => setShareSuccess(false), 2000)
   }
   
   const downloadImage = (blob) => {
@@ -378,9 +291,8 @@ export default function TripSummary() {
       {/* Header with route visualization */}
       <div className="relative flex-shrink-0">
         <div className="relative h-44 overflow-hidden">
-          {/* Route SVG */}
           <svg 
-            viewBox={`0 0 ${routePath?.viewWidth || 320} ${routePath?.viewHeight || 140}`} 
+            viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`} 
             className="absolute inset-0 w-full h-full"
             preserveAspectRatio="xMidYMid meet"
           >
@@ -401,25 +313,8 @@ export default function TripSummary() {
             
             {routePath ? (
               <>
-                <path
-                  d={routePath.d}
-                  fill="none"
-                  stroke={modeColor}
-                  strokeWidth="8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity="0.3"
-                  filter="url(#glow)"
-                />
-                <path
-                  d={routePath.d}
-                  fill="none"
-                  stroke="url(#routeGradient)"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="animate-draw"
-                />
+                <path d={routePath.d} fill="none" stroke={modeColor} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" filter="url(#glow)"/>
+                <path d={routePath.d} fill="none" stroke="url(#routeGradient)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="animate-draw"/>
                 <circle cx={routePath.start[0]} cy={routePath.start[1]} r="8" fill="#0a0a0f" stroke="#22c55e" strokeWidth="3"/>
                 <circle cx={routePath.end[0]} cy={routePath.end[1]} r="8" fill="#0a0a0f" stroke={modeColor} strokeWidth="3"/>
                 <g transform={`translate(${routePath.end[0] - 6}, ${routePath.end[1] - 6})`}>
@@ -427,16 +322,13 @@ export default function TripSummary() {
                 </g>
               </>
             ) : (
-              <text x="160" y="70" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="14">Route Complete</text>
+              <text x="140" y="70" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="14">Route Complete</text>
             )}
           </svg>
           
           {/* Completion badge */}
           <div className="absolute top-4 right-4 safe-top">
-            <div 
-              className="px-3 py-1.5 rounded-full backdrop-blur-xl border flex items-center gap-2"
-              style={{ background: `${modeColor}15`, borderColor: `${modeColor}30` }}
-            >
+            <div className="px-3 py-1.5 rounded-full backdrop-blur-xl border flex items-center gap-2" style={{ background: `${modeColor}15`, borderColor: `${modeColor}30` }}>
               <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: modeColor, boxShadow: `0 0 8px ${modeColor}` }}/>
               <span className="text-[11px] font-semibold tracking-wider" style={{ color: modeColor }}>COMPLETE</span>
             </div>
@@ -450,7 +342,7 @@ export default function TripSummary() {
           </div>
         </div>
         
-        {/* Route Names - Below the map */}
+        {/* Route Names */}
         <div className="px-4 pb-3 -mt-2">
           <div className="flex items-center justify-center gap-2 text-center">
             <span className="text-white/60 text-sm font-medium truncate max-w-[140px]">{routeNames.from}</span>
@@ -528,15 +420,9 @@ export default function TripSummary() {
             </div>
             
             <div className="flex h-3 rounded-full overflow-hidden mb-3">
-              {zoneInsights.urban > 0 && (
-                <div className="h-full transition-all duration-1000" style={{ width: `${(zoneInsights.urban / zoneInsights.total) * 100}%`, background: ZONE_COLORS.urban.primary }}/>
-              )}
-              {zoneInsights.transit > 0 && (
-                <div className="h-full transition-all duration-1000" style={{ width: `${(zoneInsights.transit / zoneInsights.total) * 100}%`, background: ZONE_COLORS.transit.primary }}/>
-              )}
-              {zoneInsights.technical > 0 && (
-                <div className="h-full transition-all duration-1000" style={{ width: `${(zoneInsights.technical / zoneInsights.total) * 100}%`, background: ZONE_COLORS.technical.primary }}/>
-              )}
+              {zoneInsights.urban > 0 && <div className="h-full" style={{ width: `${(zoneInsights.urban / zoneInsights.total) * 100}%`, background: ZONE_COLORS.urban.primary }}/>}
+              {zoneInsights.transit > 0 && <div className="h-full" style={{ width: `${(zoneInsights.transit / zoneInsights.total) * 100}%`, background: ZONE_COLORS.transit.primary }}/>}
+              {zoneInsights.technical > 0 && <div className="h-full" style={{ width: `${(zoneInsights.technical / zoneInsights.total) * 100}%`, background: ZONE_COLORS.technical.primary }}/>}
             </div>
             
             <div className="grid grid-cols-3 gap-2">
@@ -564,16 +450,11 @@ export default function TripSummary() {
           <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-200 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-white/40 text-[10px] tracking-widest">CURVES TACKLED</span>
-              <span className="text-white font-semibold">
-                {curveInsights.completed}<span className="text-white/30">/{curveInsights.total}</span>
-              </span>
+              <span className="text-white font-semibold">{curveInsights.completed}<span className="text-white/30">/{curveInsights.total}</span></span>
             </div>
             
             <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-4">
-              <div 
-                className="h-full rounded-full transition-all duration-1000"
-                style={{ width: `${completionPercent}%`, background: `linear-gradient(90deg, #22c55e, ${modeColor})` }}
-              />
+              <div className="h-full rounded-full" style={{ width: `${completionPercent}%`, background: `linear-gradient(90deg, #22c55e, ${modeColor})` }}/>
             </div>
             
             <div className="grid grid-cols-4 gap-2">
@@ -617,26 +498,11 @@ export default function TripSummary() {
             }}
           >
             {isSharing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"/>
-                Creating...
-              </>
+              <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"/>Creating...</>
             ) : shareSuccess ? (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 6L9 17l-5-5"/>
-                </svg>
-                Saved!
-              </>
+              <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>Saved!</>
             ) : (
-              <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                  <polyline points="16 6 12 2 8 6"/>
-                  <line x1="12" y1="2" x2="12" y2="15"/>
-                </svg>
-                Share Drive
-              </>
+              <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>Share Drive</>
             )}
           </button>
           
@@ -646,6 +512,91 @@ export default function TripSummary() {
           >
             Done
           </button>
+        </div>
+      </div>
+
+      {/* Hidden Share Card - This gets rendered to PNG */}
+      <div className="fixed -left-[9999px] top-0">
+        <div 
+          ref={shareCardRef}
+          className="w-[400px] p-6"
+          style={{ background: 'linear-gradient(180deg, #0a0a0f 0%, #12121a 100%)' }}
+        >
+          {/* Route visualization */}
+          <div className="relative h-[160px] mb-4">
+            <div 
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full"
+              style={{ background: `radial-gradient(circle, ${modeColor}30 0%, transparent 70%)` }}
+            />
+            <svg viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+              {routePath && (
+                <>
+                  <path d={routePath.d} fill="none" stroke={modeColor} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
+                  <circle cx={routePath.start[0]} cy={routePath.start[1]} r="6" fill="#0a0a0f" stroke="#22c55e" strokeWidth="2"/>
+                  <circle cx={routePath.end[0]} cy={routePath.end[1]} r="6" fill="#0a0a0f" stroke={modeColor} strokeWidth="2"/>
+                </>
+              )}
+            </svg>
+          </div>
+          
+          {/* Route name */}
+          <div className="text-center mb-1">
+            <span className="text-white text-lg font-bold">{routeNames.from} → {routeNames.to}</span>
+          </div>
+          
+          {/* Date */}
+          <div className="text-center mb-6">
+            <span className="text-white/40 text-xs">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </span>
+          </div>
+          
+          {/* Stats grid */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="bg-white/5 rounded-xl p-4">
+              <div className="text-white/40 text-[10px] tracking-widest mb-1">DISTANCE</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold text-white">{summary.distance.toFixed(1)}</span>
+                <span className="text-white/40 text-sm">{summary.distanceUnit}</span>
+              </div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-4">
+              <div className="text-white/40 text-[10px] tracking-widest mb-1">DURATION</div>
+              <span className="text-3xl font-bold text-white">{summary.durationFormatted}</span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="bg-white/5 rounded-xl p-4">
+              <div className="text-white/40 text-[10px] tracking-widest mb-1">AVG SPEED</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold" style={{ color: modeColor }}>{Math.round(summary.avgSpeed)}</span>
+                <span className="text-white/40 text-sm">{summary.speedUnit}</span>
+              </div>
+            </div>
+            <div className="bg-white/5 rounded-xl p-4">
+              <div className="text-white/40 text-[10px] tracking-widest mb-1">TOP SPEED</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl font-bold text-orange-400">{Math.round(summary.maxSpeed)}</span>
+                <span className="text-white/40 text-sm">{summary.speedUnit}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Curves summary */}
+          {curveInsights && curveInsights.total > 0 && (
+            <div className="text-center mb-6">
+              <span className="text-white/50 text-xs">
+                {curveInsights.total} curves • {curveInsights.easy} easy • {curveInsights.medium} medium • {curveInsights.hard} hard
+              </span>
+            </div>
+          )}
+          
+          {/* Branding */}
+          <div className="text-center pt-4 border-t border-white/10">
+            <div className="font-bold text-sm tracking-wider mb-1" style={{ color: modeColor }}>RALLY CO-PILOT</div>
+            <div className="text-white/30 text-[10px] tracking-widest">{mode.toUpperCase()} MODE</div>
+          </div>
         </div>
       </div>
 
