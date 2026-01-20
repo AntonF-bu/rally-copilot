@@ -4,9 +4,10 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 
 // ================================
-// Map Component - v22
-// FIXED: Callout markers now show angles properly
-// Uses callout.angle directly instead of parsing text
+// Map Component - v23
+// UPDATED: Route rendering now matches RoutePreview style
+// - Removed dark outline, matched line widths
+// - Simplified callout color logic
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
@@ -114,6 +115,7 @@ export default function Map() {
 
   // ================================
   // Add route to map with zone coloring
+  // Matches RoutePreview style (no outline, thinner lines)
   // ================================
   const addRouteToMap = useCallback(() => {
     if (!map.current || !routeData?.coordinates?.length) return false
@@ -127,22 +129,8 @@ export default function Map() {
       routeLayersRef.current = []
 
       const zoneSegs = buildZoneSegments(routeData.coordinates)
-      
-      // Add dark outline
-      map.current.addSource('route-outline-src', {
-        type: 'geojson',
-        data: { type: 'Feature', geometry: { type: 'LineString', coordinates: routeData.coordinates } }
-      })
-      map.current.addLayer({
-        id: 'route-outline',
-        type: 'line',
-        source: 'route-outline-src',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#000000', 'line-width': 10, 'line-opacity': 0.6 }
-      })
-      routeLayersRef.current.push('route-outline-src', 'route-outline')
 
-      // Add zone segments with their colors
+      // Add zone segments with their colors (no dark outline - matches Preview)
       zoneSegs.forEach((seg, i) => {
         const srcId = `route-src-${i}`
         const glowId = `route-glow-${i}`
@@ -153,22 +141,22 @@ export default function Map() {
           data: { type: 'Feature', geometry: { type: 'LineString', coordinates: seg.coords } }
         })
 
-        // Glow layer
+        // Glow layer - matches Preview (width 12, blur 5, opacity 0.4)
         map.current.addLayer({
           id: glowId,
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.5 }
+          paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 }
         })
 
-        // Main line
+        // Main line - matches Preview (width 4)
         map.current.addLayer({
           id: lineId,
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 5 }
+          paint: { 'line-color': seg.color, 'line-width': 4 }
         })
 
         routeLayersRef.current.push(srcId, glowId, lineId)
@@ -228,8 +216,8 @@ export default function Map() {
   }, [routeData?.curves, routeZones, isInTransitZone, curatedHighwayCallouts])
 
   // ================================
-  // Add curated callout markers (from Preview)
-  // FIXED: Now uses callout.angle directly for display
+  // Add curated callout markers
+  // Matches RoutePreview style (simpler colors, G${count} labels)
   // ================================
   const addCalloutMarkers = useCallback(() => {
     if (!map.current || !mapLoaded) return
@@ -251,101 +239,61 @@ export default function Map() {
       const el = document.createElement('div')
       el.style.cursor = 'pointer'
 
-      // Get the angle - try multiple sources
-      const angle = callout.angle || 
-                    callout.originalAngle || 
-                    parseInt(callout.text?.match(/(\d+)°?/)?.[1]) || 
-                    0
-      
-      // Get direction
-      const direction = callout.direction || 
-                       (callout.text?.toLowerCase().includes('left') ? 'left' : 
-                        callout.text?.toLowerCase().includes('right') ? 'right' : null)
-
-      // Determine color based on angle and type
+      const text = callout.text || ''
       const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
+      const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
+
+      // Simple color logic matching Preview
       let color
-      
-      if (callout.zone === 'transit') {
-        // Highway callouts - blue themed unless danger
-        if (angle >= 40 || callout.type === 'danger') {
-          color = CALLOUT_COLORS.danger
-        } else if (angle >= 25 || callout.type === 'significant') {
-          color = CALLOUT_COLORS.significant
-        } else {
-          color = CALLOUT_COLORS.sweeper
-        }
+      if (isHighway) {
+        color = '#3b82f6'  // Always blue for highway
       } else {
-        // Technical/Urban - severity-based colors
-        if (angle >= 70 || callout.text?.toLowerCase().includes('caution') || callout.type === 'danger') {
-          color = CALLOUT_COLORS.danger
-        } else if (angle >= 45 || callout.type === 'significant') {
-          color = CALLOUT_COLORS.significant
+        const angle = parseInt(text.match(/\d+/)?.[0]) || 0
+        if (angle >= 70 || text.toLowerCase().includes('hairpin')) {
+          color = '#ef4444'  // Red
+        } else if (angle >= 45 || text.toLowerCase().includes('chicane')) {
+          color = '#f97316'  // Orange
         } else {
-          color = '#22c55e' // Green for moderate
+          color = '#22c55e'  // Green
         }
       }
 
-      // Get short label for marker - FIXED to use angle directly
+      // Get short label matching Preview format
       const getShortLabel = () => {
-        const text = callout.text || ''
-        
-        // Grouped callouts
+        // Grouped callouts - match Preview format
         if (isGrouped) {
-          const count = callout.groupedFrom.length
-          return `${count}+`
+          if (text.toLowerCase().includes('hairpin')) return text.includes('DOUBLE') ? '2xHP' : 'HP'
+          if (text.toLowerCase().includes('chicane')) return 'CHI'
+          if (text.toLowerCase().includes('esses')) return 'ESS'
+          if (text.includes('HARD')) {
+            const match = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
+            return match ? `H${match[1][0]}${match[2]}` : 'HRD'
+          }
+          return `G${callout.groupedFrom.length}`
         }
-        
+
         // Special types
         if (callout.type === 'wake_up') return '!'
         if (callout.type === 'sequence') return 'SEQ'
         if (callout.type === 'transition') return '→'
-        
-        // If we have angle AND direction, show both (e.g., "L45")
-        if (direction && angle > 0) {
-          const dirChar = direction[0].toUpperCase()
-          return `${dirChar}${angle}`
-        }
-        
-        // If we have just angle, show it
-        if (angle > 0) {
-          return `${angle}°`
-        }
-        
-        // If we have just direction, show it
-        if (direction) {
-          return direction[0].toUpperCase()
-        }
-        
-        // Fall back to parsing text
+
+        // Direction + angle from text
         const dirMatch = text.match(/\b(left|right|L|R)\b/i)
         const angleMatch = text.match(/(\d+)/)
-        
-        if (dirMatch && angleMatch) {
-          const dir = dirMatch[1][0].toUpperCase()
-          return `${dir}${angleMatch[1]}`
-        }
-        
-        if (angleMatch) return `${angleMatch[1]}°`
+
+        if (dirMatch && angleMatch) return `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}`
+        if (angleMatch) return angleMatch[1]
         if (dirMatch) return dirMatch[1][0].toUpperCase()
-        
-        return '•'
+
+        return callout.type?.[0]?.toUpperCase() || '•'
       }
 
       const shortLabel = getShortLabel()
-      const isHighway = callout.zone === 'transit'
-      
-      // Create marker with proper styling
+
+      // Create marker matching Preview styling
       el.innerHTML = `
-        <div style="
-          background: ${isHighway ? color + '30' : color};
-          padding: ${isGrouped ? '4px 12px' : '4px 10px'};
-          border-radius: ${isGrouped ? '12px' : '6px'};
-          border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color};
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-        " title="${callout.text}">
-          <span style="font-size:${isGrouped ? '12px' : '11px'};font-weight:${isGrouped ? '700' : '600'};color:${isHighway ? color : '#fff'};">${shortLabel}</span>
+        <div style="background: ${isHighway ? color + '30' : color}; padding: ${isGrouped ? '4px 12px' : '4px 10px'}; border-radius: ${isGrouped ? '12px' : '6px'}; border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color}; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">
+          <span style="font-size:${isGrouped ? '12px' : '11px'}; font-weight:${isGrouped ? '700' : '600'}; color:${isHighway ? color : '#fff'};">${shortLabel}</span>
         </div>
       `
 
@@ -359,7 +307,7 @@ export default function Map() {
     console.log(`🗺️ Added ${calloutMarkers.current.length} callout markers`)
   }, [curatedHighwayCallouts, mapLoaded])
 
-  // Initialize map
+  // Initialize map - matches RoutePreview style (flat view, no terrain)
   useEffect(() => {
     if (map.current) return
 
@@ -369,25 +317,15 @@ export default function Map() {
       container: mapContainer.current,
       style: 'mapbox://styles/mapbox/dark-v11',
       center: startCoord,
-      zoom: 14,
-      pitch: 60,
+      zoom: 10,    // Match Preview (was 14)
+      pitch: 0,    // Match Preview flat view (was 60)
       bearing: 0,
       antialias: true
     })
 
     map.current.on('load', () => {
       console.log('🗺️ Map loaded')
-      try {
-        map.current.addSource('mapbox-dem', {
-          type: 'raster-dem',
-          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-          tileSize: 512,
-          maxzoom: 14
-        })
-        map.current.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 })
-      } catch (e) {
-        console.log('Terrain setup error:', e)
-      }
+      // No 3D terrain - matches Preview
       setMapLoaded(true)
     })
 
