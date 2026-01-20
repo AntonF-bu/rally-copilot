@@ -7,9 +7,7 @@ import { getRoute, extractRoadRefs } from '../services/routeService'
 import { detectCurves } from '../utils/curveDetection'
 import { analyzeRouteCharacter, CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { analyzeHighwayBends, HIGHWAY_MODE } from '../services/highwayModeService'
-import { validateZonesWithLLM, getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
-import { generateCalloutSlots, addPositionsToSlots, formatSlotsForDisplay } from '../services/highwayCalloutGenerator'
-import { polishCalloutsWithAI } from '../services/aiCalloutPolish'
+import { getLLMApiKey, hasLLMApiKey } from '../services/llmZoneService'
 import { dumpHighwayData } from '../services/highwayDataDebug'
 import { analyzeRoadFlow, generateCalloutsFromEvents } from '../services/roadFlowAnalyzer'
 import { filterEventsToCallouts } from '../services/ruleBasedCalloutFilter'
@@ -18,12 +16,11 @@ import { generateGroupedCalloutSets } from '../services/calloutGroupingService'
 // NEW: Import the chunked chatter service
 import { generateChatterTimeline } from '../services/highwayChatterService'
 
-import { 
-  classifyZones, 
-  classifyByRoadName, 
-  convertToStandardFormat, 
+import {
+  classifyZones,
+  convertToStandardFormat,
   reassignEventZones,
-  extractCurvesFromEvents 
+  extractCurvesFromEvents
 } from '../services/simpleZoneClassifier'
 import useHighwayStore from '../services/highwayStore'
 import CopilotLoader from './CopilotLoader'
