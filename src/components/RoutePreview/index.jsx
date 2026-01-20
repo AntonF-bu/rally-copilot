@@ -1,8 +1,5 @@
-// RoutePreview - Main Export
-// TODO: This will become the refactored component
-// For now, re-export the original
-
-export { default } from '../RoutePreview.jsx'
+// RoutePreview - Main Export (Refactored)
+export { default } from './RoutePreviewMain'
 
 // Constants
 export * from './constants'
