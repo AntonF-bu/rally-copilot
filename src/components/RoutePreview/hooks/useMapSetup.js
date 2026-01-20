@@ -2,6 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import { CHARACTER_COLORS } from '../../../services/zoneService'
 import { MAP_STYLES } from '../constants'
+import { buildZoneSegments } from '../../../utils/routeGeometry'
+
+// Zone colors for shared utility (must match CHARACTER_COLORS primary values)
+const ZONE_COLORS = {
+  technical: CHARACTER_COLORS.technical.primary,
+  transit: CHARACTER_COLORS.transit.primary,
+  urban: CHARACTER_COLORS.urban.primary
+}
 
 /**
  * Hook to manage Mapbox map setup, route rendering, and markers
@@ -34,60 +42,21 @@ export function useMapSetup({
   // Note: mapContainer/setMapContainer is now state above, used as ref callback
 
   // ================================
-  // BUILD SLEEVE SEGMENTS
+  // BUILD SLEEVE SEGMENTS (using shared utility)
   // ================================
   const buildSleeveSegments = useCallback((coords, characterSegments) => {
-    if (!coords?.length || !characterSegments?.length) return []
-
-    const totalDist = routeData?.distance || 15000
-
-    // Calculate cumulative distances along route
-    const coordDistances = [0]
-    for (let i = 1; i < coords.length; i++) {
-      const [lng1, lat1] = coords[i - 1]
-      const [lng2, lat2] = coords[i]
-      const R = 6371000
-      const dLat = (lat2 - lat1) * Math.PI / 180
-      const dLng = (lng2 - lng1) * Math.PI / 180
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLng / 2) * Math.sin(dLng / 2)
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-      coordDistances.push(coordDistances[i - 1] + R * c)
-    }
-
-    const calculatedTotal = coordDistances[coordDistances.length - 1]
-
-    const findCoordIndexAtDistance = (targetDist) => {
-      const scaledTarget = targetDist * (calculatedTotal / totalDist)
-      for (let i = 0; i < coordDistances.length; i++) {
-        if (coordDistances[i] >= scaledTarget) return Math.max(0, i - 1)
-      }
-      return coords.length - 1
-    }
-
-    const segments = []
-    characterSegments.forEach((seg) => {
-      const startDist = seg.startDistance ?? (seg.start * 1609.34) ?? 0
-      const endDist = seg.endDistance ?? (seg.end * 1609.34) ?? totalDist
-
-      const startIdx = findCoordIndexAtDistance(startDist)
-      const endIdx = findCoordIndexAtDistance(endDist)
-      const segCoords = coords.slice(startIdx, endIdx + 1)
-
-      if (segCoords.length > 1) {
-        const colors = CHARACTER_COLORS[seg.character] || CHARACTER_COLORS.technical
-        segments.push({
-          coords: segCoords,
-          color: colors.primary,
-          character: seg.character,
-          startIdx,
-          endIdx
-        })
-      }
-    })
-
-    return segments
+    const segments = buildZoneSegments(
+      coords,
+      characterSegments,
+      routeData?.distance || 0,
+      ZONE_COLORS
+    )
+    // Convert from shared format (coordinates) to local format (coords)
+    return segments.map(seg => ({
+      coords: seg.coordinates,
+      color: seg.color,
+      character: seg.character
+    }))
   }, [routeData?.distance])
 
   // ================================
