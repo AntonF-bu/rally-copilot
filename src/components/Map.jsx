@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
+import { buildZoneSegments as buildZoneSegmentsShared } from '../utils/routeGeometry'
 
 // ================================
 // Map Component - v23
@@ -72,46 +73,21 @@ export default function Map() {
 
   // ================================
   // Build zone-based segments for route coloring
+  // Uses shared utility with accurate Haversine distance calculation
   // ================================
-  const buildZoneSegments = useCallback((coords) => {
-    if (!coords?.length || !routeZones?.length) {
-      return [{ coords, color: ZONE_COLORS.technical }]
-    }
-
-    const segments = []
-    let currentIdx = 0
-    let cumulativeDistance = 0
-
-    routeZones.forEach((zone) => {
-      const zoneColor = ZONE_COLORS[zone.character] || ZONE_COLORS.technical
-      const segmentCoords = []
-
-      while (currentIdx < coords.length - 1 && cumulativeDistance < zone.endDistance) {
-        segmentCoords.push(coords[currentIdx])
-        
-        const dx = coords[currentIdx + 1][0] - coords[currentIdx][0]
-        const dy = coords[currentIdx + 1][1] - coords[currentIdx][1]
-        const segDist = Math.sqrt(dx * dx + dy * dy) * 111000
-        
-        cumulativeDistance += segDist
-        currentIdx++
-      }
-
-      if (segmentCoords.length > 1) {
-        segments.push({ coords: segmentCoords, color: zoneColor })
-      }
-    })
-
-    if (currentIdx < coords.length) {
-      const remaining = coords.slice(currentIdx)
-      if (remaining.length > 1) {
-        const lastColor = segments.length > 0 ? segments[segments.length - 1].color : ZONE_COLORS.technical
-        segments.push({ coords: remaining, color: lastColor })
-      }
-    }
-
-    return segments.length > 0 ? segments : [{ coords, color: ZONE_COLORS.technical }]
-  }, [routeZones])
+  const getZoneSegments = useCallback((coords) => {
+    const segments = buildZoneSegmentsShared(
+      coords,
+      routeZones,
+      routeData?.distance || 0,
+      ZONE_COLORS
+    )
+    // Convert from shared format (coordinates) to local format (coords)
+    return segments.map(seg => ({
+      coords: seg.coordinates,
+      color: seg.color
+    }))
+  }, [routeZones, routeData?.distance])
 
   // ================================
   // Add route to map with zone coloring
@@ -128,7 +104,7 @@ export default function Map() {
       })
       routeLayersRef.current = []
 
-      const zoneSegs = buildZoneSegments(routeData.coordinates)
+      const zoneSegs = getZoneSegments(routeData.coordinates)
 
       // Add zone segments with their colors (no dark outline - matches Preview)
       zoneSegs.forEach((seg, i) => {
@@ -169,7 +145,7 @@ export default function Map() {
       console.error('Route rendering error:', e)
       return false
     }
-  }, [routeData, routeZones, buildZoneSegments])
+  }, [routeData, routeZones, getZoneSegments])
 
   // ================================
   // Add curve markers (technical zones only)
