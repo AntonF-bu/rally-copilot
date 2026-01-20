@@ -24,19 +24,14 @@ export function useMapSetup({
   const [mapStyle, setMapStyle] = useState('dark')
   const [showSleeve, setShowSleeve] = useState(true)
   const [showHighwayBends, setShowHighwayBends] = useState(true)
+  const [mapContainer, setMapContainer] = useState(null)  // Use state instead of ref
 
   const mapRef = useRef(null)
-  const containerRef = useRef(null)
   const markersRef = useRef([])
   const highwayMarkersRef = useRef([])
   const initialRouteDrawnRef = useRef(false)
 
-  // Container ref callback
-  const setMapContainer = useCallback((node) => {
-    if (node) {
-      containerRef.current = node
-    }
-  }, [])
+  // Note: mapContainer/setMapContainer is now state above, used as ref callback
 
   // ================================
   // BUILD SLEEVE SEGMENTS
@@ -324,10 +319,15 @@ export function useMapSetup({
   // INITIALIZE MAP
   // ================================
   useEffect(() => {
-    if (!enabled || !containerRef.current || !routeData?.coordinates || mapRef.current) return
+    // Wait for container, enabled, and route data
+    if (!enabled || !mapContainer || !routeData?.coordinates || mapRef.current) {
+      return
+    }
+
+    console.log('🗺️ Initializing map with container:', mapContainer)
 
     mapRef.current = new mapboxgl.Map({
-      container: containerRef.current,
+      container: mapContainer,  // Use state variable
       style: MAP_STYLES[mapStyle],
       center: routeData.coordinates[0],
       zoom: 10,
@@ -335,6 +335,7 @@ export function useMapSetup({
     })
 
     mapRef.current.on('load', () => {
+      console.log('🗺️ Map loaded!')
       setMapLoaded(true)
 
       // Fit bounds to route
@@ -360,7 +361,7 @@ export function useMapSetup({
       mapRef.current?.remove()
       mapRef.current = null
     }
-  }, [enabled, routeData?.coordinates, mapStyle])
+  }, [enabled, mapContainer, routeData?.coordinates, mapStyle])  // Add mapContainer to deps
 
   // Draw route when segments are ready
   useEffect(() => {
