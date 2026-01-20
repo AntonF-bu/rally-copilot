@@ -15,3 +15,5 @@ export { default as ActionButton } from './components/ActionButton'
 // Hooks
 export { useElevation } from './hooks/useElevation'
 export { useFlythrough } from './hooks/useFlythrough'
+export { useMapSetup } from './hooks/useMapSetup'
+export { useRouteAnalysisPipeline } from './hooks/useRouteAnalysisPipeline'
