@@ -409,6 +409,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
       {/* TOP BAR */}
       <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent">
         <div className="flex items-center justify-between p-2 pt-10">
+          {/* Left: Navigation + Map controls */}
           <div className="flex items-center gap-1.5">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
@@ -439,6 +440,20 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
             )}
           </div>
 
+          {/* Center: Route stats (clickable to show curve list) */}
+          <button onClick={() => setShowCurveList(true)} className="flex items-center gap-2 px-3 py-1 rounded-full bg-black/50 border border-white/10 hover:bg-white/5 transition-all">
+            <span className="text-white font-bold">{routeStats.distance}</span>
+            <span className="text-white/50 text-xs">{routeStats.distanceUnit}</span>
+            <span className="text-white/30">•</span>
+            <span className="text-white font-bold">{routeStats.curves}</span>
+            <span className="text-white/50 text-xs">curves</span>
+            <span className="text-white/30">•</span>
+            <span className="text-red-400 font-bold">{routeStats.sharpCurves}</span>
+            <span className="text-white/50 text-xs">sharp</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="opacity-40"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+
+          {/* Right: Route info badges + favorite */}
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${selectedMode === HIGHWAY_MODE.COMPANION ? 'bg-amber-500/20 text-amber-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
               {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMPANION' : 'BASIC'}
@@ -457,21 +472,6 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
             )}
           </div>
         </div>
-
-        <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-3 px-3 py-1.5 hover:bg-white/5">
-          <span className="text-white font-bold text-lg">{routeStats.distance}</span>
-          <span className="text-white/50 text-sm">{routeStats.distanceUnit}</span>
-          <span className="text-white/30">•</span>
-          <span className="text-white font-bold text-lg">{routeStats.duration}</span>
-          <span className="text-white/50 text-sm">min</span>
-          <span className="text-white/30">•</span>
-          <span className="text-white font-bold text-lg">{routeStats.curves}</span>
-          <span className="text-white/50 text-sm">curves</span>
-          <span className="text-white/30">•</span>
-          <span className="text-red-400 font-bold text-lg">{routeStats.sharpCurves}</span>
-          <span className="text-white/50 text-sm">sharp</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="ml-1 opacity-40"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
       </div>
 
       {/* Elevation mini widget */}
@@ -520,7 +520,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
                 {highwayBends?.length > 0 && (
                   <span className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
                     style={{ background: `${HIGHWAY_BEND_COLOR}20`, color: HIGHWAY_BEND_COLOR, border: `1px solid ${HIGHWAY_BEND_COLOR}40` }}>
-                    {highwayBends.length} sweeps
+                    {highwayBends.length} highway curves
                   </span>
                 )}
               </>
@@ -589,28 +589,13 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
           </div>
         )}
 
-        {/* Mode + Actions */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className="flex bg-black/60 rounded-full p-0.5 border border-white/10">
-              {[{ id: 'cruise', l: 'CRUISE', c: '#00d4ff' }, { id: 'fast', l: 'FAST', c: '#ffd500' }, { id: 'race', l: 'RACE', c: '#ff3366' }].map(m => (
-                <button key={m.id} onClick={() => setMode(m.id)}
-                  className="px-3 py-1 rounded-full text-[10px] font-bold transition-all"
-                  style={{ background: mode === m.id ? m.c : 'transparent', color: mode === m.id ? (m.id === 'fast' ? '#000' : '#fff') : '#fff6' }}>
-                  {m.l}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex gap-1.5">
-            <Btn icon="edit" onClick={onEdit} tip="Edit" highlight={hasEdits} />
-            <Btn icon="reverse" onClick={handleReverseRoute} tip="Reverse" />
-            <Btn icon="fly" onClick={startFly} disabled={isFlying} tip="Preview" />
-            <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
-            <Btn icon="share" onClick={handleShare} tip="Share" />
-            <Btn icon={downloadComplete ? 'check' : 'download'} onClick={handleDownload} disabled={isDownloading || downloadComplete} success={downloadComplete} loading={isDownloading} tip="Download" />
-          </div>
+        {/* Action buttons */}
+        <div className="flex items-center justify-end gap-1.5 mb-2">
+          {/* TODO: Re-enable edit button when zone editing is complete */}
+          {/* <Btn icon="edit" onClick={onEdit} tip="Edit" highlight={hasEdits} /> */}
+          <Btn icon="fly" onClick={startFly} disabled={isFlying} tip="Preview" />
+          <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
+          <Btn icon="share" onClick={handleShare} tip="Share" />
         </div>
 
         {/* Start button */}
