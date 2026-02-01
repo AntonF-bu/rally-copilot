@@ -211,7 +211,7 @@ export default function RouteSelector() {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col overflow-y-auto">
 
       {/* ================================ */}
       {/* HERO SECTION */}
@@ -221,15 +221,29 @@ export default function RouteSelector() {
           heroMounted ? 'opacity-100' : 'opacity-0'
         }`}
       >
-        {/* TODO: Replace with AI-generated hero image */}
-        {/* Layered background for depth */}
+        {/* Hero background image (falls back to gradient if image not found) */}
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage: `
+              linear-gradient(to bottom, rgba(10,10,20,0.3) 0%, rgba(10,10,20,0.85) 100%),
+              url('/images/hero-road.jpg')
+            `,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundColor: '#0a0a1a'
+          }}
+        />
+
+        {/* Fallback gradient (shows through if image not loaded) */}
         <div
           className="absolute inset-0"
           style={{
             background: `
               radial-gradient(ellipse at 50% 0%, rgba(0, 212, 255, 0.15) 0%, transparent 50%),
               linear-gradient(135deg, #0a0a1a 0%, #0f1a2e 40%, #0a1628 70%, #0a0a1a 100%)
-            `
+            `,
+            mixBlendMode: 'multiply'
           }}
         />
 
@@ -380,7 +394,9 @@ export default function RouteSelector() {
             onClick={() => setLogbookExpanded(!logbookExpanded)}
             className="w-full p-4 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
           >
-            <span className="text-lg">📖</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2" className="opacity-70">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
             <div className="flex-1 text-left">
               <span className="text-white/80 text-sm font-medium">{logbookStats.rank}</span>
               <span className="text-white/30 mx-2">·</span>
@@ -440,8 +456,19 @@ export default function RouteSelector() {
               <div className="pt-2 border-t border-white/5">
                 <p className="text-white/30 text-[10px] uppercase mb-2" style={{ letterSpacing: '0.1em' }}>Recent Badges</p>
                 <div className="flex gap-2 text-xs text-white/60">
-                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg">🌙 Night Owl</span>
-                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg">🔁 Repeat Driver</span>
+                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                    Night Owl
+                  </span>
+                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg flex items-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    Repeat Driver
+                  </span>
                 </div>
               </div>
             </div>
