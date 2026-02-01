@@ -1,19 +1,42 @@
 // ================================
-// Simple Zone Classifier v5.0
-// 
+// Simple Zone Classifier v5.1
+//
 // SIMPLE RULES:
-// 1. Interstate/US Highway → TRANSIT (always, regardless of urban context)
-// 2. State Route → TECHNICAL  
-// 3. Local Road → TECHNICAL
-// 4. Gaps after/before highways → TECHNICAL (ramps)
-// 5. Tiny transit segments (<0.5mi) surrounded by non-transit → absorb
-// 6. POST-PROCESS: Urban overlay - TECHNICAL in major cities → URBAN
+// 1. Highway-grade names (Turnpike, Expressway, etc.) → TRANSIT (always)
+// 2. Interstate/US Highway → TRANSIT (always, regardless of urban context)
+// 3. State Route → TECHNICAL
+// 4. Local Road → TECHNICAL
+// 5. Gaps after/before highways → TECHNICAL (ramps)
+// 6. Tiny transit segments (<0.5mi) surrounded by non-transit → absorb
+// 7. POST-PROCESS: Urban overlay - TECHNICAL in major cities → URBAN
 //
 // Key principle: TRANSIT (highway) is NEVER changed to URBAN
 // Only TECHNICAL zones can become URBAN based on city context
 // ================================
 
 import { detectUrbanSections, applyUrbanOverlay } from './urbanDetectionService'
+
+// Highway-grade name patterns (these are always TRANSIT regardless of Mapbox road type)
+// Matches roads like "Concord Turnpike", "Southeast Expressway", etc.
+const HIGHWAY_GRADE_PATTERNS = [
+  /turnpike/i,
+  /expressway/i,
+  /freeway/i,
+  /parkway/i,
+  /thruway/i,
+  /\bpike\b/i,           // Mass Pike, etc.
+  /\bI-\d+/i,            // I-90, I-95, etc.
+  /interstate\s*\d+/i,   // Interstate 90, etc.
+]
+
+/**
+ * Check if a road name indicates highway-grade infrastructure
+ * e.g., "Concord Turnpike" should be TRANSIT even if Mapbox says state_route
+ */
+function isHighwayGradeName(roadName) {
+  if (!roadName) return false
+  return HIGHWAY_GRADE_PATTERNS.some(pattern => pattern.test(roadName))
+}
 
 /**
  * Main entry: Classify zones from road segments
@@ -165,20 +188,30 @@ export function classifyByRoadName(roadSegments, totalMiles, curves = []) {
  */
 function classifyRoad(segment) {
   const roadClass = segment.roadClass || 'unknown'
-  
+  const roadName = segment.name || ''
+  const roadRef = segment.ref || ''
+
+  // FIRST: Check if the road name indicates highway-grade infrastructure
+  // e.g., "Concord Turnpike" (MA 2) should be TRANSIT even though it's a state_route
+  if (isHighwayGradeName(roadName)) {
+    console.log(`   🛣️ ${roadRef || roadName}: TRANSIT (highway-grade name: "${roadName}")`)
+    return 'transit'
+  }
+
+  // THEN: Fall through to normal road class logic
   switch (roadClass) {
     case 'interstate':
       return 'transit'
-    
+
     case 'us_highway':
       return 'transit'
-    
+
     case 'state_route':
       return 'technical'
-    
+
     case 'local':
       return 'technical'
-    
+
     default:
       return 'technical'
   }
