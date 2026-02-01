@@ -217,44 +217,66 @@ export default function RouteSelector() {
       {/* HERO SECTION */}
       {/* ================================ */}
       <div
-        className={`relative flex-shrink-0 min-h-[50vh] flex flex-col items-center justify-center px-6 transition-all duration-500 ease-out ${
-          heroMounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+        className={`relative flex-shrink-0 min-h-[50vh] flex flex-col items-center justify-center px-6 transition-all duration-700 ease-out ${
+          heroMounted ? 'opacity-100' : 'opacity-0'
         }`}
       >
         {/* TODO: Replace with AI-generated hero image */}
+        {/* Layered background for depth */}
         <div
           className="absolute inset-0"
           style={{
-            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)'
+            background: `
+              radial-gradient(ellipse at 50% 0%, rgba(0, 212, 255, 0.15) 0%, transparent 50%),
+              linear-gradient(135deg, #0a0a1a 0%, #0f1a2e 40%, #0a1628 70%, #0a0a1a 100%)
+            `
           }}
         />
 
-        {/* Dark overlay gradient */}
+        {/* Vignette overlay (darker edges) */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.4) 100%)'
+          }}
+        />
+
+        {/* Bottom fade to content */}
         <div
           className="absolute inset-0"
           style={{
-            background: 'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.7) 100%)'
+            background: 'linear-gradient(to bottom, transparent 60%, rgba(10,10,15,0.8) 85%, #0a0a0f 100%)'
           }}
         />
 
-        {/* Accent glow */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] rounded-full opacity-30 blur-[100px] pointer-events-none"
-          style={{ background: 'radial-gradient(circle, #00d4ff 0%, transparent 70%)' }}
-        />
-
-        {/* Content */}
-        <div className="relative z-10 text-center">
-          <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-widest mb-3">
+        {/* Hero Content */}
+        <div
+          className={`relative z-10 text-center transition-all duration-700 ease-out ${
+            heroMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+          }`}
+        >
+          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3" style={{ letterSpacing: '0.15em' }}>
             RALLY CO-PILOT
           </h1>
-          <p className="text-white/60 text-sm sm:text-base font-light tracking-wide mb-8">
+          <p className="text-white/50 text-sm sm:text-base font-light mb-8" style={{ letterSpacing: '0.05em' }}>
             Know the road before you see it
           </p>
 
           <button
             onClick={handleStartDrive}
             disabled={!hasLocation}
-            className="group px-8 py-4 rounded-2xl bg-[#00d4ff] text-black font-bold text-lg tracking-wider flex items-center gap-3 mx-auto transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,212,255,0.4)] active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+            className="group px-8 py-4 rounded-2xl text-black font-bold text-lg flex items-center gap-3 mx-auto transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0"
+            style={{
+              background: 'linear-gradient(135deg, #00d4ff 0%, #00a8cc 100%)',
+              boxShadow: '0 4px 20px rgba(0, 212, 255, 0.3), 0 0 40px rgba(0, 212, 255, 0.1)',
+              letterSpacing: '0.1em'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = '0 6px 25px rgba(0, 212, 255, 0.4), 0 0 50px rgba(0, 212, 255, 0.15)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 212, 255, 0.3), 0 0 40px rgba(0, 212, 255, 0.1)'
+            }}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="5 3 19 12 5 21"/>
@@ -275,22 +297,23 @@ export default function RouteSelector() {
       {/* ================================ */}
       {/* ROUTE CARDS ROW */}
       {/* ================================ */}
-      <div className="px-4 -mt-6 relative z-10">
+      <div
+        className={`px-4 -mt-6 relative z-10 transition-all duration-700 ease-out ${
+          heroMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+        }`}
+        style={{ transitionDelay: '100ms' }}
+      >
         <div className="flex gap-3">
           {/* Recent Card */}
           <button
             onClick={() => recentRoutes?.length > 0 ? setShowRecentList(true) : handleStartDrive()}
-            className="flex-1 p-4 rounded-2xl backdrop-blur-md border transition-all hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.98]"
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              borderColor: 'rgba(255, 255, 255, 0.1)'
-            }}
+            className="glass-card flex-1 p-4 rounded-2xl transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98]"
           >
             <div className="flex items-center gap-2 mb-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
                 <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
               </svg>
-              <span className="text-[10px] font-bold text-white/50 tracking-wider">RECENT</span>
+              <span className="text-[10px] font-semibold text-white/50" style={{ letterSpacing: '0.1em' }}>RECENT</span>
             </div>
             <div className="text-left">
               {recentRoutes?.length > 0 ? (
@@ -313,17 +336,13 @@ export default function RouteSelector() {
           <button
             onClick={() => favoriteRoutes?.length > 0 ? setShowFavoritesList(true) : null}
             disabled={!favoriteRoutes?.length}
-            className="flex-1 p-4 rounded-2xl backdrop-blur-md border transition-all hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.98] disabled:opacity-60 disabled:hover:border-white/10"
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              borderColor: 'rgba(255, 255, 255, 0.1)'
-            }}
+            className="glass-card flex-1 p-4 rounded-2xl transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:opacity-60 disabled:hover:translate-y-0"
           >
             <div className="flex items-center gap-2 mb-2">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="2">
                 <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
               </svg>
-              <span className="text-[10px] font-bold text-white/50 tracking-wider">FAVORITES</span>
+              <span className="text-[10px] font-semibold text-white/50" style={{ letterSpacing: '0.1em' }}>FAVORITES</span>
             </div>
             <div className="text-left">
               {favoriteRoutes?.length > 0 ? (
@@ -345,18 +364,21 @@ export default function RouteSelector() {
       {/* ================================ */}
       {/* LOGBOOK BAR */}
       {/* ================================ */}
-      <div className="px-4 mt-4">
+      <div
+        className={`px-4 mt-4 transition-all duration-700 ease-out ${
+          heroMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+        }`}
+        style={{ transitionDelay: '200ms' }}
+      >
         <div
-          className="rounded-2xl backdrop-blur-md border overflow-hidden transition-all"
-          style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            borderColor: 'rgba(255, 255, 255, 0.1)'
-          }}
+          className={`glass-card rounded-2xl overflow-hidden transition-all duration-200 ${
+            logbookExpanded ? 'border-l-[3px] border-l-[#00d4ff]' : ''
+          }`}
         >
           {/* Collapsed header */}
           <button
             onClick={() => setLogbookExpanded(!logbookExpanded)}
-            className="w-full p-4 flex items-center gap-3 hover:bg-white/[0.03] transition-colors"
+            className="w-full p-4 flex items-center gap-3 hover:bg-white/[0.02] transition-colors"
           >
             <span className="text-lg">📖</span>
             <div className="flex-1 text-left">
@@ -368,7 +390,7 @@ export default function RouteSelector() {
             </div>
             <svg
               width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              className={`text-white/30 transition-transform duration-200 ${logbookExpanded ? 'rotate-180' : ''}`}
+              className={`text-white/30 transition-transform duration-300 ${logbookExpanded ? 'rotate-180' : ''}`}
             >
               <path d="M6 9l6 6 6-6"/>
             </svg>
@@ -376,7 +398,7 @@ export default function RouteSelector() {
 
           {/* Expanded content */}
           <div
-            className={`overflow-hidden transition-all duration-200 ease-out ${
+            className={`overflow-hidden transition-all duration-300 ease-out ${
               logbookExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
             }`}
           >
@@ -391,21 +413,24 @@ export default function RouteSelector() {
                 </div>
                 <div className="h-2 bg-white/10 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-[#00d4ff] to-[#00d4ff]/70 rounded-full transition-all"
-                    style={{ width: `${(logbookStats.totalMiles / logbookStats.nextRankMiles) * 100}%` }}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${(logbookStats.totalMiles / logbookStats.nextRankMiles) * 100}%`,
+                      background: 'linear-gradient(90deg, #00d4ff 0%, #00a8cc 100%)'
+                    }}
                   />
                 </div>
               </div>
 
               {/* Stats boxes */}
               <div className="flex gap-3 mb-3">
-                <div className="flex-1 p-3 rounded-xl bg-white/5">
-                  <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">This Week</p>
+                <div className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                  <p className="text-white/40 text-[10px] uppercase mb-1" style={{ letterSpacing: '0.1em' }}>This Week</p>
                   <p className="text-white font-bold text-lg">{logbookStats.weekMiles} mi</p>
                   <p className="text-emerald-400 text-xs">{logbookStats.weekChange}</p>
                 </div>
-                <div className="flex-1 p-3 rounded-xl bg-white/5">
-                  <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">All Time</p>
+                <div className="flex-1 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                  <p className="text-white/40 text-[10px] uppercase mb-1" style={{ letterSpacing: '0.1em' }}>All Time</p>
                   <p className="text-white font-bold text-lg">{logbookStats.totalMiles} mi</p>
                   <p className="text-white/40 text-xs">{logbookStats.routeCount} routes</p>
                 </div>
@@ -413,10 +438,10 @@ export default function RouteSelector() {
 
               {/* Badges placeholder */}
               <div className="pt-2 border-t border-white/5">
-                <p className="text-white/30 text-[10px] uppercase tracking-wider mb-2">Recent Badges</p>
+                <p className="text-white/30 text-[10px] uppercase mb-2" style={{ letterSpacing: '0.1em' }}>Recent Badges</p>
                 <div className="flex gap-2 text-xs text-white/60">
-                  <span className="px-2 py-1 bg-white/5 rounded-lg">🌙 Night Owl</span>
-                  <span className="px-2 py-1 bg-white/5 rounded-lg">🔁 Repeat Driver</span>
+                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg">🌙 Night Owl</span>
+                  <span className="px-2 py-1 bg-white/[0.03] border border-white/5 rounded-lg">🔁 Repeat Driver</span>
                 </div>
               </div>
             </div>
@@ -427,10 +452,15 @@ export default function RouteSelector() {
       {/* ================================ */}
       {/* QUICK ACTIONS (Import, Plan Trip) */}
       {/* ================================ */}
-      <div className="px-4 mt-4 flex gap-3">
+      <div
+        className={`px-4 mt-4 flex gap-3 transition-all duration-700 ease-out ${
+          heroMounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'
+        }`}
+        style={{ transitionDelay: '300ms' }}
+      >
         <button
           onClick={() => setShowImport(true)}
-          className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 text-white/60 hover:bg-white/[0.08] hover:text-white/80 transition-all active:scale-[0.98]"
+          className="glass-card flex-1 p-3 rounded-xl flex items-center justify-center gap-2 text-white/50 hover:text-white/70 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98]"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -441,7 +471,7 @@ export default function RouteSelector() {
         <button
           onClick={() => setShowTripBuilder(true)}
           disabled={!hasLocation}
-          className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 text-white/60 hover:bg-white/[0.08] hover:text-white/80 transition-all active:scale-[0.98] disabled:opacity-50"
+          className="glass-card flex-1 p-3 rounded-xl flex items-center justify-center gap-2 text-white/50 hover:text-white/70 transition-all duration-200 hover:-translate-y-0.5 active:scale-[0.98] disabled:opacity-50 disabled:hover:translate-y-0"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/>
@@ -459,11 +489,11 @@ export default function RouteSelector() {
       {/* ================================ */}
       <button
         onClick={toggleSettings}
-        className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:bg-white/15 hover:text-white/70 transition-all z-20 safe-bottom"
+        className="fixed bottom-6 right-6 w-11 h-11 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-white/40 hover:bg-white/10 hover:text-white/70 hover:border-white/15 transition-all duration-200 z-20 safe-bottom"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="3"/>
-          <path d="M12 1v4m0 14v4M1 12h4m14 0h4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
       </button>
 
@@ -581,6 +611,18 @@ export default function RouteSelector() {
 
       <style>{`
         .safe-bottom { margin-bottom: env(safe-area-inset-bottom, 0px); }
+
+        .glass-card {
+          background: rgba(255, 255, 255, 0.03);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-card:hover:not(:disabled) {
+          background: rgba(255, 255, 255, 0.05);
+          border-color: rgba(255, 255, 255, 0.12);
+        }
       `}</style>
     </div>
   )
