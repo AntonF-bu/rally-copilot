@@ -4,16 +4,16 @@ import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 import { geocodeAddress } from '../services/routeService'
 
 // ================================
-// Route Selection Screen - v3
-// Clean redesign, fixed recent routes
-// Removed: Demo mode, Look-ahead mode
+// Route Selection Screen - v4
+// Premium redesign: Hero + Cards + Logbook
 // ================================
 
 export default function RouteSelector() {
-  const { 
-    setRouteMode, 
-    setShowRouteSelector, 
+  const {
+    setRouteMode,
+    setShowRouteSelector,
     setShowRoutePreview,
+    toggleSettings,
     position,
     setPosition,
     clearRouteData,
@@ -23,13 +23,19 @@ export default function RouteSelector() {
     removeFavoriteRoute,
     clearRecentRoutes,
   } = useStore()
-  
+
   const { initDestinationRoute, initImportedRoute, initMultiStopRoute } = useRouteAnalysis()
 
-  const [activeTab, setActiveTab] = useState('new')
+  // UI State
   const [showDestination, setShowDestination] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showTripBuilder, setShowTripBuilder] = useState(false)
+  const [showRecentList, setShowRecentList] = useState(false)
+  const [showFavoritesList, setShowFavoritesList] = useState(false)
+  const [logbookExpanded, setLogbookExpanded] = useState(false)
+  const [heroMounted, setHeroMounted] = useState(false)
+
+  // Search/Loading state
   const [destination, setDestination] = useState('')
   const [importUrl, setImportUrl] = useState('')
   const [searchResults, setSearchResults] = useState([])
@@ -38,6 +44,13 @@ export default function RouteSelector() {
   const [error, setError] = useState(null)
   const [hasLocation, setHasLocation] = useState(false)
 
+  // Hero mount animation
+  useEffect(() => {
+    const timer = setTimeout(() => setHeroMounted(true), 50)
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Get location on mount
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -54,6 +67,7 @@ export default function RouteSelector() {
     }
   }, [setPosition])
 
+  // Geocode search
   useEffect(() => {
     if (!destination || destination.length < 3) {
       setSearchResults([])
@@ -68,10 +82,11 @@ export default function RouteSelector() {
     return () => clearTimeout(timeout)
   }, [destination])
 
+  // Route handlers
   const handleSelectDestination = async (dest) => {
     setError(null)
     setIsLoading(true)
-    
+
     if (!hasLocation) {
       setError('Cannot get your current location. Please enable location services.')
       setIsLoading(false)
@@ -82,7 +97,7 @@ export default function RouteSelector() {
       clearRouteData()
       setRouteMode('destination')
       const success = await initDestinationRoute(dest.name)
-      
+
       if (success) {
         setShowDestination(false)
         setShowRouteSelector(false)
@@ -106,7 +121,7 @@ export default function RouteSelector() {
       clearRouteData()
       setRouteMode('destination')
       const success = await initDestinationRoute(route.destination || route.name)
-      
+
       if (success) {
         setShowRouteSelector(false)
         setShowRoutePreview(true)
@@ -123,7 +138,7 @@ export default function RouteSelector() {
 
   const handleImport = async () => {
     if (!importUrl.trim()) return
-    
+
     setError(null)
     setIsLoading(true)
 
@@ -131,7 +146,7 @@ export default function RouteSelector() {
       clearRouteData()
       setRouteMode('imported')
       const result = await initImportedRoute(importUrl)
-      
+
       if (result === true) {
         setShowImport(false)
         setShowRouteSelector(false)
@@ -159,7 +174,7 @@ export default function RouteSelector() {
       clearRouteData()
       setRouteMode('multistop')
       const success = await initMultiStopRoute(coords)
-      
+
       if (success) {
         setShowRouteSelector(false)
         setShowRoutePreview(true)
@@ -174,17 +189,8 @@ export default function RouteSelector() {
     }
   }
 
-  const timeAgo = (timestamp) => {
-    if (!timestamp) return ''
-    const seconds = Math.floor((Date.now() - timestamp) / 1000)
-    if (seconds < 60) return 'Just now'
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}m ago`
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h ago`
-    const days = Math.floor(hours / 24)
-    if (days < 7) return `${days}d ago`
-    return new Date(timestamp).toLocaleDateString()
+  const handleStartDrive = () => {
+    setShowDestination(true)
   }
 
   const formatDist = (meters) => {
@@ -193,48 +199,277 @@ export default function RouteSelector() {
     return miles < 10 ? `${miles.toFixed(1)} mi` : `${Math.round(miles)} mi`
   }
 
+  // Placeholder logbook stats (will wire up real data later)
+  const logbookStats = {
+    rank: 'Road Scout',
+    totalMiles: 847,
+    nextRank: 'Pace Setter',
+    nextRankMiles: 1000,
+    routeCount: 23,
+    weekMiles: 124,
+    weekChange: '+18%',
+  }
+
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col">
-      
-      {/* Top spacer for browser/notch */}
-      <div className="h-8 flex-shrink-0 safe-top" />
-      
-      {/* Header - New Clean Design */}
-      <div className="relative pt-4 pb-8 px-6">
-        {/* Background accent */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[300px] rounded-full opacity-20 blur-[80px]"
-            style={{ background: 'radial-gradient(circle, #00d4ff 0%, transparent 70%)' }}
-          />
-        </div>
-        
-        {/* Logo and Title */}
-        <div className="relative flex items-center gap-4">
-          {/* Logo Icon */}
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-cyan-500/5 border border-cyan-500/20 flex items-center justify-center">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              {/* Steering wheel / road icon */}
-              <circle cx="12" cy="12" r="9" stroke="#00d4ff" strokeWidth="1.5" fill="none"/>
-              <circle cx="12" cy="12" r="3" stroke="#00d4ff" strokeWidth="1.5" fill="none"/>
-              <path d="M12 3v6M12 15v6M3 12h6M15 12h6" stroke="#00d4ff" strokeWidth="1.5" strokeLinecap="round"/>
+    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col overflow-hidden">
+
+      {/* ================================ */}
+      {/* HERO SECTION */}
+      {/* ================================ */}
+      <div
+        className={`relative flex-shrink-0 min-h-[50vh] flex flex-col items-center justify-center px-6 transition-all duration-500 ease-out ${
+          heroMounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+        }`}
+      >
+        {/* TODO: Replace with AI-generated hero image */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)'
+          }}
+        />
+
+        {/* Dark overlay gradient */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.7) 100%)'
+          }}
+        />
+
+        {/* Accent glow */}
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] rounded-full opacity-30 blur-[100px] pointer-events-none"
+          style={{ background: 'radial-gradient(circle, #00d4ff 0%, transparent 70%)' }}
+        />
+
+        {/* Content */}
+        <div className="relative z-10 text-center">
+          <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-widest mb-3">
+            RALLY CO-PILOT
+          </h1>
+          <p className="text-white/60 text-sm sm:text-base font-light tracking-wide mb-8">
+            Know the road before you see it
+          </p>
+
+          <button
+            onClick={handleStartDrive}
+            disabled={!hasLocation}
+            className="group px-8 py-4 rounded-2xl bg-[#00d4ff] text-black font-bold text-lg tracking-wider flex items-center gap-3 mx-auto transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,212,255,0.4)] active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21"/>
             </svg>
+            START DRIVE
+          </button>
+
+          {/* GPS Status */}
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <div className={`w-2 h-2 rounded-full transition-colors ${hasLocation ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
+            <span className="text-white/40 text-xs">
+              {hasLocation ? 'GPS ready' : 'Acquiring GPS...'}
+            </span>
           </div>
-          
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold text-white tracking-tight">Rally Co-Pilot</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <div className={`w-2 h-2 rounded-full transition-colors ${hasLocation ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
-              <p className="text-white/50 text-sm">
-                {hasLocation ? 'Ready to navigate' : 'Acquiring GPS...'}
-              </p>
+        </div>
+      </div>
+
+      {/* ================================ */}
+      {/* ROUTE CARDS ROW */}
+      {/* ================================ */}
+      <div className="px-4 -mt-6 relative z-10">
+        <div className="flex gap-3">
+          {/* Recent Card */}
+          <button
+            onClick={() => recentRoutes?.length > 0 ? setShowRecentList(true) : handleStartDrive()}
+            className="flex-1 p-4 rounded-2xl backdrop-blur-md border transition-all hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.98]"
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+              </svg>
+              <span className="text-[10px] font-bold text-white/50 tracking-wider">RECENT</span>
+            </div>
+            <div className="text-left">
+              {recentRoutes?.length > 0 ? (
+                <>
+                  <p className="text-white font-medium text-sm truncate">
+                    {recentRoutes[0].name || recentRoutes[0].destination || 'Unknown route'}
+                  </p>
+                  <p className="text-white/40 text-xs mt-0.5">{recentRoutes.length} drive{recentRoutes.length !== 1 ? 's' : ''}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-white/50 text-sm">No recent drives</p>
+                  <p className="text-white/30 text-xs mt-0.5">Start your first route</p>
+                </>
+              )}
+            </div>
+          </button>
+
+          {/* Favorites Card */}
+          <button
+            onClick={() => favoriteRoutes?.length > 0 ? setShowFavoritesList(true) : null}
+            disabled={!favoriteRoutes?.length}
+            className="flex-1 p-4 rounded-2xl backdrop-blur-md border transition-all hover:border-white/20 hover:bg-white/[0.08] active:scale-[0.98] disabled:opacity-60 disabled:hover:border-white/10"
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              borderColor: 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="2">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span className="text-[10px] font-bold text-white/50 tracking-wider">FAVORITES</span>
+            </div>
+            <div className="text-left">
+              {favoriteRoutes?.length > 0 ? (
+                <>
+                  <p className="text-white font-medium text-sm">{favoriteRoutes.length} saved</p>
+                  <p className="text-white/40 text-xs mt-0.5">Tap to view</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-white/50 text-sm">No favorites yet</p>
+                  <p className="text-white/30 text-xs mt-0.5">Save routes to access here</p>
+                </>
+              )}
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* ================================ */}
+      {/* LOGBOOK BAR */}
+      {/* ================================ */}
+      <div className="px-4 mt-4">
+        <div
+          className="rounded-2xl backdrop-blur-md border overflow-hidden transition-all"
+          style={{
+            background: 'rgba(255, 255, 255, 0.05)',
+            borderColor: 'rgba(255, 255, 255, 0.1)'
+          }}
+        >
+          {/* Collapsed header */}
+          <button
+            onClick={() => setLogbookExpanded(!logbookExpanded)}
+            className="w-full p-4 flex items-center gap-3 hover:bg-white/[0.03] transition-colors"
+          >
+            <span className="text-lg">📖</span>
+            <div className="flex-1 text-left">
+              <span className="text-white/80 text-sm font-medium">{logbookStats.rank}</span>
+              <span className="text-white/30 mx-2">·</span>
+              <span className="text-white/50 text-sm">{logbookStats.totalMiles} mi</span>
+              <span className="text-white/30 mx-2">·</span>
+              <span className="text-white/50 text-sm">{logbookStats.routeCount} routes</span>
+            </div>
+            <svg
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              className={`text-white/30 transition-transform duration-200 ${logbookExpanded ? 'rotate-180' : ''}`}
+            >
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
+
+          {/* Expanded content */}
+          <div
+            className={`overflow-hidden transition-all duration-200 ease-out ${
+              logbookExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'
+            }`}
+          >
+            <div className="px-4 pb-4 border-t border-white/5">
+              {/* Rank progress */}
+              <div className="pt-4 pb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-white font-semibold">{logbookStats.rank}</span>
+                  <span className="text-white/40 text-xs">
+                    {logbookStats.totalMiles} / {logbookStats.nextRankMiles} mi to {logbookStats.nextRank}
+                  </span>
+                </div>
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#00d4ff] to-[#00d4ff]/70 rounded-full transition-all"
+                    style={{ width: `${(logbookStats.totalMiles / logbookStats.nextRankMiles) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Stats boxes */}
+              <div className="flex gap-3 mb-3">
+                <div className="flex-1 p-3 rounded-xl bg-white/5">
+                  <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">This Week</p>
+                  <p className="text-white font-bold text-lg">{logbookStats.weekMiles} mi</p>
+                  <p className="text-emerald-400 text-xs">{logbookStats.weekChange}</p>
+                </div>
+                <div className="flex-1 p-3 rounded-xl bg-white/5">
+                  <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">All Time</p>
+                  <p className="text-white font-bold text-lg">{logbookStats.totalMiles} mi</p>
+                  <p className="text-white/40 text-xs">{logbookStats.routeCount} routes</p>
+                </div>
+              </div>
+
+              {/* Badges placeholder */}
+              <div className="pt-2 border-t border-white/5">
+                <p className="text-white/30 text-[10px] uppercase tracking-wider mb-2">Recent Badges</p>
+                <div className="flex gap-2 text-xs text-white/60">
+                  <span className="px-2 py-1 bg-white/5 rounded-lg">🌙 Night Owl</span>
+                  <span className="px-2 py-1 bg-white/5 rounded-lg">🔁 Repeat Driver</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
+      {/* ================================ */}
+      {/* QUICK ACTIONS (Import, Plan Trip) */}
+      {/* ================================ */}
+      <div className="px-4 mt-4 flex gap-3">
+        <button
+          onClick={() => setShowImport(true)}
+          className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 text-white/60 hover:bg-white/[0.08] hover:text-white/80 transition-all active:scale-[0.98]"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span className="text-sm font-medium">Import</span>
+        </button>
+        <button
+          onClick={() => setShowTripBuilder(true)}
+          disabled={!hasLocation}
+          className="flex-1 p-3 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 text-white/60 hover:bg-white/[0.08] hover:text-white/80 transition-all active:scale-[0.98] disabled:opacity-50"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/>
+            <path d="M6 8v8a2 2 0 0 0 2 2h8"/><path d="M8 6h8"/>
+          </svg>
+          <span className="text-sm font-medium">Plan Trip</span>
+        </button>
+      </div>
+
+      {/* Spacer */}
+      <div className="flex-1" />
+
+      {/* ================================ */}
+      {/* SETTINGS BUTTON (fixed bottom-right) */}
+      {/* ================================ */}
+      <button
+        onClick={toggleSettings}
+        className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-white/50 hover:bg-white/15 hover:text-white/70 transition-all z-20 safe-bottom"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v4m0 14v4M1 12h4m14 0h4M4.22 4.22l2.83 2.83m9.9 9.9l2.83 2.83M4.22 19.78l2.83-2.83m9.9-9.9l2.83-2.83"/>
+        </svg>
+      </button>
+
       {/* Error Banner */}
       {error && (
-        <div className="mx-4 mb-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between">
+        <div className="fixed top-12 left-4 right-4 z-50 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-between backdrop-blur-sm">
           <p className="text-red-400 text-sm flex-1">{error}</p>
           <button onClick={() => setError(null)} className="text-red-400/60 p-1 ml-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -244,237 +479,9 @@ export default function RouteSelector() {
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <div className="px-4 mb-4">
-        <div className="flex bg-white/5 rounded-2xl p-1.5">
-          {[
-            { id: 'new', label: 'New Route', icon: (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-            )},
-            { id: 'recent', label: 'Recent', count: recentRoutes?.length || 0, icon: (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-              </svg>
-            )},
-            { id: 'favorites', label: 'Saved', count: favoriteRoutes?.length || 0, icon: (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-              </svg>
-            )},
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
-                activeTab === tab.id 
-                  ? 'bg-white/10 text-white' 
-                  : 'text-white/40 hover:text-white/60'
-              }`}
-            >
-              <span className={activeTab === tab.id ? 'text-cyan-400' : ''}>{tab.icon}</span>
-              <span className="hidden sm:inline">{tab.label}</span>
-              {tab.count > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                  activeTab === tab.id ? 'bg-cyan-500/30 text-cyan-400' : 'bg-white/10 text-white/40'
-                }`}>
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 px-4 pb-4 overflow-auto">
-        
-        {/* NEW ROUTE TAB */}
-        {activeTab === 'new' && (
-          <div className="flex flex-col gap-3">
-            {/* Set Destination */}
-            <button
-              onClick={() => setShowDestination(true)}
-              disabled={!hasLocation}
-              className="group p-4 rounded-2xl bg-gradient-to-br from-white/[0.07] to-white/[0.02] border border-white/10 flex items-center gap-4 active:scale-[0.98] transition-all disabled:opacity-50 hover:border-cyan-500/30"
-            >
-              <div className="w-12 h-12 rounded-xl bg-cyan-500/15 flex items-center justify-center group-hover:bg-cyan-500/25 transition-colors">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
-                  <circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
-                </svg>
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-white font-semibold">Set Destination</div>
-                <div className="text-white/40 text-sm">Search for a place to navigate to</div>
-              </div>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20 group-hover:text-cyan-500/50 transition-colors">
-                <path d="M9 18l6-6-6-6"/>
-              </svg>
-            </button>
-
-            {/* Plan Trip */}
-            <button
-              onClick={() => setShowTripBuilder(true)}
-              disabled={!hasLocation}
-              className="group p-4 rounded-2xl bg-gradient-to-br from-white/[0.07] to-white/[0.02] border border-white/10 flex items-center gap-4 active:scale-[0.98] transition-all disabled:opacity-50 hover:border-emerald-500/30"
-            >
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/15 flex items-center justify-center group-hover:bg-emerald-500/25 transition-colors">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
-                  <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/>
-                  <path d="M6 8v8a2 2 0 0 0 2 2h8"/><path d="M8 6h8"/>
-                </svg>
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-white font-semibold">Plan Trip</div>
-                <div className="text-white/40 text-sm">Multiple stops, custom route</div>
-              </div>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20 group-hover:text-emerald-500/50 transition-colors">
-                <path d="M9 18l6-6-6-6"/>
-              </svg>
-            </button>
-
-            {/* Import Route */}
-            <button
-              onClick={() => setShowImport(true)}
-              className="group p-4 rounded-2xl bg-gradient-to-br from-white/[0.07] to-white/[0.02] border border-white/10 flex items-center gap-4 active:scale-[0.98] transition-all hover:border-purple-500/30"
-            >
-              <div className="w-12 h-12 rounded-xl bg-purple-500/15 flex items-center justify-center group-hover:bg-purple-500/25 transition-colors">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-              </div>
-              <div className="flex-1 text-left">
-                <div className="text-white font-semibold">Import Route</div>
-                <div className="text-white/40 text-sm">Paste Google Maps link</div>
-              </div>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20 group-hover:text-purple-500/50 transition-colors">
-                <path d="M9 18l6-6-6-6"/>
-              </svg>
-            </button>
-          </div>
-        )}
-
-        {/* RECENT ROUTES TAB */}
-        {activeTab === 'recent' && (
-          <div className="flex flex-col gap-2">
-            {(!recentRoutes || recentRoutes.length === 0) ? (
-              <div className="text-center py-16">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" className="opacity-20">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-                  </svg>
-                </div>
-                <p className="text-white/40 text-sm font-medium">No recent routes</p>
-                <p className="text-white/20 text-xs mt-1">Routes you navigate will appear here</p>
-              </div>
-            ) : (
-              <>
-                {/* Clear all button when at max */}
-                {recentRoutes.length >= 10 && (
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-white/30 text-xs">{recentRoutes.length} routes (max)</span>
-                    <button 
-                      onClick={clearRecentRoutes}
-                      className="text-xs text-red-400/60 hover:text-red-400 transition-colors"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                )}
-                
-                {recentRoutes.map((route) => (
-                  <div key={route.id} className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
-                    <button
-                      onClick={() => handleSelectSavedRoute(route)}
-                      disabled={isLoading}
-                      className="flex-1 flex items-center gap-3 text-left disabled:opacity-50"
-                    >
-                      <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2">
-                          <circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-white text-sm font-medium truncate">{route.name || route.destination || 'Unknown'}</div>
-                        <div className="flex items-center gap-2 text-white/30 text-xs">
-                          <span>{formatDist(route.distance)}</span>
-                          <span>•</span>
-                          <span>{route.curveCount || 0} curves</span>
-                          {route.timestamp && (
-                            <>
-                              <span>•</span>
-                              <span>{timeAgo(route.timestamp)}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => removeRecentRoute(route.id)}
-                      className="p-2 text-white/20 hover:text-white/50 transition-colors"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* FAVORITES TAB */}
-        {activeTab === 'favorites' && (
-          <div className="flex flex-col gap-2">
-            {(!favoriteRoutes || favoriteRoutes.length === 0) ? (
-              <div className="text-center py-16">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-white/5 flex items-center justify-center">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" className="opacity-20">
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                  </svg>
-                </div>
-                <p className="text-white/40 text-sm font-medium">No saved routes</p>
-                <p className="text-white/20 text-xs mt-1">Tap the bookmark icon to save routes</p>
-              </div>
-            ) : (
-              favoriteRoutes.map((route) => (
-                <div key={route.id} className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
-                  <button
-                    onClick={() => handleSelectSavedRoute(route)}
-                    disabled={isLoading}
-                    className="flex-1 flex items-center gap-3 text-left disabled:opacity-50"
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="2">
-                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-white text-sm font-medium truncate">{route.name}</div>
-                      <div className="flex items-center gap-2 text-white/30 text-xs">
-                        <span>{formatDist(route.distance)}</span>
-                        <span>•</span>
-                        <span>{route.curveCount || 0} curves</span>
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => removeFavoriteRoute(route.id)}
-                    className="p-2 text-amber-500/50 hover:text-amber-500 transition-colors"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2">
-                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                    </svg>
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+      {/* ================================ */}
+      {/* MODALS */}
+      {/* ================================ */}
 
       {/* Destination Search Modal */}
       {showDestination && (
@@ -504,11 +511,11 @@ export default function RouteSelector() {
                 </svg>
               </button>
             </div>
-            
+
             <p className="text-white/50 text-sm mb-4">
               Paste a Google Maps URL to import that route. Use the full URL from your browser's address bar.
             </p>
-            
+
             <input
               type="text"
               value={importUrl}
@@ -516,7 +523,7 @@ export default function RouteSelector() {
               placeholder="https://www.google.com/maps/dir/..."
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 mb-4"
             />
-            
+
             <button
               onClick={handleImport}
               disabled={!importUrl.trim() || isLoading}
@@ -542,9 +549,38 @@ export default function RouteSelector() {
         />
       )}
 
+      {/* Recent Routes List Modal */}
+      {showRecentList && (
+        <RouteListModal
+          title="Recent Drives"
+          routes={recentRoutes}
+          onSelect={handleSelectSavedRoute}
+          onRemove={removeRecentRoute}
+          onClearAll={clearRecentRoutes}
+          onClose={() => setShowRecentList(false)}
+          isLoading={isLoading}
+          formatDist={formatDist}
+          accentColor="#00d4ff"
+        />
+      )}
+
+      {/* Favorites List Modal */}
+      {showFavoritesList && (
+        <RouteListModal
+          title="Favorites"
+          routes={favoriteRoutes}
+          onSelect={handleSelectSavedRoute}
+          onRemove={removeFavoriteRoute}
+          onClose={() => setShowFavoritesList(false)}
+          isLoading={isLoading}
+          formatDist={formatDist}
+          accentColor="#f59e0b"
+          isFavorites
+        />
+      )}
+
       <style>{`
-        .safe-top { padding-top: env(safe-area-inset-top, 20px); }
-        .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        .safe-bottom { margin-bottom: env(safe-area-inset-bottom, 0px); }
       `}</style>
     </div>
   )
@@ -558,7 +594,7 @@ function SearchModal({ title, placeholder, value, onChange, onClose, results, is
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
       <div className="absolute inset-0 bg-[#0a0a0f]/95 backdrop-blur-md" />
-      
+
       <div className="relative flex-1 flex flex-col p-4 pt-14 safe-top">
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
@@ -569,7 +605,7 @@ function SearchModal({ title, placeholder, value, onChange, onClose, results, is
           </button>
           <h2 className="text-xl font-bold text-white">{title}</h2>
         </div>
-        
+
         {/* Search Input */}
         <div className="relative mb-4">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30">
@@ -589,7 +625,7 @@ function SearchModal({ title, placeholder, value, onChange, onClose, results, is
             </div>
           )}
         </div>
-        
+
         {/* Results */}
         <div className="flex-1 overflow-auto">
           {results.length > 0 ? (
@@ -626,6 +662,107 @@ function SearchModal({ title, placeholder, value, onChange, onClose, results, is
           )}
         </div>
       </div>
+      <style>{`.safe-top { padding-top: env(safe-area-inset-top, 20px); }`}</style>
+    </div>
+  )
+}
+
+
+// ================================
+// Route List Modal Component
+// ================================
+function RouteListModal({ title, routes, onSelect, onRemove, onClearAll, onClose, isLoading, formatDist, accentColor, isFavorites }) {
+  const timeAgo = (timestamp) => {
+    if (!timestamp) return ''
+    const seconds = Math.floor((Date.now() - timestamp) / 1000)
+    if (seconds < 60) return 'Just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    if (days < 7) return `${days}d ago`
+    return new Date(timestamp).toLocaleDateString()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col">
+      <div className="absolute inset-0 bg-[#0a0a0f]/95 backdrop-blur-md" />
+
+      <div className="relative flex-1 flex flex-col p-4 pt-14 safe-top">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="p-2 -ml-2 text-white/60 hover:text-white">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
+              </svg>
+            </button>
+            <h2 className="text-xl font-bold text-white">{title}</h2>
+          </div>
+          {onClearAll && routes?.length >= 5 && (
+            <button
+              onClick={onClearAll}
+              className="text-xs text-red-400/60 hover:text-red-400 transition-colors px-3 py-1"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+
+        {/* Routes */}
+        <div className="flex-1 overflow-auto">
+          <div className="flex flex-col gap-2">
+            {routes?.map((route) => (
+              <div key={route.id} className="p-3 rounded-xl bg-white/[0.03] border border-white/5 flex items-center gap-3 hover:bg-white/[0.05] transition-colors">
+                <button
+                  onClick={() => onSelect(route)}
+                  disabled={isLoading}
+                  className="flex-1 flex items-center gap-3 text-left disabled:opacity-50"
+                >
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                    style={{ background: `${accentColor}15` }}
+                  >
+                    {isFavorites ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill={accentColor} stroke={accentColor} strokeWidth="2">
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2">
+                        <circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
+                      </svg>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium truncate">{route.name || route.destination || 'Unknown'}</div>
+                    <div className="flex items-center gap-2 text-white/30 text-xs">
+                      <span>{formatDist(route.distance)}</span>
+                      <span>•</span>
+                      <span>{route.curveCount || 0} curves</span>
+                      {route.timestamp && !isFavorites && (
+                        <>
+                          <span>•</span>
+                          <span>{timeAgo(route.timestamp)}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => onRemove(route.id)}
+                  className="p-2 text-white/20 hover:text-white/50 transition-colors"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <style>{`.safe-top { padding-top: env(safe-area-inset-top, 20px); }`}</style>
     </div>
   )
 }
@@ -673,7 +810,7 @@ function TripBuilderModal({ onClose, onCreateRoute, isLoading, currentPosition }
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
       <div className="absolute inset-0 bg-[#0a0a0f]/95 backdrop-blur-md" />
-      
+
       <div className="relative flex-1 flex flex-col p-4 pt-14 safe-top">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
@@ -770,6 +907,7 @@ function TripBuilderModal({ onClose, onCreateRoute, isLoading, currentPosition }
           </button>
         </div>
       </div>
+      <style>{`.safe-top { padding-top: env(safe-area-inset-top, 20px); }`}</style>
     </div>
   )
 }
