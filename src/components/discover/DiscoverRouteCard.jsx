@@ -1,22 +1,24 @@
 // Route card for Discover tab
 // Shows map preview, route info, tags, and save button
 
-export function DiscoverRouteCard({ route, isSaved, onSave, onSelect }) {
+export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }) {
   // Generate Mapbox Static Image URL
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
-  const startCoord = `${route.start.lng},${route.start.lat}`
-  const endCoord = `${route.end.lng},${route.end.lat}`
+  const hasValidToken = mapboxToken && mapboxToken.length > 10
 
-  // Markers for start (A) and end (B) points
-  const markers = `pin-s-a+00d4ff(${startCoord}),pin-s-b+ff9500(${endCoord})`
+  // Build static map URL if token exists
+  let staticMapUrl = null
+  if (hasValidToken) {
+    const startCoord = `${route.start.lng},${route.start.lat}`
+    const endCoord = `${route.end.lng},${route.end.lat}`
+    const markers = `pin-s-a+00d4ff(${startCoord}),pin-s-b+ff9500(${endCoord})`
+    const centerLng = (route.start.lng + route.end.lng) / 2
+    const centerLat = (route.start.lat + route.end.lat) / 2
+    staticMapUrl = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
+  }
 
-  // Center between the two points
-  const centerLng = (route.start.lng + route.end.lng) / 2
-  const centerLat = (route.start.lat + route.end.lat) / 2
-
-  const staticMapUrl = mapboxToken
-    ? `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
-    : null
+  // Gradient fallback when no map preview available
+  const gradientFallback = 'linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(15,26,46,0.9) 50%, rgba(10,10,20,1) 100%)'
 
   const difficultyColors = {
     easy: { bg: 'rgba(0, 255, 136, 0.15)', text: '#00ff88' },
@@ -37,27 +39,37 @@ export function DiscoverRouteCard({ route, isSaved, onSave, onSelect }) {
       {/* Map Preview */}
       <button
         onClick={() => onSelect?.(route)}
-        className="w-full h-36 bg-cover bg-center relative"
+        className="w-full h-36 bg-cover bg-center relative overflow-hidden"
         style={{
-          backgroundImage: staticMapUrl ? `url(${staticMapUrl})` : 'none',
-          backgroundColor: 'rgba(255,255,255,0.05)',
+          backgroundImage: staticMapUrl ? `url(${staticMapUrl})` : gradientFallback,
+          backgroundColor: '#0a0a1a',
         }}
       >
+        {/* Overlay gradient for text readability */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(to bottom, transparent 50%, rgba(10,10,15,0.8) 100%)'
+          }}
+        />
+
+        {/* Route line indicator when no map */}
         {!staticMapUrl && (
           <div className="absolute inset-0 flex items-center justify-center">
-            {/* Map icon placeholder */}
-            <svg
-              width="32"
-              height="32"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="rgba(255,255,255,0.2)"
-              strokeWidth="1.5"
-            >
-              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-              <line x1="8" y1="2" x2="8" y2="18" />
-              <line x1="16" y1="6" x2="16" y2="22" />
-            </svg>
+            {/* Stylized route indicator */}
+            <div className="flex items-center gap-3">
+              {/* Start dot */}
+              <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-lg shadow-cyan-400/50" />
+              {/* Dashed line */}
+              <div
+                className="w-20 h-0.5"
+                style={{
+                  background: 'repeating-linear-gradient(90deg, rgba(0,212,255,0.5) 0px, rgba(0,212,255,0.5) 8px, transparent 8px, transparent 12px)'
+                }}
+              />
+              {/* End dot */}
+              <div className="w-3 h-3 rounded-full bg-orange-400 shadow-lg shadow-orange-400/50" />
+            </div>
           </div>
         )}
       </button>
@@ -153,7 +165,8 @@ export function DiscoverRouteCard({ route, isSaved, onSave, onSelect }) {
           {/* Save Button */}
           <button
             onClick={() => onSave(route)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full transition-all"
+            disabled={isSaving}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full transition-all disabled:opacity-70"
             style={{
               background: isSaved
                 ? 'rgba(0, 212, 255, 0.2)'
@@ -164,20 +177,32 @@ export function DiscoverRouteCard({ route, isSaved, onSave, onSelect }) {
               color: isSaved ? '#00d4ff' : 'rgba(255,255,255,0.8)',
             }}
           >
-            {/* Heart icon */}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill={isSaved ? '#00d4ff' : 'none'}
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-            </svg>
-            <span className="text-sm">
-              {isSaved ? 'Saved' : 'Save'}
-            </span>
+            {isSaving ? (
+              <>
+                {/* Spinner */}
+                <div
+                  className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+                />
+                <span className="text-sm">Saving...</span>
+              </>
+            ) : (
+              <>
+                {/* Heart icon */}
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill={isSaved ? '#00d4ff' : 'none'}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                </svg>
+                <span className="text-sm">
+                  {isSaved ? 'Saved' : 'Save'}
+                </span>
+              </>
+            )}
           </button>
         </div>
       </div>
