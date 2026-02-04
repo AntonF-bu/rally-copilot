@@ -17,16 +17,6 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
     staticMapUrl = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
   }
 
-  // DEBUG: Log token and URL status (remove after debugging)
-  console.log('=== Map Debug ===')
-  console.log('Token available:', !!mapboxToken)
-  console.log('Token length:', mapboxToken?.length || 0)
-  console.log('Has valid token:', hasValidToken)
-  console.log('Static URL:', staticMapUrl)
-
-  // Gradient fallback when no map preview available
-  const gradientFallback = 'linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(15,26,46,0.9) 50%, rgba(10,10,20,1) 100%)'
-
   const difficultyColors = {
     easy: { bg: 'rgba(0, 255, 136, 0.15)', text: '#00ff88' },
     moderate: { bg: 'rgba(255, 170, 0, 0.15)', text: '#ffaa00' },
@@ -46,23 +36,28 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
       {/* Map Preview */}
       <button
         onClick={() => onSelect?.(route)}
-        className="w-full h-36 bg-cover bg-center relative overflow-hidden"
-        style={{
-          backgroundImage: staticMapUrl ? `url(${staticMapUrl})` : gradientFallback,
-          backgroundColor: '#0a0a1a',
-        }}
+        className="w-full h-36 relative overflow-hidden"
+        style={{ backgroundColor: '#0a0a1a' }}
       >
-        {/* Overlay gradient for text readability */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background: 'linear-gradient(to bottom, transparent 50%, rgba(10,10,15,0.8) 100%)'
-          }}
-        />
-
-        {/* Route line indicator when no map */}
-        {!staticMapUrl && (
-          <div className="absolute inset-0 flex items-center justify-center">
+        {/* Map image or fallback */}
+        {staticMapUrl ? (
+          <img
+            src={staticMapUrl}
+            alt={`Map of ${route.name}`}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              // Hide image on error, fallback will show
+              e.target.style.display = 'none'
+            }}
+          />
+        ) : (
+          /* Gradient fallback with route indicator */
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            style={{
+              background: 'linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(15,26,46,0.9) 50%, rgba(10,10,20,1) 100%)'
+            }}
+          >
             {/* Stylized route indicator */}
             <div className="flex items-center gap-3">
               {/* Start dot */}
@@ -79,13 +74,15 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
             </div>
           </div>
         )}
-      </button>
 
-      {/* DEBUG: Visible debug info (remove after debugging) */}
-      <div className="p-2 bg-red-900/50 text-[10px] text-red-300 break-all">
-        Token: {mapboxToken ? `YES (${mapboxToken.length} chars)` : 'NO'} |
-        URL: {staticMapUrl ? staticMapUrl.substring(0, 60) + '...' : 'none'}
-      </div>
+        {/* Overlay gradient for text readability */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to bottom, transparent 50%, rgba(10,10,15,0.8) 100%)'
+          }}
+        />
+      </button>
 
       {/* Content */}
       <div className="p-4">
