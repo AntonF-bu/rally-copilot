@@ -17,6 +17,13 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
     staticMapUrl = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
   }
 
+  // DEBUG: Log token and URL status (remove after debugging)
+  console.log('=== Map Debug ===')
+  console.log('Token available:', !!mapboxToken)
+  console.log('Token length:', mapboxToken?.length || 0)
+  console.log('Has valid token:', hasValidToken)
+  console.log('Static URL:', staticMapUrl)
+
   // Gradient fallback when no map preview available
   const gradientFallback = 'linear-gradient(135deg, rgba(0,212,255,0.15) 0%, rgba(15,26,46,0.9) 50%, rgba(10,10,20,1) 100%)'
 
@@ -73,6 +80,12 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
           </div>
         )}
       </button>
+
+      {/* DEBUG: Visible debug info (remove after debugging) */}
+      <div className="p-2 bg-red-900/50 text-[10px] text-red-300 break-all">
+        Token: {mapboxToken ? `YES (${mapboxToken.length} chars)` : 'NO'} |
+        URL: {staticMapUrl ? staticMapUrl.substring(0, 60) + '...' : 'none'}
+      </div>
 
       {/* Content */}
       <div className="p-4">
