@@ -6,16 +6,15 @@ import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
 import { DiscoverFilters } from '../discover/DiscoverFilters'
 import { DiscoverRouteCard } from '../discover/DiscoverRouteCard'
+import { RouteDetailView } from '../discover/RouteDetailView'
 
 export function DiscoverTab() {
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
-  const [savingRouteId, setSavingRouteId] = useState(null)
+  const [selectedRoute, setSelectedRoute] = useState(null)
 
-  // Get favorites from store
+  // Get favorites from store (for showing saved indicator on cards)
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
-  const addFavoriteRoute = useStore((state) => state.addFavoriteRoute)
-  const removeFavoriteRoute = useStore((state) => state.removeFavoriteRoute)
 
   const handleVibeToggle = (vibeId) => {
     setSelectedVibes((prev) =>
@@ -55,76 +54,8 @@ export function DiscoverTab() {
     return favoriteRoutes.some((fav) => fav.discoveryId === routeId || fav.id === routeId)
   }
 
-  const handleSaveRoute = async (route) => {
-    if (isRouteSaved(route.id)) {
-      // Find and remove from favorites
-      const existing = favoriteRoutes.find(
-        (fav) => fav.discoveryId === route.id || fav.id === route.id
-      )
-      if (existing) {
-        removeFavoriteRoute(existing.id)
-      }
-    } else {
-      // Show saving indicator
-      setSavingRouteId(route.id)
-
-      // Fetch route geometry from Mapbox if not already present
-      let geometry = route.geometry
-      let fetchedDistance = null
-      let fetchedDuration = null
-
-      if (!geometry) {
-        const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
-        if (mapboxToken) {
-          try {
-            // Build coordinates: start -> waypoints -> end
-            const coords = [
-              `${route.start.lng},${route.start.lat}`,
-              ...(route.waypoints || []).map(wp => `${wp.lng},${wp.lat}`),
-              `${route.end.lng},${route.end.lat}`,
-            ].join(';')
-
-            const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
-            const response = await fetch(url)
-            const data = await response.json()
-
-            if (data.routes?.[0]) {
-              geometry = data.routes[0].geometry
-              fetchedDistance = data.routes[0].distance // in meters
-              fetchedDuration = data.routes[0].duration // in seconds
-            }
-          } catch (err) {
-            console.error('Failed to fetch route geometry:', err)
-          }
-        }
-      }
-
-      // Add to favorites with geometry
-      const favoriteRoute = {
-        name: route.name,
-        destination: route.end.label,
-        origin: route.start.label,
-        distance: fetchedDistance || route.distance * 1609.34,
-        duration: fetchedDuration || route.duration * 60,
-        discoveryId: route.id,
-        isDiscoveryRoute: true,
-        // Store route geometry for consistent routing
-        geometry: geometry,
-        // Store coordinates for re-routing
-        startCoords: [route.start.lng, route.start.lat],
-        endCoords: [route.end.lng, route.end.lat],
-        waypoints: route.waypoints || [],
-        // Store original route data
-        discoveryData: route,
-      }
-      addFavoriteRoute(favoriteRoute)
-      setSavingRouteId(null)
-    }
-  }
-
   const handleSelectRoute = (route) => {
-    // TODO: Navigate to route preview with this route
-    console.log('Selected route:', route)
+    setSelectedRoute(route)
   }
 
   const clearFilters = () => {
@@ -180,8 +111,6 @@ export function DiscoverTab() {
                 key={route.id}
                 route={route}
                 isSaved={isRouteSaved(route.id)}
-                isSaving={savingRouteId === route.id}
-                onSave={handleSaveRoute}
                 onSelect={handleSelectRoute}
               />
             ))}
@@ -214,6 +143,14 @@ export function DiscoverTab() {
           </div>
         )}
       </div>
+
+      {/* Route Detail View */}
+      {selectedRoute && (
+        <RouteDetailView
+          route={selectedRoute}
+          onClose={() => setSelectedRoute(null)}
+        />
+      )}
     </div>
   )
 }

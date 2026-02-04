@@ -1,7 +1,7 @@
 // Route card for Discover tab
-// Shows map preview, route info, tags, and save button
+// Tappable preview card that opens route detail view
 
-export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }) {
+export function DiscoverRouteCard({ route, isSaved, onSelect }) {
   // Generate Mapbox Static Image URL
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const hasValidToken = mapboxToken && mapboxToken.length > 10
@@ -26,16 +26,18 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
   const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
 
   return (
-    <div
-      className="rounded-2xl overflow-hidden"
+    <button
+      onClick={() => onSelect?.(route)}
+      className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.98]"
       style={{
         background: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
+        border: isSaved
+          ? '1px solid rgba(0, 212, 255, 0.3)'
+          : '1px solid rgba(255, 255, 255, 0.08)',
       }}
     >
       {/* Map Preview */}
-      <button
-        onClick={() => onSelect?.(route)}
+      <div
         className="w-full h-36 relative overflow-hidden"
         style={{ backgroundColor: '#0a0a1a' }}
       >
@@ -82,7 +84,30 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
             background: 'linear-gradient(to bottom, transparent 50%, rgba(10,10,15,0.8) 100%)'
           }}
         />
-      </button>
+
+        {/* Saved indicator */}
+        {isSaved && (
+          <div
+            className="absolute top-2 right-2 px-2 py-1 rounded-full flex items-center gap-1"
+            style={{
+              background: 'rgba(0, 212, 255, 0.2)',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="#00d4ff"
+              stroke="#00d4ff"
+              strokeWidth="2"
+            >
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+            <span className="text-xs" style={{ color: '#00d4ff' }}>Saved</span>
+          </div>
+        )}
+      </div>
 
       {/* Content */}
       <div className="p-4">
@@ -126,7 +151,7 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
         )}
 
         {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
+        <div className="flex flex-wrap gap-1.5 mb-3">
           {route.tags.map((tag) => (
             <span
               key={tag}
@@ -150,72 +175,24 @@ export function DiscoverRouteCard({ route, isSaved, isSaving, onSave, onSelect }
           </span>
         </div>
 
-        {/* Bottom Row: Claim teaser + Save button */}
-        <div className="flex items-center justify-between">
-          {/* Claim Teaser */}
-          <div
-            className="flex items-center gap-1.5 text-sm"
-            style={{ color: 'rgba(255,255,255,0.3)' }}
+        {/* Tap hint */}
+        <div
+          className="flex items-center justify-end gap-1 text-xs"
+          style={{ color: 'rgba(255,255,255,0.3)' }}
+        >
+          <span>Tap to view</span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
           >
-            {/* Lock icon */}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-            <span>{route.claimedBy || 'Unclaimed'}</span>
-          </div>
-
-          {/* Save Button */}
-          <button
-            onClick={() => onSave(route)}
-            disabled={isSaving}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full transition-all disabled:opacity-70"
-            style={{
-              background: isSaved
-                ? 'rgba(0, 212, 255, 0.2)'
-                : 'rgba(255, 255, 255, 0.08)',
-              border: isSaved
-                ? '1px solid rgba(0, 212, 255, 0.5)'
-                : '1px solid rgba(255, 255, 255, 0.1)',
-              color: isSaved ? '#00d4ff' : 'rgba(255,255,255,0.8)',
-            }}
-          >
-            {isSaving ? (
-              <>
-                {/* Spinner */}
-                <div
-                  className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
-                />
-                <span className="text-sm">Saving...</span>
-              </>
-            ) : (
-              <>
-                {/* Heart icon */}
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill={isSaved ? '#00d4ff' : 'none'}
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                </svg>
-                <span className="text-sm">
-                  {isSaved ? 'Saved' : 'Save'}
-                </span>
-              </>
-            )}
-          </button>
+            <path d="M9 18l6-6-6-6" />
+          </svg>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
