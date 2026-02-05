@@ -73,7 +73,6 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   const [selectedCurve, setSelectedCurve] = useState(null)
   const [showCurveList, setShowCurveList] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
-  const [aiSectionCollapsed, setAiSectionCollapsed] = useState(true)
 
   // Download state
   const [isDownloading, setIsDownloading] = useState(false)
@@ -420,27 +419,28 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
       <div ref={mapContainerRef} className="absolute inset-0" />
 
       {/* TOP BAR */}
-      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent" style={{ paddingTop: 'env(safe-area-inset-top, 12px)' }}>
-        <div className="flex items-center justify-between p-2 pt-3">
+      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent" style={{ paddingTop: 'env(safe-area-inset-top, 8px)' }}>
+        {/* Row 1: Icon buttons */}
+        <div className="flex items-center justify-between px-2 pt-2">
           {/* Left: Navigation + Map controls */}
-          <div className="flex items-center gap-1.5">
-            <button onClick={onBack} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
+          <div className="flex items-center gap-1">
+            <button onClick={onBack} className="w-8 h-8 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
             </button>
-            <button onClick={toggleStyle} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+            <button onClick={toggleStyle} className="w-8 h-8 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                 {mapStyle === 'dark' ? <><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></> : <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>}
               </svg>
             </button>
             <button
               onClick={toggleSleeve}
-              className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
+              className="w-8 h-8 rounded-full flex items-center justify-center transition-all"
               style={{
                 background: showSleeve ? colors.accentGlow : 'rgba(0,0,0,0.7)',
                 border: `1px solid ${showSleeve ? colors.accent + '80' : 'rgba(255,255,255,0.1)'}`,
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? colors.accent : 'white'} strokeWidth="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? colors.accent : 'white'} strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <path d="M3 9h18M9 21V9"/>
               </svg>
@@ -448,50 +448,51 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
             {hasHighwaySections && highwayBends?.length > 0 && (
               <button
                 onClick={toggleHighwayBends}
-                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showHighwayBends ? 'bg-blue-500/20 border border-blue-500/50' : 'bg-black/70 border border-white/10'}`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${showHighwayBends ? 'bg-blue-500/20 border border-blue-500/50' : 'bg-black/70 border border-white/10'}`}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showHighwayBends ? HIGHWAY_BEND_COLOR : 'white'} strokeWidth="2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={showHighwayBends ? HIGHWAY_BEND_COLOR : 'white'} strokeWidth="2">
                   <path d="M4 19h16M4 15l4-8h8l4 8"/>
                 </svg>
               </button>
             )}
           </div>
 
-          {/* Center: Route stats (clickable to show curve list) */}
-          <button onClick={() => setShowCurveList(true)} className="flex items-center gap-2 px-3 py-1 rounded-full bg-black/50 border border-white/10 hover:bg-white/5 transition-all">
-            <span className="text-white font-bold">{routeStats.distance}</span>
-            <span className="text-white/50 text-xs">{routeStats.distanceUnit}</span>
-            <span className="text-white/30">•</span>
-            <span className="text-white font-bold">{routeStats.curves}</span>
-            <span className="text-white/50 text-xs">curves</span>
-            <span className="text-white/30">•</span>
-            <span className="text-red-400 font-bold">{routeStats.sharpCurves}</span>
-            <span className="text-white/50 text-xs">sharp</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" className="opacity-40"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
-
-          {/* Right: Route info badges + favorite */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-bold px-2 py-1 rounded-full"
+          {/* Right: Badges + favorite */}
+          <div className="flex items-center gap-1">
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full"
               style={{
                 background: selectedMode === HIGHWAY_MODE.COMPANION ? 'rgba(251,191,36,0.2)' : 'rgba(249,115,22,0.2)',
                 color: selectedMode === HIGHWAY_MODE.COMPANION ? '#FBBF24' : '#F97316'
               }}>
-              {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMPANION' : 'BASIC'}
+              {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMP' : 'BASIC'}
             </span>
-            <div className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
-              <span className="text-[10px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
+            <div className="px-1.5 py-0.5 rounded-full bg-black/70 border border-white/10 flex items-center gap-0.5">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2"><path d="M2 22L12 2l10 20H2z"/></svg>
+              <span className="text-[9px] text-white/80">{isLoadingElevation ? '...' : `${elevationGain}${settings.units === 'metric' ? 'm' : 'ft'}`}</span>
             </div>
-            <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: `${difficultyRating.color}30`, color: difficultyRating.color }}>
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: `${difficultyRating.color}30`, color: difficultyRating.color }}>
               {difficultyRating.label}
             </span>
             {routeData?.name && (
-              <button onClick={handleToggleFavorite} className={`w-9 h-9 rounded-full flex items-center justify-center border ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+              <button onClick={handleToggleFavorite} className={`w-8 h-8 rounded-full flex items-center justify-center border ${isRouteFavorite ? 'bg-amber-500/20 border-amber-500/30' : 'bg-black/70 border-white/10'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={isRouteFavorite ? '#f59e0b' : 'none'} stroke={isRouteFavorite ? '#f59e0b' : 'white'} strokeWidth="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
               </button>
             )}
           </div>
+        </div>
+
+        {/* Row 2: Stats pill (full width) */}
+        <div className="px-2 pt-1.5 pb-1">
+          <button onClick={() => setShowCurveList(true)} className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded-full bg-black/50 border border-white/10 hover:bg-white/5 transition-all">
+            <span className="text-white font-bold text-[11px]">{routeStats.distance}</span>
+            <span className="text-white/50 text-[10px]">{routeStats.distanceUnit}</span>
+            <span className="text-white/30">·</span>
+            <span className="text-white font-bold text-[11px]">{routeStats.curves}</span>
+            <span className="text-white/50 text-[10px]">curves</span>
+            <span className="text-white/30">·</span>
+            <span className="text-red-400 font-bold text-[11px]">{routeStats.sharpCurves}</span>
+            <span className="text-white/50 text-[10px]">sharp</span>
+          </button>
         </div>
       </div>
 
@@ -517,12 +518,13 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
 
       {/* BOTTOM BAR */}
       <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[#0a0a0f] to-transparent pt-8 pb-4 px-3">
-        {/* Route Character */}
-        {routeCharacter?.summary && (
-          <div className="flex items-center gap-2 mb-2 overflow-x-auto">
+        {/* Zone pills + Action buttons - single row */}
+        <div className="flex items-center justify-between mb-2">
+          {/* Left: Zone segment pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto flex-1 mr-2">
             {isLoadingCharacter ? (
-              <span className="text-[10px] text-white/40">Analyzing route...</span>
-            ) : (
+              <span className="text-[10px] text-white/40">Analyzing...</span>
+            ) : routeCharacter?.summary ? (
               <>
                 {Object.values(ROUTE_CHARACTER).map(char => {
                   const data = routeCharacter.summary.byCharacter[char]
@@ -541,82 +543,19 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
                 {highwayBends?.length > 0 && (
                   <span className="flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-medium whitespace-nowrap"
                     style={{ background: `${HIGHWAY_BEND_COLOR}20`, color: HIGHWAY_BEND_COLOR, border: `1px solid ${HIGHWAY_BEND_COLOR}40` }}>
-                    {highwayBends.length} highway curves
+                    {highwayBends.length} hwy curves
                   </span>
                 )}
               </>
-            )}
+            ) : null}
           </div>
-        )}
 
-        {/* AI Co-Driver widget */}
-        {curveEnhanced && agentResult && (
-          <div className="mb-2">
-            <button onClick={() => setAiSectionCollapsed(!aiSectionCollapsed)}
-              className="flex items-center gap-2 px-2.5 py-1.5 bg-black/70 rounded-lg border border-emerald-500/30 hover:border-emerald-500/50 transition-all">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-              <span className="text-[10px] text-emerald-400 font-semibold">AI Co-Driver</span>
-              <span className="text-[9px] text-white/40">{curatedCallouts?.length || 0} callouts</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className={`text-white/40 transition-transform ${aiSectionCollapsed ? '' : 'rotate-180'}`}>
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </button>
-
-            {!aiSectionCollapsed && (
-              <div className="mt-2 p-2.5 bg-black/80 rounded-lg border border-emerald-500/20 max-w-md">
-                <div className="text-[10px] text-white/70 leading-relaxed mb-2">
-                  {agentResult.summary?.summary || 'Route analyzed'}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {curatedCallouts?.slice(0, 20).map((callout, i) => {
-                    const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
-                    let color = '#22c55e'
-                    if (angle >= 70) color = '#ef4444'
-                    else if (angle >= 45) color = '#f97316'
-
-                    const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
-                    const text = callout.text || ''
-                    let shortText = ''
-
-                    if (isGrouped) {
-                      if (text.toLowerCase().includes('hairpin')) shortText = text.includes('DOUBLE') ? '2xHP' : 'HP'
-                      else if (text.toLowerCase().includes('chicane')) shortText = 'CHI'
-                      else shortText = `G${callout.groupedFrom.length}`
-                    } else {
-                      const dirMatch = text.match(/\b(left|right)\b/i)
-                      const angleMatch = text.match(/(\d+)/)
-                      shortText = dirMatch && angleMatch ? `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}` : text.substring(0, 6)
-                    }
-
-                    return (
-                      <button key={callout.id || i}
-                        onClick={() => {
-                          setSelectedCurve({ ...callout, isCuratedCallout: true })
-                          if (mapRef.current && callout.position) mapRef.current.flyTo({ center: callout.position, zoom: 14, pitch: 45, duration: 800 })
-                        }}
-                        className="px-1.5 py-0.5 rounded text-[9px] font-semibold"
-                        style={{ background: color, color: '#fff', border: isGrouped ? '2px solid #fff' : 'none' }}>
-                        {shortText}
-                      </button>
-                    )
-                  })}
-                  {curatedCallouts?.length > 20 && (
-                    <span className="px-1.5 py-0.5 text-[9px] text-white/40">+{curatedCallouts.length - 20} more</span>
-                  )}
-                </div>
-              </div>
-            )}
+          {/* Right: Action buttons */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <Btn icon="recenter" onClick={handleRecenter} tip="Recenter" />
+            <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
+            <Btn icon="share" onClick={handleShare} tip="Share" />
           </div>
-        )}
-
-        {/* Action buttons */}
-        <div className="flex items-center justify-end gap-1.5 mb-2">
-          {/* TODO: Re-enable edit button when zone editing is complete */}
-          {/* <Btn icon="edit" onClick={onEdit} tip="Edit" highlight={hasEdits} /> */}
-          <Btn icon="recenter" onClick={handleRecenter} tip="Recenter" />
-          <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
-          <Btn icon="share" onClick={handleShare} tip="Share" />
         </div>
 
         {/* Start button */}
