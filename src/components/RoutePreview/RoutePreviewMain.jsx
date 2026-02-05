@@ -31,8 +31,9 @@ import LoadingScreen from '../LoadingScreen'
 
 // Constants
 import { DEMO_START, DEMO_END, MAP_STYLES, MODE_COLORS } from './constants'
+import { colors } from '../../styles/theme'
 
-const HIGHWAY_BEND_COLOR = '#3b82f6'
+const HIGHWAY_BEND_COLOR = colors.highwayBend
 
 /**
  * RoutePreview - Refactored orchestrator
@@ -421,9 +422,13 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
             </button>
             <button
               onClick={toggleSleeve}
-              className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${showSleeve ? 'bg-cyan-500/20 border border-cyan-500/50' : 'bg-black/70 border border-white/10'}`}
+              className="w-9 h-9 rounded-full flex items-center justify-center transition-all"
+              style={{
+                background: showSleeve ? colors.accentGlow : 'rgba(0,0,0,0.7)',
+                border: `1px solid ${showSleeve ? colors.accent + '80' : 'rgba(255,255,255,0.1)'}`,
+              }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? '#00d4ff' : 'white'} strokeWidth="2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? colors.accent : 'white'} strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <path d="M3 9h18M9 21V9"/>
               </svg>

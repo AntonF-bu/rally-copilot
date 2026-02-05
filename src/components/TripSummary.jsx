@@ -1,12 +1,14 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import useStore from '../store'
+import { colors } from '../styles/theme'
 
 // ================================
 // Trip Summary - Premium Redesign
 // Strava-inspired with deeper insights
+// Refactored to use theme system
 // ================================
 
-// Zone colors
+// Zone colors for trip summary visualization
 const ZONE_COLORS = {
   urban: { primary: '#f59e0b', bg: '#f59e0b20' },
   transit: { primary: '#3b82f6', bg: '#3b82f620' },
@@ -15,15 +17,16 @@ const ZONE_COLORS = {
 
 export default function TripSummary() {
   const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, routeZones, settings } = useStore()
-  
+
   const summary = getTripSummary()
   const [animatedStats, setAnimatedStats] = useState({ distance: 0, avgSpeed: 0, maxSpeed: 0 })
   const [showDetails, setShowDetails] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
   const [shareSuccess, setShareSuccess] = useState(false)
   const shareCardRef = useRef(null)
-  
-  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+
+  // Mode colors - cyan for cruise is acceptable for mode visualization
+  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
   // Animate stats on mount

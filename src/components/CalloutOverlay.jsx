@@ -3,19 +3,17 @@ import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { useHighwayMode } from '../hooks/useHighwayMode'
+import { colors } from '../styles/theme'
 
 // ================================
 // Racing HUD - v12
 // NEW: Uses curated callouts from Preview
 // NEW: Urban zone support (pink color)
+// Refactored to use theme system
 // ================================
 
-// Zone colors - MUST match Preview and Map
-const ZONE_COLORS = {
-  technical: '#22d3ee',  // Cyan
-  transit: '#3b82f6',    // Blue
-  urban: '#f472b6'       // Pink
-}
+// Zone colors from theme
+const ZONE_COLORS = colors.zones
 
 // Character labels for zone badge
 const CHARACTER_LABELS = {
@@ -66,7 +64,8 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   }, [])
 
   const curve = activeCurve || upcomingCurves[0]
-  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+  // Mode colors - cyan for cruise is acceptable for mode visualization
+  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
   // Get current zone using userDistance

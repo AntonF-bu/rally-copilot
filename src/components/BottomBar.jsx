@@ -1,26 +1,29 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import useStore from '../store'
 import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
+import { colors } from '../styles/theme'
 
 // ================================
 // Bottom Bar - Navigation Controls - v3
 // With draggable progress slider for demo mode
+// Refactored to use theme system
 // ================================
 
 export default function BottomBar() {
-  const { 
+  const {
     isRunning, mode, setMode, settings, updateSettings, toggleSettings,
     goToMenu, goToPreview, endTrip, routeMode, gpsAccuracy,
     simulationSpeed, setSimulationSpeed, simulationPaused, toggleSimulationPaused,
     simulationProgress, setSimulationProgress, routeData
   } = useStore()
-  
+
   const { reroute } = useRouteAnalysis()
   const [isRerouting, setIsRerouting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const sliderRef = useRef(null)
 
-  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+  // Mode colors - cyan for cruise is acceptable for mode visualization
+  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
 
   const handleStop = () => endTrip()
   const handleBack = () => goToMenu()
@@ -124,34 +127,36 @@ export default function BottomBar() {
               onTouchEnd={handleTouchEnd}
             >
               {/* Track background */}
-              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-2 bg-white/10 rounded-full overflow-hidden">
+              <div className="absolute top-1/2 -translate-y-1/2 left-0 right-0 h-2 rounded-full overflow-hidden" style={{ background: colors.glassBorder }}>
                 {/* Progress fill */}
-                <div 
+                <div
                   className="h-full rounded-full transition-all"
-                  style={{ 
+                  style={{
                     width: `${progressPercent}%`,
-                    background: 'linear-gradient(90deg, #00d4ff, #00d4ff)',
+                    background: `linear-gradient(90deg, ${colors.accent}, ${colors.accentSoft})`,
                     transition: isDragging ? 'none' : 'width 0.3s ease-out'
                   }}
                 />
               </div>
-              
+
               {/* Draggable thumb */}
-              <div 
-                className="absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow-lg border-2 border-cyan-500 transition-transform"
-                style={{ 
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow-lg transition-transform"
+                style={{
                   left: `calc(${progressPercent}% - 10px)`,
                   transform: `translateY(-50%) scale(${isDragging ? 1.2 : 1})`,
-                  transition: isDragging ? 'transform 0.1s' : 'left 0.3s ease-out, transform 0.1s'
+                  transition: isDragging ? 'transform 0.1s' : 'left 0.3s ease-out, transform 0.1s',
+                  border: `2px solid ${colors.accent}`,
                 }}
               />
-              
+
               {/* Progress label */}
-              <div 
-                className="absolute -top-5 text-[10px] font-bold text-cyan-400 whitespace-nowrap"
-                style={{ 
+              <div
+                className="absolute -top-5 text-[10px] font-bold whitespace-nowrap"
+                style={{
                   left: `${progressPercent}%`,
-                  transform: 'translateX(-50%)'
+                  transform: 'translateX(-50%)',
+                  color: colors.accent,
                 }}
               >
                 {progressPercent}%
@@ -169,33 +174,33 @@ export default function BottomBar() {
           <div className="flex justify-center">
             <div className="inline-flex items-center gap-1 bg-black/70 backdrop-blur-xl rounded-full px-2 py-1 border border-white/10">
               {/* Pause/Play */}
-              <button 
+              <button
                 onClick={toggleSimulationPaused}
                 className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
               >
                 {simulationPaused ? (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill={colors.accent}>
                     <polygon points="5 3 19 12 5 21 5 3"/>
                   </svg>
                 ) : (
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#00d4ff">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill={colors.accent}>
                     <rect x="6" y="4" width="4" height="16" rx="1"/>
                     <rect x="14" y="4" width="4" height="16" rx="1"/>
                   </svg>
                 )}
               </button>
-              
+
               {/* Speed selector */}
               <div className="flex items-center gap-0.5 px-2 border-l border-white/10">
                 {speedOptions.map((spd) => (
                   <button
                     key={spd}
                     onClick={() => setSimulationSpeed(spd)}
-                    className={`px-2 py-1 rounded text-xs font-bold transition-all ${
-                      simulationSpeed === spd 
-                        ? 'bg-cyan-500 text-black' 
-                        : 'text-white/50 hover:text-white hover:bg-white/10'
-                    }`}
+                    className="px-2 py-1 rounded text-xs font-bold transition-all"
+                    style={{
+                      background: simulationSpeed === spd ? colors.accent : 'transparent',
+                      color: simulationSpeed === spd ? colors.bgDeep : colors.textSecondary,
+                    }}
                   >
                     {spd}x
                   </button>
@@ -236,8 +241,8 @@ export default function BottomBar() {
           {showReroute && (
             <button onClick={handleReroute} disabled={isRerouting}
               className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center disabled:opacity-50">
-              {isRerouting ? <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-                : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2"><path d="M21 12a9 9 0 11-9-9"/><polyline points="21 3 21 9 15 9"/></svg>}
+              {isRerouting ? <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: `${colors.accent} transparent transparent transparent` }} />
+                : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2"><path d="M21 12a9 9 0 11-9-9"/><polyline points="21 3 21 9 15 9"/></svg>}
             </button>
           )}
 
@@ -250,10 +255,10 @@ export default function BottomBar() {
           {/* Voice Toggle */}
           <button onClick={() => updateSettings({ voiceEnabled: !settings.voiceEnabled })}
             className="w-12 h-12 rounded-xl backdrop-blur-xl border flex items-center justify-center transition-all"
-            style={{ background: settings.voiceEnabled ? 'rgba(0,212,255,0.2)' : 'rgba(0,0,0,0.6)', borderColor: settings.voiceEnabled ? 'rgba(0,212,255,0.5)' : 'rgba(255,255,255,0.1)' }}>
-            {settings.voiceEnabled 
-              ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00d4ff" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-              : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>}
+            style={{ background: settings.voiceEnabled ? colors.accentGlow : 'rgba(0,0,0,0.6)', borderColor: settings.voiceEnabled ? colors.accent + '80' : 'rgba(255,255,255,0.1)' }}>
+            {settings.voiceEnabled
+              ? <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+              : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={colors.textSecondary} strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>}
           </button>
 
           {/* Settings Button */}
