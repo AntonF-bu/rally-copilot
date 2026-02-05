@@ -40,6 +40,7 @@ import RouteSelector from './components/RouteSelector'
 import RoutePreview from './components/RoutePreview'
 import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
+import AmbientBackground from './components/ui/AmbientBackground'
 
 // ================================
 // Rally Co-Pilot App - v22
@@ -516,12 +517,15 @@ export default function App() {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f]">
-      <Map />
-      <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
-      <BottomBar />
-      <SettingsPanel />
-      <VoiceIndicator />
+    <div className="fixed inset-0" style={{ background: 'var(--bg-deep)' }}>
+      <AmbientBackground />
+      <div className="relative z-[1] w-full h-full">
+        <Map />
+        <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
+        <BottomBar />
+        <SettingsPanel />
+        <VoiceIndicator />
+      </div>
     </div>
   )
 }
