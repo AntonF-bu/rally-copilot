@@ -11,7 +11,7 @@ import HighwayModeSettings from './HighwayModeSettings'
 // ================================
 
 export default function SettingsPanel() {
-  const { showSettings, toggleSettings, settings, updateSettings, mode, setMode } = useStore()
+  const { showSettings, toggleSettings, settings, updateSettings, mode, setMode, theme, setTheme } = useStore()
   const { speak } = useSpeech()
   const [testPlaying, setTestPlaying] = useState(false)
 
@@ -67,6 +67,29 @@ export default function SettingsPanel() {
         {/* Content */}
         <div className="px-5 py-4 max-h-[65vh] overflow-y-auto">
           
+          {/* Appearance Section */}
+          <Section title="APPEARANCE" icon="appearance">
+            <div className="grid grid-cols-2 gap-2">
+              <ThemeButton
+                active={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+                color={modeColor}
+                title="Dark"
+                icon="moon"
+              />
+              <ThemeButton
+                active={theme === 'light'}
+                onClick={() => setTheme('light')}
+                color={modeColor}
+                title="Light"
+                icon="sun"
+              />
+            </div>
+            <p className="text-white/30 text-xs mt-2">
+              Navigation HUD always uses dark mode for visibility
+            </p>
+          </Section>
+
           {/* Units Section */}
           <Section title="UNITS" icon="units">
             <div className="grid grid-cols-2 gap-2">
@@ -342,6 +365,19 @@ export default function SettingsPanel() {
 // Section component with SVG icons
 function Section({ title, icon, children }) {
   const icons = {
+    appearance: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="5"/>
+        <line x1="12" y1="1" x2="12" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/>
+        <line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+    ),
     units: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -430,13 +466,62 @@ function UnitButton({ active, onClick, color, title, subtitle }) {
         border: active ? `2px solid ${color}` : '2px solid transparent',
       }}
     >
-      <span 
+      <span
         className="text-lg font-bold"
         style={{ color: active ? color : 'rgba(255,255,255,0.6)' }}
       >
         {title}
       </span>
       <span className="text-xs text-white/40 mt-1">{subtitle}</span>
+    </button>
+  )
+}
+
+// Theme selection button
+function ThemeButton({ active, onClick, color, title, icon }) {
+  const icons = {
+    moon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    ),
+    sun: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="5"/>
+        <line x1="12" y1="1" x2="12" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="23"/>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/>
+        <line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+    ),
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center py-4 px-3 rounded-xl transition-all ${
+        active ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'
+      }`}
+      style={{
+        border: active ? `2px solid ${color}` : '2px solid transparent',
+      }}
+    >
+      <div
+        className="mb-2"
+        style={{ color: active ? color : 'rgba(255,255,255,0.5)' }}
+      >
+        {icons[icon]}
+      </div>
+      <span
+        className="text-sm font-bold"
+        style={{ color: active ? color : 'rgba(255,255,255,0.6)' }}
+      >
+        {title}
+      </span>
     </button>
   )
 }

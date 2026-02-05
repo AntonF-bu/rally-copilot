@@ -5,6 +5,83 @@
 @tailwind utilities;
 
 /* ================================
+   RALLY CO-PILOT v2 - Theme System
+   ================================ */
+
+/* Dark Theme (Default) */
+:root,
+[data-theme="dark"] {
+  /* Background */
+  --bg-app: #0a0a0f;
+  --bg-card: #141820;
+  --bg-input: rgba(255, 255, 255, 0.05);
+  --bg-input-hover: rgba(255, 255, 255, 0.08);
+
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-muted: rgba(255, 255, 255, 0.45);
+  --text-disabled: rgba(255, 255, 255, 0.25);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-active: rgba(255, 107, 53, 0.4);
+
+  /* Brand Accents */
+  --accent-primary: #FF6B35;
+  --accent-primary-muted: rgba(255, 107, 53, 0.2);
+  --accent-route: #00D4FF;
+  --accent-success: #4CAF50;
+  --accent-warning: #FF6B35;
+  --accent-danger: #FF3B3B;
+
+  /* Overlays */
+  --overlay-backdrop: rgba(0, 0, 0, 0.7);
+  --overlay-glass: rgba(0, 0, 0, 0.6);
+
+  /* Shadows */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 15px rgba(255, 107, 53, 0.1);
+}
+
+/* Light Theme */
+[data-theme="light"] {
+  /* Background */
+  --bg-app: #f5f5f7;
+  --bg-card: #ffffff;
+  --bg-input: rgba(0, 0, 0, 0.04);
+  --bg-input-hover: rgba(0, 0, 0, 0.08);
+
+  /* Text */
+  --text-primary: #1a1a1a;
+  --text-secondary: rgba(0, 0, 0, 0.7);
+  --text-muted: rgba(0, 0, 0, 0.5);
+  --text-disabled: rgba(0, 0, 0, 0.3);
+
+  /* Borders */
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.1);
+  --border-active: rgba(255, 107, 53, 0.5);
+
+  /* Brand Accents (same in both themes) */
+  --accent-primary: #FF6B35;
+  --accent-primary-muted: rgba(255, 107, 53, 0.15);
+  --accent-route: #00A8CC;
+  --accent-success: #2E7D32;
+  --accent-warning: #E65100;
+  --accent-danger: #D32F2F;
+
+  /* Overlays */
+  --overlay-backdrop: rgba(0, 0, 0, 0.5);
+  --overlay-glass: rgba(255, 255, 255, 0.8);
+
+  /* Shadows */
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 15px rgba(255, 107, 53, 0.15);
+}
+
+/* ================================
    RALLY CO-PILOT v2 - Minimal UI
    ================================ */
 * {
@@ -17,11 +94,11 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: #0a0a0f;
+  background: var(--bg-app);
 }
 body {
   font-family: 'Rajdhani', system-ui, -apple-system, sans-serif;
-  color: white;
+  color: var(--text-primary);
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
@@ -58,7 +135,7 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--text-disabled);
   border-radius: 2px;
 }
 /* ================================
@@ -80,10 +157,10 @@ body {
    Glass Effect
    ================================ */
 .glass {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-glass);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-subtle);
 }
 /* ================================
    Button States
@@ -105,7 +182,7 @@ input[type="range"] {
 }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 6px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-input);
   border-radius: 3px;
 }
 input[type="range"]::-webkit-slider-thumb {
@@ -113,21 +190,48 @@ input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   width: 20px;
   height: 20px;
-  background: #00d4ff;
+  background: var(--accent-route);
   border-radius: 50%;
   margin-top: -7px;
   box-shadow: 0 2px 10px rgba(0, 212, 255, 0.4);
 }
 input[type="range"]::-moz-range-track {
   height: 6px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-input);
   border-radius: 3px;
 }
 input[type="range"]::-moz-range-thumb {
   width: 20px;
   height: 20px;
-  background: #00d4ff;
+  background: var(--accent-route);
   border-radius: 50%;
   border: none;
   box-shadow: 0 2px 10px rgba(0, 212, 255, 0.4);
+}
+
+/* ================================
+   Theme Transition
+   ================================ */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Utility classes for themed components */
+.themed-bg {
+  background-color: var(--bg-app);
+}
+.themed-card {
+  background-color: var(--bg-card);
+}
+.themed-text {
+  color: var(--text-primary);
+}
+.themed-text-secondary {
+  color: var(--text-secondary);
+}
+.themed-text-muted {
+  color: var(--text-muted);
+}
+.themed-border {
+  border-color: var(--border-default);
 }

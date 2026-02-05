@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useLayoutEffect } from 'react'
 import useStore from './store'
+
+// Theme application hook - runs before render to prevent flash
+function useThemeSync() {
+  const theme = useStore((state) => state.theme)
+
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  return theme
+}
 import { useSimulation } from './hooks/useSimulation'
 import { useGeolocation } from './hooks/useGeolocation'
 import { useRouteAnalysis } from './hooks/useRouteAnalysis'
@@ -42,8 +53,11 @@ const CHARACTER_TO_MODE = {
 }
 
 export default function App() {
+  // Apply theme to document root
+  useThemeSync()
+
   const { speak, initAudio } = useSpeech()
-  
+
   const {
     isRunning,
     mode,

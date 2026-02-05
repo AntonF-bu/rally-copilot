@@ -4,6 +4,11 @@ import { persist } from 'zustand/middleware'
 const useStore = create(
   persist(
     (set, get) => ({
+      // Theme state - persisted at top level (affects entire app)
+      theme: 'dark',
+      setTheme: (theme) => set({ theme }),
+      toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+
       isRunning: false,
       position: null,
       heading: 0,
@@ -491,6 +496,7 @@ const useStore = create(
     {
       name: 'rally-copilot-storage',
       partialize: (state) => ({
+        theme: state.theme,
         settings: state.settings,
         mode: state.mode,
         recentRoutes: state.recentRoutes,
