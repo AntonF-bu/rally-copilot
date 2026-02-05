@@ -1,7 +1,7 @@
 // Route detail view with interactive Mapbox map
 // Shows when user taps a route card in Discover tab
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
@@ -13,6 +13,7 @@ export function RouteDetailView({ route, onClose }) {
   const [routeGeometry, setRouteGeometry] = useState(null)
   const [loadingRoute, setLoadingRoute] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [heartAnimating, setHeartAnimating] = useState(false)
 
   // Store access
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
@@ -146,6 +147,13 @@ export function RouteDetailView({ route, onClose }) {
     })
   }, [mapLoaded, routeGeometry])
 
+  // Quick toggle for the floating heart button
+  const handleQuickToggle = useCallback(() => {
+    setHeartAnimating(true)
+    setTimeout(() => setHeartAnimating(false), 300)
+    handleSave()
+  }, [])
+
   // Handle save/unsave
   const handleSave = async () => {
     if (isSaved) {
@@ -259,6 +267,45 @@ export function RouteDetailView({ route, onClose }) {
           <path d="M15 18l-6-6 6-6" />
         </svg>
         <span className="text-white text-sm font-medium">Back</span>
+      </button>
+
+      {/* Favorite Button - floating in top right */}
+      <button
+        onClick={handleQuickToggle}
+        disabled={isSaving}
+        className="absolute z-10 flex items-center justify-center rounded-full shadow-lg transition-transform duration-150"
+        style={{
+          top: 'max(16px, env(safe-area-inset-top, 16px))',
+          right: '16px',
+          width: '44px',
+          height: '44px',
+          background: isSaved ? 'rgba(0, 212, 255, 0.25)' : 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: isSaved
+            ? '1px solid rgba(0, 212, 255, 0.4)'
+            : '1px solid rgba(255, 255, 255, 0.15)',
+          transform: heartAnimating ? 'scale(1.2)' : 'scale(1)',
+        }}
+      >
+        {isSaving ? (
+          <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+        ) : (
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill={isSaved ? '#00d4ff' : 'none'}
+            stroke={isSaved ? '#00d4ff' : 'white'}
+            strokeWidth="2"
+            className="transition-all duration-150"
+            style={{
+              transform: heartAnimating ? 'scale(1.1)' : 'scale(1)',
+            }}
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        )}
       </button>
 
       {/* Bottom Info Panel */}
