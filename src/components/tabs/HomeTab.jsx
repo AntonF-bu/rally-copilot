@@ -1,9 +1,10 @@
-// Home Tab - Hero, Start Drive, Recent, Favorites
-// Refactored to use theme system
+// Home Tab - Night Stage Design
+// Premium dark aesthetic with atmospheric backgrounds and animated route visualization
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { geocodeAddress } from '../../services/routeService'
-import { colors, fonts, glass, glassPanel, transitions } from '../../styles/theme'
+import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
+import './HomeTab.css'
 
 export function HomeTab({
   hasLocation,
@@ -21,18 +22,11 @@ export function HomeTab({
   const [showDestination, setShowDestination] = useState(false)
   const [showRecentList, setShowRecentList] = useState(false)
   const [showFavoritesList, setShowFavoritesList] = useState(false)
-  const [heroMounted, setHeroMounted] = useState(false)
 
   // Search state
   const [destination, setDestination] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
-
-  // Hero mount animation
-  useEffect(() => {
-    const timer = setTimeout(() => setHeroMounted(true), 50)
-    return () => clearTimeout(timer)
-  }, [])
 
   // Geocode search
   useEffect(() => {
@@ -49,9 +43,45 @@ export function HomeTab({
     return () => clearTimeout(timeout)
   }, [destination])
 
-  const handleStartDrive = () => {
-    setShowDestination(true)
-  }
+  // Time-based greeting
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours()
+    if (hour < 5) return 'Good night'
+    if (hour < 12) return 'Good morning'
+    if (hour < 17) return 'Good afternoon'
+    if (hour < 21) return 'Good evening'
+    return 'Good night'
+  }, [])
+
+  // Hero route - prefer recent route with curves, else fall back to discovery
+  const heroRoute = useMemo(() => {
+    if (recentRoutes?.length > 0) {
+      // Find a route with decent curve count
+      const withCurves = recentRoutes.find(r => (r.curveCount || 0) > 5)
+      return withCurves || recentRoutes[0]
+    }
+    return DISCOVERY_ROUTES[0] || null
+  }, [recentRoutes])
+
+  // Compute lifetime stats from recentRoutes
+  const lifetimeStats = useMemo(() => {
+    if (!recentRoutes?.length) {
+      return { drives: 0, miles: 0, curves: 0 }
+    }
+    return recentRoutes.reduce((acc, route) => ({
+      drives: acc.drives + 1,
+      miles: acc.miles + (route.distance ? route.distance / 1609.34 : 0),
+      curves: acc.curves + (route.curveCount || 0),
+    }), { drives: 0, miles: 0, curves: 0 })
+  }, [recentRoutes])
+
+  // Nearby routes - first 3 from discovery
+  const nearbyRoutes = useMemo(() => {
+    return DISCOVERY_ROUTES.slice(0, 3)
+  }, [])
+
+  // Handlers
+  const handleStartDrive = () => setShowDestination(true)
 
   const handleSelectDestination = async (dest) => {
     setShowDestination(false)
@@ -66,298 +96,407 @@ export function HomeTab({
     return miles < 10 ? `${miles.toFixed(1)} mi` : `${Math.round(miles)} mi`
   }
 
+  const formatDuration = (seconds) => {
+    if (!seconds) return '--'
+    const mins = Math.round(seconds / 60)
+    return `${mins} min`
+  }
+
+  const timeAgo = (timestamp) => {
+    if (!timestamp) return ''
+    const seconds = Math.floor((Date.now() - timestamp) / 1000)
+    if (seconds < 60) return 'Just now'
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    if (days < 7) return `${days}d ago`
+    return new Date(timestamp).toLocaleDateString()
+  }
+
+  const getDifficulty = (route) => {
+    if (route.difficulty) return route.difficulty
+    // Derive from curves per mile
+    const miles = (route.distance || 0) / 1609.34
+    const curves = route.curveCount || 0
+    const cpm = miles > 0 ? curves / miles : 0
+    if (cpm < 1) return 'easy'
+    if (cpm < 2) return 'moderate'
+    if (cpm < 4) return 'hard'
+    return 'expert'
+  }
+
+  // Generate SVG route path - creates a stylized route visualization
+  const generateRoutePath = (seed = 0, width = 300, height = 120) => {
+    // Simple deterministic path generation
+    const points = []
+    const segments = 6
+    for (let i = 0; i <= segments; i++) {
+      const x = (width * 0.1) + (width * 0.8 * i / segments)
+      const baseY = height * 0.5
+      const variance = height * 0.3
+      // Use seed to create deterministic but varied paths
+      const offset = Math.sin((seed + i) * 1.5) * variance
+      points.push({ x, y: baseY + offset })
+    }
+
+    // Build smooth curve path
+    let d = `M ${points[0].x} ${points[0].y}`
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1]
+      const curr = points[i]
+      const cpx = (prev.x + curr.x) / 2
+      d += ` Q ${prev.x + (curr.x - prev.x) * 0.5} ${prev.y}, ${cpx} ${(prev.y + curr.y) / 2}`
+    }
+    d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`
+
+    return { d, start: points[0], end: points[points.length - 1] }
+  }
+
   return (
-    <div className="flex flex-col">
-      {/* ================================ */}
-      {/* HERO SECTION */}
-      {/* ================================ */}
-      <div
-        className={`relative flex-shrink-0 min-h-[50vh] flex flex-col items-center justify-center px-6 ${
-          heroMounted ? 'opacity-100' : 'opacity-0'
-        }`}
-        style={{ transition: 'opacity 0.7s ease-out' }}
-      >
-        {/* Hero background image (falls back to gradient if image not found) */}
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              linear-gradient(to bottom, rgba(6,10,19,0.3) 0%, rgba(6,10,19,0.85) 100%),
-              url('/images/hero-road.jpg')
-            `,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundColor: colors.bgDeep
-          }}
-        />
-
-        {/* Fallback gradient (shows through if image not loaded) */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `
-              radial-gradient(ellipse at 50% 0%, ${colors.accentGlow} 0%, transparent 50%),
-              linear-gradient(135deg, ${colors.bgDeep} 0%, ${colors.bgPrimary} 40%, ${colors.bgDeep} 100%)
-            `,
-            mixBlendMode: 'multiply'
-          }}
-        />
-
-        {/* Vignette overlay (darker edges) */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.4) 100%)'
-          }}
-        />
-
-        {/* Bottom fade to content */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `linear-gradient(to bottom, transparent 60%, ${colors.bgDeep}cc 85%, ${colors.bgDeep} 100%)`
-          }}
-        />
-
-        {/* Hero Content */}
-        <div
-          className={`relative z-10 text-center ${
-            heroMounted ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{
-            transition: 'all 0.7s ease-out',
-            transform: heroMounted ? 'translateY(0)' : 'translateY(20px)'
-          }}
-        >
-          <h1
-            style={{
-              fontFamily: fonts.heading,
-              fontSize: '32px',
-              fontWeight: 600,
-              color: colors.textPrimary,
-              letterSpacing: '0.15em',
-              marginBottom: '12px',
-              textTransform: 'uppercase',
-            }}
-          >
-            RALLY CO-PILOT
-          </h1>
-          <p
-            style={{
-              color: colors.textSecondary,
-              fontSize: '14px',
-              fontWeight: 300,
-              letterSpacing: '0.05em',
-              marginBottom: '32px',
-              fontFamily: fonts.body,
-            }}
-          >
-            Know the road before you see it
-          </p>
-
-          <button
-            onClick={handleStartDrive}
-            disabled={!hasLocation}
-            className="group flex items-center gap-3 mx-auto disabled:opacity-50"
-            style={{
-              padding: '16px 32px',
-              borderRadius: '16px',
-              background: `linear-gradient(135deg, ${colors.accent} 0%, #E85A2A 100%)`,
-              boxShadow: `0 4px 20px ${colors.accentGlow}, 0 0 40px ${colors.accentDim}`,
-              color: colors.bgDeep,
-              fontFamily: fonts.heading,
-              fontWeight: 700,
-              fontSize: '16px',
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              transition: transitions.smooth,
-              border: 'none',
-              cursor: hasLocation ? 'pointer' : 'not-allowed',
-            }}
-            onMouseEnter={(e) => {
-              if (hasLocation) {
-                e.currentTarget.style.transform = 'translateY(-2px)'
-                e.currentTarget.style.boxShadow = `0 6px 25px ${colors.accentGlow}, 0 0 50px ${colors.accentGlow}`
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)'
-              e.currentTarget.style.boxShadow = `0 4px 20px ${colors.accentGlow}, 0 0 40px ${colors.accentDim}`
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="5 3 19 12 5 21"/>
-            </svg>
-            START DRIVE
-          </button>
-
-          {/* GPS Status */}
-          <div className="flex items-center justify-center gap-2 mt-4">
-            <div
-              className={`w-2 h-2 rounded-full ${!hasLocation ? 'animate-pulse' : ''}`}
-              style={{ background: hasLocation ? '#22c55e' : '#f59e0b' }}
-            />
-            <span style={{ color: colors.textMuted, fontSize: '12px' }}>
-              {hasLocation ? 'GPS ready' : 'Acquiring GPS...'}
-            </span>
-          </div>
-        </div>
+    <div className="ns-container">
+      {/* Atmospheric backgrounds */}
+      <div className="ns-atmosphere">
+        <div className="ns-warm-glow" />
+        <div className="ns-cool-glow" />
+        <div className="ns-topo-texture" />
+        <div className="ns-noise" />
       </div>
 
-      {/* ================================ */}
-      {/* ROUTE CARDS ROW */}
-      {/* ================================ */}
-      <div
-        className={`px-4 -mt-6 relative z-10 ${heroMounted ? 'opacity-100' : 'opacity-0'}`}
-        style={{
-          transition: 'all 0.7s ease-out',
-          transitionDelay: '100ms',
-          transform: heroMounted ? 'translateY(0)' : 'translateY(20px)'
-        }}
-      >
-        <div className="flex gap-3">
-          {/* Recent Card */}
-          <button
-            onClick={() => recentRoutes?.length > 0 ? setShowRecentList(true) : handleStartDrive()}
-            className="flex-1 p-4 rounded-2xl"
-            style={{
-              ...glass,
-              transition: transitions.smooth,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = colors.bgCard
-              e.currentTarget.style.borderColor = `${colors.accent}20`
-              e.currentTarget.style.transform = 'translateY(-2px)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = glass.background
-              e.currentTarget.style.borderColor = colors.glassBorder
-              e.currentTarget.style.transform = 'translateY(0)'
-            }}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+      {/* Main content */}
+      <div className="ns-content">
+        {/* Top Bar */}
+        <div className="ns-topbar ns-d1">
+          <div className="ns-topbar-left">
+            <div className="ns-avatar">A</div>
+            <div className="ns-brand">
+              <span className="ns-brand-name">Rally Co-Pilot</span>
+              <div className="ns-location">
+                <div className={`ns-gps-dot ${!hasLocation ? 'acquiring' : ''}`} />
+                <span>{hasLocation ? 'Boston, MA' : 'Acquiring GPS...'}</span>
+              </div>
+            </div>
+          </div>
+          <div className="ns-topbar-right">
+            <button className="ns-icon-btn" aria-label="Notifications">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
-              <span style={{
-                fontFamily: fonts.heading,
-                fontSize: '10px',
-                fontWeight: 500,
-                color: colors.textMuted,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-              }}>RECENT</span>
-            </div>
-            <div className="text-left">
-              {recentRoutes?.length > 0 ? (
-                <>
-                  <p style={{ color: colors.textPrimary, fontWeight: 500, fontSize: '14px' }} className="truncate">
-                    {recentRoutes[0].name || recentRoutes[0].destination || 'Unknown route'}
-                  </p>
-                  <p style={{ color: colors.textMuted, fontSize: '12px', marginTop: '2px' }}>
-                    {recentRoutes.length} drive{recentRoutes.length !== 1 ? 's' : ''}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p style={{ color: colors.textSecondary, fontSize: '14px' }}>No recent drives</p>
-                  <p style={{ color: colors.textMuted, fontSize: '12px', marginTop: '2px' }}>Start your first route</p>
-                </>
-              )}
-            </div>
-          </button>
-
-          {/* Favorites Card */}
-          <button
-            onClick={() => favoriteRoutes?.length > 0 ? setShowFavoritesList(true) : null}
-            disabled={!favoriteRoutes?.length}
-            className="flex-1 p-4 rounded-2xl disabled:opacity-60"
-            style={{
-              ...glass,
-              transition: transitions.smooth,
-              cursor: favoriteRoutes?.length ? 'pointer' : 'not-allowed',
-            }}
-            onMouseEnter={(e) => {
-              if (favoriteRoutes?.length) {
-                e.currentTarget.style.background = colors.bgCard
-                e.currentTarget.style.borderColor = `${colors.accent}20`
-                e.currentTarget.style.transform = 'translateY(-2px)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = glass.background
-              e.currentTarget.style.borderColor = colors.glassBorder
-              e.currentTarget.style.transform = 'translateY(0)'
-            }}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="2">
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+            </button>
+            <button className="ns-icon-btn" aria-label="Settings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
               </svg>
-              <span style={{
-                fontFamily: fonts.heading,
-                fontSize: '10px',
-                fontWeight: 500,
-                color: colors.textMuted,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-              }}>FAVORITES</span>
-            </div>
-            <div className="text-left">
-              {favoriteRoutes?.length > 0 ? (
-                <>
-                  <p style={{ color: colors.textPrimary, fontWeight: 500, fontSize: '14px' }}>
-                    {favoriteRoutes.length} saved
-                  </p>
-                  <p style={{ color: colors.textMuted, fontSize: '12px', marginTop: '2px' }}>Tap to view</p>
-                </>
-              ) : (
-                <>
-                  <p style={{ color: colors.textSecondary, fontSize: '14px' }}>No favorites yet</p>
-                  <p style={{ color: colors.textMuted, fontSize: '12px', marginTop: '2px' }}>Save routes to access here</p>
-                </>
-              )}
-            </div>
-          </button>
+            </button>
+          </div>
         </div>
+
+        {/* Greeting */}
+        <div className="ns-greeting ns-d2">
+          <h1 className="ns-greeting-text">
+            {greeting}, <strong>Anton</strong>
+          </h1>
+          <div className="ns-weather">
+            <svg className="ns-weather-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+            </svg>
+            <span>28°F · Clear skies · Perfect driving conditions</span>
+          </div>
+        </div>
+
+        {/* Voice Ready Indicator */}
+        <div className="ns-voice-ready ns-d3">
+          <div className="ns-voice-bars">
+            <div className="ns-voice-bar" />
+            <div className="ns-voice-bar" />
+            <div className="ns-voice-bar" />
+            <div className="ns-voice-bar" />
+            <div className="ns-voice-bar" />
+          </div>
+          <span className="ns-voice-text">Co-Pilot Voice Ready</span>
+        </div>
+
+        {/* Hero Stage Card */}
+        {heroRoute && (
+          <div className="ns-hero ns-d4">
+            <div className="ns-hero-badges">
+              <div className="ns-badge ns-badge-recommended">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                Recommended
+              </div>
+              <div className={`ns-badge ns-badge-difficulty ${getDifficulty(heroRoute)}`}>
+                {getDifficulty(heroRoute).toUpperCase()}
+              </div>
+            </div>
+
+            {/* Route Visualization */}
+            <div className="ns-route-viz">
+              <svg className="ns-route-svg" viewBox="0 0 300 120" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <linearGradient id="ns-route-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#FF6B35" />
+                    <stop offset="100%" stopColor="#64B5F6" />
+                  </linearGradient>
+                </defs>
+                {(() => {
+                  const { d, start, end } = generateRoutePath(heroRoute.id?.charCodeAt(0) || 0)
+                  return (
+                    <>
+                      <path className="ns-route-path-bg" d={d} />
+                      <path className="ns-route-path" d={d} />
+                      <circle className="ns-origin-pulse" cx={start.x} cy={start.y} />
+                      <circle className="ns-origin-dot" cx={start.x} cy={start.y} />
+                      <circle className="ns-dest-pulse" cx={end.x} cy={end.y} />
+                      <circle className="ns-dest-dot" cx={end.x} cy={end.y} />
+                    </>
+                  )
+                })()}
+              </svg>
+            </div>
+
+            {/* Route Info */}
+            <div className="ns-route-info">
+              <h2 className="ns-route-name">
+                {heroRoute.name || heroRoute.destination || 'Unknown Route'}
+              </h2>
+              <div className="ns-route-endpoints">
+                <span>{heroRoute.start?.label || heroRoute.origin || 'Start'}</span>
+                <span className="ns-route-arrow">→</span>
+                <span>{heroRoute.end?.label || heroRoute.destination || 'End'}</span>
+              </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="ns-stats-grid">
+              <div className="ns-stat">
+                <div className="ns-stat-value">
+                  {heroRoute.distance
+                    ? Math.round(heroRoute.distance / 1609.34)
+                    : heroRoute.distance || '--'}
+                </div>
+                <div className="ns-stat-label">Miles</div>
+              </div>
+              <div className="ns-stat">
+                <div className="ns-stat-value">
+                  {heroRoute.duration
+                    ? Math.round(heroRoute.duration / 60)
+                    : heroRoute.duration || '--'}
+                </div>
+                <div className="ns-stat-label">Minutes</div>
+              </div>
+              <div className="ns-stat">
+                <div className="ns-stat-value accent">
+                  {heroRoute.curveCount || heroRoute.curves || '--'}
+                </div>
+                <div className="ns-stat-label">Curves</div>
+              </div>
+              <div className="ns-stat">
+                <div className="ns-stat-value">
+                  {recentRoutes?.filter(r => r.id === heroRoute.id).length || 1}
+                </div>
+                <div className="ns-stat-label">Drives</div>
+              </div>
+            </div>
+
+            {/* CTA Button */}
+            <button
+              className="ns-cta"
+              onClick={handleStartDrive}
+              disabled={!hasLocation || isLoading}
+            >
+              <span className="ns-cta-shimmer" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" />
+              </svg>
+              Start Co-Pilot
+            </button>
+          </div>
+        )}
+
+        {/* Your Driving Section */}
+        <div className="ns-section ns-d5">
+          <div className="ns-section-header">
+            <h3 className="ns-section-title">Your Driving</h3>
+            <button className="ns-section-link">
+              Details
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </div>
+          <div className="ns-lifetime-stats">
+            <div className="ns-lifetime-stat">
+              <div className="ns-lifetime-value orange">{lifetimeStats.drives}</div>
+              <div className="ns-lifetime-label">Drives</div>
+            </div>
+            <div className="ns-lifetime-stat">
+              <div className="ns-lifetime-value white">{Math.round(lifetimeStats.miles)}</div>
+              <div className="ns-lifetime-label">Miles</div>
+            </div>
+            <div className="ns-lifetime-stat">
+              <div className="ns-lifetime-value blue">{lifetimeStats.curves}</div>
+              <div className="ns-lifetime-label">Curves</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Drives Section */}
+        {recentRoutes?.length > 0 && (
+          <div className="ns-section ns-d6">
+            <div className="ns-section-header">
+              <h3 className="ns-section-title">Recent Drives</h3>
+              <button className="ns-section-link" onClick={() => setShowRecentList(true)}>
+                All
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+            <div className="ns-recent-scroll">
+              {recentRoutes.slice(0, 6).map((route, idx) => {
+                const difficulty = getDifficulty(route)
+                const { d, start, end } = generateRoutePath(idx + 10, 150, 60)
+                return (
+                  <div
+                    key={route.id || idx}
+                    className="ns-recent-card"
+                    onClick={() => onSelectSavedRoute(route)}
+                  >
+                    <div className={`ns-recent-accent ${difficulty}`} />
+                    <div className="ns-recent-viz">
+                      <svg className="ns-recent-svg" viewBox="0 0 150 60" preserveAspectRatio="xMidYMid meet">
+                        <defs>
+                          <linearGradient id={`ns-recent-grad-${idx}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#FF6B35" />
+                            <stop offset="100%" stopColor="#64B5F6" />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          className="ns-recent-path"
+                          d={d}
+                          stroke={`url(#ns-recent-grad-${idx})`}
+                        />
+                        <circle cx={start.x} cy={start.y} r="4" fill="#FF6B35" />
+                        <circle cx={end.x} cy={end.y} r="4" fill="#64B5F6" />
+                      </svg>
+                    </div>
+                    <div className="ns-recent-content">
+                      <div className="ns-recent-name">
+                        {route.name || route.destination || 'Unknown'}
+                      </div>
+                      <div className="ns-recent-endpoints">
+                        <span>{route.origin || 'Start'}</span>
+                        <span>→</span>
+                        <span>{route.destination || 'End'}</span>
+                      </div>
+                      <div className="ns-recent-meta">
+                        <span>{formatDist(route.distance)}</span>
+                        <span className="ns-recent-meta-sep">·</span>
+                        <span>{formatDuration(route.duration)}</span>
+                        <span className="ns-recent-time">{timeAgo(route.timestamp)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Routes Near You Section */}
+        {nearbyRoutes.length > 0 && (
+          <div className="ns-section ns-d7">
+            <div className="ns-section-header">
+              <h3 className="ns-section-title">Routes Near You</h3>
+              <button className="ns-section-link">
+                Discover
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+            <div className="ns-nearby-list">
+              {nearbyRoutes.map((route, idx) => {
+                const difficulty = getDifficulty(route)
+                return (
+                  <div
+                    key={route.id || idx}
+                    className="ns-nearby-card"
+                    onClick={() => onSelectSavedRoute(route)}
+                  >
+                    <div className={`ns-nearby-accent ${difficulty}`} />
+                    <div className="ns-nearby-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="url(#ns-nearby-icon-grad)" strokeWidth="2">
+                        <defs>
+                          <linearGradient id="ns-nearby-icon-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#FF6B35" />
+                            <stop offset="100%" stopColor="#64B5F6" />
+                          </linearGradient>
+                        </defs>
+                        <path d="M12 2L4 7l8 5 8-5-8-5z" />
+                        <path d="M4 12l8 5 8-5" />
+                        <path d="M4 17l8 5 8-5" />
+                      </svg>
+                    </div>
+                    <div className="ns-nearby-info">
+                      <div className="ns-nearby-name">{route.name}</div>
+                      <div className="ns-nearby-endpoints">
+                        <span>{route.start?.label || 'Start'}</span>
+                        <span>→</span>
+                        <span>{route.end?.label || 'End'}</span>
+                      </div>
+                      <div className="ns-nearby-meta">
+                        <span>{route.distance} mi</span>
+                        <span>·</span>
+                        <span>{route.duration} min</span>
+                        <span>·</span>
+                        <span>{route.curveCount || route.tags?.length || 0} curves</span>
+                      </div>
+                    </div>
+                    <div className="ns-nearby-chevron">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error Banner */}
       {error && (
-        <div
-          className="fixed top-12 left-4 right-4 z-50 p-3 rounded-xl flex items-center justify-between"
-          style={{
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-          }}
-        >
-          <p style={{ color: '#f87171', fontSize: '14px', flex: 1 }}>{error}</p>
-          <button onClick={onClearError} className="p-1 ml-2" style={{ color: 'rgba(248, 113, 113, 0.6)' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
+        <div className="ns-error">
+          <span className="ns-error-text">{error}</span>
+          <button className="ns-error-close" onClick={onClearError}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
       )}
 
-      {/* ================================ */}
-      {/* MODALS */}
-      {/* ================================ */}
-
-      {/* Destination Search Modal */}
+      {/* Search Modal */}
       {showDestination && (
         <SearchModal
-          title="Set Destination"
-          placeholder="Search for a place..."
-          value={destination}
-          onChange={setDestination}
-          onClose={() => { setShowDestination(false); setDestination(''); setSearchResults([]) }}
-          results={searchResults}
+          destination={destination}
+          setDestination={setDestination}
+          searchResults={searchResults}
           isSearching={isSearching}
           isLoading={isLoading}
           onSelect={handleSelectDestination}
+          onClose={() => {
+            setShowDestination(false)
+            setDestination('')
+            setSearchResults([])
+          }}
         />
       )}
 
@@ -372,7 +511,7 @@ export function HomeTab({
           onClose={() => setShowRecentList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
-          accentColor={colors.accent}
+          accentColor="#FF6B35"
         />
       )}
 
@@ -398,111 +537,75 @@ export function HomeTab({
 // ================================
 // Search Modal Component
 // ================================
-function SearchModal({ title, placeholder, value, onChange, onClose, results, isSearching, isLoading, onSelect }) {
+function SearchModal({
+  destination,
+  setDestination,
+  searchResults,
+  isSearching,
+  isLoading,
+  onSelect,
+  onClose,
+}) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col">
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `${colors.bgDeep}f5`,
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-        }}
-      />
-
-      <div className="relative flex-1 flex flex-col p-4 pt-14" style={{ paddingTop: 'max(56px, env(safe-area-inset-top))' }}>
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={onClose} className="p-2 -ml-2" style={{ color: colors.textSecondary }}>
+    <>
+      <div className="ns-modal-overlay" onClick={onClose} />
+      <div className="ns-modal">
+        <div className="ns-modal-header">
+          <button className="ns-modal-back" onClick={onClose}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
+              <path d="M19 12H5m0 0l7 7m-7-7l7-7" />
             </svg>
           </button>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: colors.textPrimary, fontFamily: fonts.body }}>{title}</h2>
+          <h2 className="ns-modal-title">Set Destination</h2>
         </div>
 
-        {/* Search Input */}
-        <div className="relative mb-4">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: colors.textMuted }}>
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        <div className="ns-search-input-wrap">
+          <svg className="ns-search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
           </svg>
           <input
             type="text"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={placeholder}
+            className="ns-search-input"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="Search for a place..."
             autoFocus
-            style={{
-              width: '100%',
-              background: colors.bgGlass,
-              border: `1px solid ${colors.glassBorder}`,
-              borderRadius: '12px',
-              paddingLeft: '48px',
-              paddingRight: '16px',
-              paddingTop: '14px',
-              paddingBottom: '14px',
-              color: colors.textPrimary,
-              fontSize: '16px',
-              outline: 'none',
-              fontFamily: fonts.body,
-            }}
-            onFocus={(e) => { e.target.style.borderColor = `${colors.accent}50` }}
-            onBlur={(e) => { e.target.style.borderColor = colors.glassBorder }}
           />
-          {isSearching && (
-            <div className="absolute right-4 top-1/2 -translate-y-1/2">
-              <div
-                className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
-                style={{ borderColor: `${colors.accent} transparent ${colors.accent} ${colors.accent}` }}
-              />
-            </div>
-          )}
+          {isSearching && <div className="ns-search-spinner" />}
         </div>
 
-        {/* Results */}
-        <div className="flex-1 overflow-auto">
-          {results.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {results.map((result, i) => (
-                <button
-                  key={i}
-                  onClick={() => onSelect(result)}
-                  disabled={isLoading}
-                  className="p-4 rounded-xl text-left flex items-start gap-3 disabled:opacity-50"
-                  style={{ transition: transitions.snappy }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgGlass }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                    style={{ background: colors.accentGlow }}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
-                      <circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div style={{ color: colors.textPrimary, fontWeight: 500 }} className="truncate">{result.name}</div>
-                    {result.address && (
-                      <div style={{ color: colors.textMuted, fontSize: '14px' }} className="truncate mt-0.5">{result.address}</div>
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : value.length >= 3 && !isSearching ? (
-            <div className="text-center py-12">
-              <p style={{ color: colors.textMuted, fontSize: '14px' }}>No results found</p>
-            </div>
+        <div className="ns-search-results">
+          {searchResults.length > 0 ? (
+            searchResults.map((result, i) => (
+              <div
+                key={i}
+                className="ns-search-result"
+                onClick={() => !isLoading && onSelect(result)}
+                style={{ opacity: isLoading ? 0.5 : 1 }}
+              >
+                <div className="ns-search-result-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="10" r="3" />
+                    <path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z" />
+                  </svg>
+                </div>
+                <div className="ns-search-result-info">
+                  <div className="ns-search-result-name">{result.name}</div>
+                  {result.address && (
+                    <div className="ns-search-result-address">{result.address}</div>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : destination.length >= 3 && !isSearching ? (
+            <div className="ns-search-empty">No results found</div>
           ) : (
-            <div className="text-center py-12">
-              <p style={{ color: colors.textMuted, fontSize: '14px' }}>Start typing to search</p>
-            </div>
+            <div className="ns-search-empty">Start typing to search</div>
           )}
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -510,7 +613,18 @@ function SearchModal({ title, placeholder, value, onChange, onClose, results, is
 // ================================
 // Route List Modal Component
 // ================================
-function RouteListModal({ title, routes, onSelect, onRemove, onClearAll, onClose, isLoading, formatDist, accentColor, isFavorites }) {
+function RouteListModal({
+  title,
+  routes,
+  onSelect,
+  onRemove,
+  onClearAll,
+  onClose,
+  isLoading,
+  formatDist,
+  accentColor,
+  isFavorites,
+}) {
   const timeAgo = (timestamp) => {
     if (!timestamp) return ''
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
@@ -525,106 +639,75 @@ function RouteListModal({ title, routes, onSelect, onRemove, onClearAll, onClose
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col">
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `${colors.bgDeep}f5`,
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-        }}
-      />
-
-      <div className="relative flex-1 flex flex-col p-4 pt-14" style={{ paddingTop: 'max(56px, env(safe-area-inset-top))' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <button onClick={onClose} className="p-2 -ml-2" style={{ color: colors.textSecondary }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M19 12H5m0 0l7 7m-7-7l7-7"/>
-              </svg>
-            </button>
-            <h2 style={{ fontSize: '20px', fontWeight: 700, color: colors.textPrimary, fontFamily: fonts.body }}>{title}</h2>
-          </div>
+    <>
+      <div className="ns-modal-overlay" onClick={onClose} />
+      <div className="ns-modal">
+        <div className="ns-modal-header">
+          <button className="ns-modal-back" onClick={onClose}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5m0 0l7 7m-7-7l7-7" />
+            </svg>
+          </button>
+          <h2 className="ns-modal-title">{title}</h2>
           {onClearAll && routes?.length >= 5 && (
-            <button
-              onClick={onClearAll}
-              style={{ fontSize: '12px', color: 'rgba(248, 113, 113, 0.6)', padding: '4px 12px' }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = '#f87171' }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(248, 113, 113, 0.6)' }}
-            >
+            <button className="ns-clear-all" onClick={onClearAll}>
               Clear all
             </button>
           )}
         </div>
 
-        {/* Routes */}
-        <div className="flex-1 overflow-auto">
-          <div className="flex flex-col gap-2">
-            {routes?.map((route) => (
-              <div
-                key={route.id}
-                className="p-3 rounded-xl flex items-center gap-3"
-                style={{
-                  background: colors.bgGlass,
-                  border: `1px solid ${colors.glassBorder}`,
-                  transition: transitions.snappy,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = colors.bgCard }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = colors.bgGlass }}
+        <div className="ns-search-results">
+          {routes?.map((route) => (
+            <div key={route.id} className="ns-list-item">
+              <button
+                className="ns-list-item-btn"
+                onClick={() => !isLoading && onSelect(route)}
+                disabled={isLoading}
               >
-                <button
-                  onClick={() => onSelect(route)}
-                  disabled={isLoading}
-                  className="flex-1 flex items-center gap-3 text-left disabled:opacity-50"
+                <div
+                  className="ns-list-icon"
+                  style={{ background: `${accentColor}15` }}
                 >
-                  <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                    style={{ background: `${accentColor}15` }}
-                  >
-                    {isFavorites ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill={accentColor} stroke={accentColor} strokeWidth="2">
-                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                      </svg>
-                    ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2">
-                        <circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
-                      </svg>
+                  {isFavorites ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill={accentColor} stroke={accentColor} strokeWidth="2">
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth="2">
+                      <circle cx="12" cy="10" r="3" />
+                      <path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z" />
+                    </svg>
+                  )}
+                </div>
+                <div className="ns-list-info">
+                  <div className="ns-list-name">
+                    {route.name || route.destination || 'Unknown'}
+                  </div>
+                  <div className="ns-list-meta">
+                    <span>{formatDist(route.distance)}</span>
+                    <span>·</span>
+                    <span>{route.curveCount || 0} curves</span>
+                    {route.timestamp && !isFavorites && (
+                      <>
+                        <span>·</span>
+                        <span>{timeAgo(route.timestamp)}</span>
+                      </>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div style={{ color: colors.textPrimary, fontSize: '14px', fontWeight: 500 }} className="truncate">
-                      {route.name || route.destination || 'Unknown'}
-                    </div>
-                    <div className="flex items-center gap-2" style={{ color: colors.textMuted, fontSize: '12px' }}>
-                      <span>{formatDist(route.distance)}</span>
-                      <span>•</span>
-                      <span>{route.curveCount || 0} curves</span>
-                      {route.timestamp && !isFavorites && (
-                        <>
-                          <span>•</span>
-                          <span>{timeAgo(route.timestamp)}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </button>
-                <button
-                  onClick={() => onRemove(route.id)}
-                  className="p-2"
-                  style={{ color: colors.textMuted, transition: transitions.snappy }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = colors.textSecondary }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = colors.textMuted }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M18 6L6 18M6 6l12 12"/>
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
+                </div>
+              </button>
+              <button
+                className="ns-list-remove"
+                onClick={() => onRemove(route.id)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
         </div>
       </div>
-    </div>
+    </>
   )
 }
