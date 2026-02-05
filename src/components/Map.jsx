@@ -143,6 +143,24 @@ export default function Map() {
         routeLayersRef.current.push(outlineId)
 
         routeLayersRef.current.push(srcId, glowId, lineId)
+
+        console.log(`🎨 Drawing segment ${i}: color=${seg.color}, glow-opacity=0.5, line-width=5`)
+      })
+
+      // Force route layers to top of stack
+      const style = map.current.getStyle()
+      const allLayerIds = style.layers.map(l => l.id)
+      const routeLayerIds = allLayerIds.filter(id =>
+        id.startsWith('route-') || id.startsWith('glow-') || id.startsWith('line-') || id.startsWith('outline-')
+      )
+
+      // Also log ALL layers for debugging
+      console.log('📋 ALL MAP LAYERS:', allLayerIds)
+      console.log('🛣️ ROUTE LAYERS:', routeLayerIds)
+
+      // Move each route layer to top
+      routeLayerIds.forEach(id => {
+        try { map.current.moveLayer(id) } catch(e) {}
       })
 
       console.log(`🗺️ Route added: ${zoneSegs.length} zone segments`)
