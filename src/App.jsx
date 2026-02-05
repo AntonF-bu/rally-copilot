@@ -506,7 +506,11 @@ export default function App() {
 
   // Render
   if (showRouteSelector) {
-    return <RouteSelector onRouteSelected={goToPreview} />
+    return (
+      <div style={mobileContainerStyle}>
+        <RouteSelector onRouteSelected={goToPreview} />
+      </div>
+    )
   }
 
   if (showRoutePreview) {
@@ -539,7 +543,7 @@ export default function App() {
 
   return (
     <div style={mobileContainerStyle}>
-      <div className="fixed inset-0" style={{ background: 'var(--bg-deep)' }}>
+      <div className="absolute inset-0" style={{ background: 'var(--bg-deep)' }}>
         <AmbientBackground />
         <div className="relative z-[1] w-full h-full">
           <Map />

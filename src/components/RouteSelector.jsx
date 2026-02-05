@@ -5,6 +5,7 @@ import { BottomNav } from './BottomNav'
 import { HomeTab } from './tabs/HomeTab'
 import { DiscoverTab } from './tabs/DiscoverTab'
 import { ProfileTab } from './tabs/ProfileTab'
+import SettingsPanel from './SettingsPanel'
 import { colors, layout } from '../styles/theme'
 
 // ================================
@@ -199,11 +200,9 @@ export default function RouteSelector() {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col"
+      className="absolute inset-0 flex flex-col"
       style={{
         background: colors.bgDeep,
-        height: '100dvh',
-        minHeight: '-webkit-fill-available',
       }}
     >
       {/* Global Atmospheric Background */}
@@ -264,6 +263,9 @@ export default function RouteSelector() {
         {/* Bottom Navigation */}
         <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
       </div>
+
+      {/* Settings Panel - overlays everything when open */}
+      <SettingsPanel />
     </div>
   )
 }
