@@ -2,6 +2,7 @@
 // 2-column grid layout with map thumbnail
 
 import { useState, useEffect, useMemo } from 'react'
+import { colors } from '../../styles/theme'
 
 export function DiscoverGridCard({ route, isSaved, onSelect }) {
   const [routePath, setRoutePath] = useState(null)
@@ -42,36 +43,32 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
     const startCoord = `${route.start.lng},${route.start.lat}`
     const endCoord = `${route.end.lng},${route.end.lat}`
-    const markers = `pin-s+00d4ff(${startCoord}),pin-s+ff9500(${endCoord})`
+    // Cyan start marker, orange end marker
+    const markers = `pin-s+00d4ff(${startCoord}),pin-s+F97316(${endCoord})`
 
     let pathOverlay = ''
     if (routePath) {
-      pathOverlay = `path-3+00d4ff-0.9(${encodeURIComponent(routePath)}),`
+      // Use orange (#F97316) for visibility on dark map
+      pathOverlay = `path-3+F97316-1(${encodeURIComponent(routePath)}),`
     }
 
     // Compact card image with no logo/attribution
     return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/300x150@2x?padding=30,30,30,30&logo=false&attribution=false&access_token=${mapboxToken}`
   }, [hasValidToken, route, routePath, mapboxToken])
 
-  // Brand difficulty colors
-  const difficultyColors = {
-    easy: { bg: 'rgba(76, 175, 80, 0.25)', text: '#4CAF50' },
-    moderate: { bg: 'rgba(255, 107, 53, 0.25)', text: '#FF6B35' },
-    hard: { bg: 'rgba(255, 59, 59, 0.25)', text: '#FF3B3B' },
-  }
-
-  const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
+  // Use theme difficulty colors
+  const diffColor = colors.difficulty[route.difficulty] || colors.difficulty.moderate
 
   return (
     <button
       onClick={() => onSelect?.(route)}
       className="w-full text-left rounded-xl overflow-hidden transition-all duration-150 active:scale-[0.97]"
       style={{
-        background: '#141820',
+        background: colors.bgCard,
         border: isSaved
-          ? '1px solid rgba(255, 107, 53, 0.4)'
-          : '1px solid rgba(255, 107, 53, 0.12)',
-        boxShadow: isSaved ? '0 0 15px rgba(255, 107, 53, 0.1)' : 'none',
+          ? `1px solid ${colors.warmBorder}`
+          : `1px solid ${colors.glassBorder}`,
+        boxShadow: isSaved ? `0 0 15px ${colors.accentGlow}` : 'none',
       }}
     >
       {/* Map Thumbnail - compact 2:1 aspect ratio */}
@@ -114,7 +111,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
           <div
             className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
             style={{
-              background: 'rgba(255, 107, 53, 0.35)',
+              background: colors.accentGlow,
               backdropFilter: 'blur(4px)',
             }}
           >
@@ -122,8 +119,8 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
               width="10"
               height="10"
               viewBox="0 0 24 24"
-              fill="#FF6B35"
-              stroke="#FF6B35"
+              fill={colors.accent}
+              stroke={colors.accent}
               strokeWidth="2"
             >
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -135,7 +132,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
         <div
           className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded"
           style={{
-            fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+            fontFamily: "'Sora', -apple-system, sans-serif",
             fontSize: '9px',
             fontWeight: 600,
             textTransform: 'uppercase',
@@ -156,7 +153,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
           className="text-white leading-tight truncate"
           title={route.name}
           style={{
-            fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+            fontFamily: "'Sora', -apple-system, sans-serif",
             fontSize: '13px',
             fontWeight: 600,
             textTransform: 'uppercase',

@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { geocodeAddress } from '../../services/routeService'
 import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
+import { RouteDetailView } from '../discover/RouteDetailView'
 import './HomeTab.css'
 
 export function HomeTab({
@@ -24,6 +25,7 @@ export function HomeTab({
   const [showDestination, setShowDestination] = useState(false)
   const [showRecentList, setShowRecentList] = useState(false)
   const [showFavoritesList, setShowFavoritesList] = useState(false)
+  const [selectedDiscoveryRoute, setSelectedDiscoveryRoute] = useState(null)
 
   // Search state
   const [destination, setDestination] = useState('')
@@ -92,20 +94,33 @@ export function HomeTab({
     onStartDrive(dest)
   }
 
-  // Handle discovery route selection - convert to proper route object shape
-  const handleSelectDiscoveryRoute = (route) => {
+  // Open discovery route preview instead of starting drive immediately
+  const handleOpenRoutePreview = (route) => {
+    setSelectedDiscoveryRoute(route)
+  }
+
+  // Handle starting drive from the preview - convert to proper route object shape
+  const handleStartDiscoveryDrive = (routeData) => {
+    // If routeData already has the full structure, use it directly
+    if (routeData.isDiscoveryRoute) {
+      onSelectSavedRoute(routeData)
+      return
+    }
+
+    // Otherwise, convert discovery route format to standard format
     const routeObject = {
-      name: route.name,
-      destination: route.end.label,
-      origin: route.start.label,
-      distance: route.distance * 1609.34, // Convert miles to meters
-      duration: route.duration * 60, // Convert minutes to seconds
-      startCoords: [route.start.lng, route.start.lat],
-      endCoords: [route.end.lng, route.end.lat],
-      waypoints: route.waypoints || [],
+      name: routeData.name,
+      destination: routeData.end?.label || routeData.destination,
+      origin: routeData.start?.label || routeData.origin,
+      distance: (routeData.distance || 0) * (routeData.distance < 500 ? 1609.34 : 1), // Convert miles to meters if needed
+      duration: (routeData.duration || 0) * (routeData.duration < 500 ? 60 : 1), // Convert minutes to seconds if needed
+      startCoords: routeData.startCoords || [routeData.start?.lng, routeData.start?.lat],
+      endCoords: routeData.endCoords || [routeData.end?.lng, routeData.end?.lat],
+      waypoints: routeData.waypoints || [],
+      geometry: routeData.geometry,
       isDiscoveryRoute: true,
-      discoveryId: route.id,
-      discoveryData: route,
+      discoveryId: routeData.id || routeData.discoveryId,
+      discoveryData: routeData.discoveryData || routeData,
     }
     onSelectSavedRoute(routeObject)
   }
@@ -412,7 +427,7 @@ export function HomeTab({
                       <svg className="ns-recent-svg" viewBox="0 0 150 60" preserveAspectRatio="xMidYMid meet">
                         <defs>
                           <linearGradient id={`ns-recent-grad-${idx}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                            <stop offset="0%" stopColor="#FF6B35" />
+                            <stop offset="0%" stopColor="#F97316" />
                             <stop offset="100%" stopColor="#64B5F6" />
                           </linearGradient>
                         </defs>
@@ -421,7 +436,7 @@ export function HomeTab({
                           d={d}
                           stroke={`url(#ns-recent-grad-${idx})`}
                         />
-                        <circle cx={start.x} cy={start.y} r="4" fill="#FF6B35" />
+                        <circle cx={start.x} cy={start.y} r="4" fill="#F97316" />
                         <circle cx={end.x} cy={end.y} r="4" fill="#64B5F6" />
                       </svg>
                     </div>
@@ -440,6 +455,58 @@ export function HomeTab({
                         <span>{formatDuration(route.duration)}</span>
                         <span className="ns-recent-time">{timeAgo(route.timestamp)}</span>
                       </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Saved Routes Section */}
+        {favoriteRoutes?.length > 0 && (
+          <div className="ns-section ns-d6">
+            <div className="ns-section-header">
+              <h3 className="ns-section-title">Saved Routes</h3>
+              <button className="ns-section-link" onClick={() => setShowFavoritesList(true)}>
+                All
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+            <div className="ns-saved-list">
+              {favoriteRoutes.slice(0, 3).map((route, idx) => {
+                const difficulty = getDifficulty(route)
+                return (
+                  <div
+                    key={route.id || idx}
+                    className="ns-nearby-card"
+                    onClick={() => onSelectSavedRoute(route)}
+                  >
+                    <div className={`ns-nearby-accent ${difficulty}`} />
+                    <div className="ns-nearby-icon ns-saved-icon">
+                      <svg viewBox="0 0 24 24" fill="#F97316" stroke="#F97316" strokeWidth="2">
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                      </svg>
+                    </div>
+                    <div className="ns-nearby-info">
+                      <div className="ns-nearby-name">{route.name || route.destination || 'Saved Route'}</div>
+                      <div className="ns-nearby-endpoints">
+                        <span>{route.origin || route.start?.label || 'Start'}</span>
+                        <span>→</span>
+                        <span>{route.destination || route.end?.label || 'End'}</span>
+                      </div>
+                      <div className="ns-nearby-meta">
+                        <span>{formatDist(route.distance)}</span>
+                        <span>·</span>
+                        <span>{route.curveCount || 0} curves</span>
+                      </div>
+                    </div>
+                    <div className="ns-nearby-chevron">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
                     </div>
                   </div>
                 )
@@ -467,14 +534,14 @@ export function HomeTab({
                   <div
                     key={route.id || idx}
                     className="ns-nearby-card"
-                    onClick={() => handleSelectDiscoveryRoute(route)}
+                    onClick={() => handleOpenRoutePreview(route)}
                   >
                     <div className={`ns-nearby-accent ${difficulty}`} />
                     <div className="ns-nearby-icon">
                       <svg viewBox="0 0 24 24" fill="none" stroke="url(#ns-nearby-icon-grad)" strokeWidth="2">
                         <defs>
                           <linearGradient id="ns-nearby-icon-grad" x1="0%" y1="100%" x2="100%" y2="0%">
-                            <stop offset="0%" stopColor="#FF6B35" />
+                            <stop offset="0%" stopColor="#F97316" />
                             <stop offset="100%" stopColor="#64B5F6" />
                           </linearGradient>
                         </defs>
@@ -551,7 +618,7 @@ export function HomeTab({
           onClose={() => setShowRecentList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
-          accentColor="#FF6B35"
+          accentColor="#F97316"
         />
       )}
 
@@ -567,6 +634,15 @@ export function HomeTab({
           formatDist={formatDist}
           accentColor="#f59e0b"
           isFavorites
+        />
+      )}
+
+      {/* Discovery Route Preview */}
+      {selectedDiscoveryRoute && (
+        <RouteDetailView
+          route={selectedDiscoveryRoute}
+          onClose={() => setSelectedDiscoveryRoute(null)}
+          onStartDrive={handleStartDiscoveryDrive}
         />
       )}
     </div>

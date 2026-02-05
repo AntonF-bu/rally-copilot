@@ -256,6 +256,7 @@ export default function RouteSelector() {
             <ProfileTab
               onNavigateToSettings={handleNavigateToSettings}
               logbookStats={logbookStats}
+              recentRoutes={recentRoutes}
             />
           )}
         </div>
