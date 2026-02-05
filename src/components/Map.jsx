@@ -97,7 +97,7 @@ export default function Map() {
 
       const zoneSegs = getZoneSegments(routeData.coordinates)
 
-      // Add zone segments with their colors (no dark outline - matches Preview)
+      // Add zone segments with their colors
       zoneSegs.forEach((seg, i) => {
         const srcId = `route-src-${i}`
         const glowId = `route-glow-${i}`
@@ -111,47 +111,34 @@ export default function Map() {
         // DEBUG: Log the color being used
         console.log(`🎨 MAP ZONE ${i}: color=${seg.color}`)
 
-        const outlineId = `route-outline-${i}`
-
-        // Add dark outline layer (underneath everything for contrast)
-        map.current.addLayer({
-          id: outlineId,
-          type: 'line',
-          source: srcId,
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#000000', 'line-width': 8, 'line-opacity': 0.8 }
-        })
-
-        // Glow layer - increased opacity for better visibility
+        // Glow layer
         map.current.addLayer({
           id: glowId,
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 14, 'line-blur': 6, 'line-opacity': 0.5 }
+          paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 }
         })
 
-        // Main line - explicit opacity 1.0 to ensure full brightness
+        // Main line
         map.current.addLayer({
           id: lineId,
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 5, 'line-opacity': 1.0 }
+          paint: { 'line-color': seg.color, 'line-width': 4, 'line-opacity': 1.0 }
         })
-
-        routeLayersRef.current.push(outlineId)
 
         routeLayersRef.current.push(srcId, glowId, lineId)
 
-        console.log(`🎨 Drawing segment ${i}: color=${seg.color}, glow-opacity=0.5, line-width=5`)
+        console.log(`🎨 Drawing segment ${i}: color=${seg.color}, glow-opacity=0.4, line-width=4`)
       })
 
       // Force route layers to top of stack
       const style = map.current.getStyle()
       const allLayerIds = style.layers.map(l => l.id)
       const routeLayerIds = allLayerIds.filter(id =>
-        id.startsWith('route-') || id.startsWith('glow-') || id.startsWith('line-') || id.startsWith('outline-')
+        id.startsWith('route-') || id.startsWith('glow-') || id.startsWith('line-')
       )
 
       // Also log ALL layers for debugging
