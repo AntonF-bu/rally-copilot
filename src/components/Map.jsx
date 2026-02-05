@@ -3,7 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { buildZoneSegments as buildZoneSegmentsShared } from '../utils/routeGeometry'
-import { colors } from '../styles/theme'
+import { colors, mapboxStyle } from '../styles/theme'
 
 // ================================
 // Map Component - v23
@@ -282,7 +282,7 @@ export default function Map() {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: mapboxStyle,
       center: startCoord,
       zoom: 10,    // Match Preview (was 14)
       pitch: 0,    // Match Preview flat view (was 60)

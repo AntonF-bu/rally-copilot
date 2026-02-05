@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { analyzeRouteCharacter, ROUTE_CHARACTER, CHARACTER_COLORS, CHARACTER_BEHAVIORS } from '../services/zoneService'
+import { mapboxStyle } from '../styles/theme'
 
 // ================================
 // Route Editor - Mission Customization
@@ -82,7 +83,7 @@ export default function RouteEditor({ onBack, onSave }) {
     
     mapRef.current = new mapboxgl.Map({
       container: mapContainer,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: mapboxStyle,
       center: routeData.coordinates[Math.floor(routeData.coordinates.length / 2)],
       zoom: 11,
       pitch: 0

@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
-import { colors } from '../../styles/theme'
+import { colors, mapboxStyle } from '../../styles/theme'
 
 export function RouteDetailView({ route, onClose }) {
   const mapContainer = useRef(null)
@@ -70,7 +70,7 @@ export function RouteDetailView({ route, onClose }) {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: mapboxStyle,
       center: [centerLng, centerLat],
       zoom: 11,
       attributionControl: false,

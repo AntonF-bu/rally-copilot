@@ -1,13 +1,12 @@
-// Discover Tab - Browse and save curated routes
-// Grid layout with search and filters
-// Refactored to use theme system
+// Discover Tab - Night Stage Design
+// Browse and save curated routes with premium dark aesthetic
 
 import { useState, useMemo } from 'react'
 import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
 import { DiscoverGridCard } from '../discover/DiscoverGridCard'
 import { RouteDetailView } from '../discover/RouteDetailView'
-import { colors, fonts, glassPanel, chipActive, chipInactive, pageTitle, sectionLabel, transitions } from '../../styles/theme'
+import { colors, fonts, transitions } from '../../styles/theme'
 
 export function DiscoverTab() {
   const [searchQuery, setSearchQuery] = useState('')
@@ -78,33 +77,48 @@ export function DiscoverTab() {
   const hasActiveFilters = searchQuery || selectedVibes.length > 0 || selectedRegions.length > 0
 
   return (
-    <div className="flex flex-col min-h-full topo-bg">
+    <div style={{ minHeight: '100%', position: 'relative' }}>
       {/* Header */}
-      <div className="px-3 pt-4 pb-2 flex-shrink-0">
-        <h1 style={pageTitle}>
+      <div style={{ padding: '24px 16px 16px' }}>
+        <h1 style={{
+          fontFamily: fonts.primary,
+          fontSize: '28px',
+          fontWeight: 600,
+          color: colors.textPrimary,
+          margin: 0,
+          marginBottom: '4px',
+        }}>
           Discover
         </h1>
-        <p className="text-[12px]" style={{ color: colors.textSecondary }}>
+        <p style={{
+          fontFamily: fonts.primary,
+          fontSize: '13px',
+          color: colors.textDim || 'rgba(255,255,255,0.5)',
+          margin: 0,
+        }}>
           Browse curated routes near you
         </p>
       </div>
 
-      {/* Search Bar - compact height */}
-      <div className="px-3 pb-2 flex-shrink-0">
+      {/* Search Bar */}
+      <div style={{ padding: '0 16px 12px' }}>
         <div
-          className="flex items-center gap-2 px-2.5 py-2"
           style={{
-            ...glassPanel,
-            transition: transitions.smooth,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '12px 14px',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '12px',
+            border: '1px solid rgba(255,255,255,0.06)',
           }}
         >
-          {/* Search icon */}
           <svg
-            width="16"
-            height="16"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="none"
-            stroke={colors.textSecondary}
+            stroke="rgba(255,255,255,0.4)"
             strokeWidth="2"
           >
             <circle cx="11" cy="11" r="8" />
@@ -115,14 +129,26 @@ export function DiscoverTab() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search routes, roads, or areas..."
-            className="flex-1 bg-transparent text-xs outline-none"
-            style={{ color: colors.textPrimary, fontFamily: fonts.body }}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              fontFamily: fonts.primary,
+              fontSize: '14px',
+              color: colors.textPrimary,
+            }}
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="p-0.5"
-              style={{ color: colors.textSecondary }}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '4px',
+                cursor: 'pointer',
+                color: 'rgba(255,255,255,0.4)',
+              }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -132,26 +158,41 @@ export function DiscoverTab() {
         </div>
       </div>
 
-      {/* Filter Chips - compact */}
-      <div className="px-3 pb-2 flex-shrink-0">
+      {/* Filter Chips */}
+      <div style={{ padding: '0 16px 16px' }}>
         {/* Vibes */}
-        <div className="mb-2">
-          <p className="mb-1" style={{ ...sectionLabel, fontSize: '11px', marginBottom: '4px' }}>
+        <div style={{ marginBottom: '12px' }}>
+          <p style={{
+            fontFamily: fonts.mono,
+            fontSize: '9px',
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'rgba(255,255,255,0.4)',
+            marginBottom: '8px',
+          }}>
             Vibes
           </p>
-          <div className="flex flex-wrap gap-1">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             {VIBE_FILTERS.map((filter) => {
               const isSelected = selectedVibes.includes(filter.id)
               return (
                 <button
                   key={filter.id}
                   onClick={() => handleVibeToggle(filter.id)}
-                  className="px-2 py-0.5 rounded-full text-[11px]"
                   style={{
-                    ...(isSelected ? chipActive : chipInactive),
-                    fontFamily: fonts.body,
-                    fontWeight: isSelected ? 500 : 400,
+                    padding: '6px 12px',
+                    borderRadius: '20px',
+                    border: 'none',
+                    fontFamily: fonts.mono,
+                    fontSize: '10px',
+                    fontWeight: 500,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    cursor: 'pointer',
                     transition: transitions.snappy,
+                    background: isSelected ? colors.accent : 'rgba(255,255,255,0.05)',
+                    color: isSelected ? '#111114' : 'rgba(255,255,255,0.6)',
                   }}
                 >
                   {filter.label}
@@ -163,22 +204,37 @@ export function DiscoverTab() {
 
         {/* Regions */}
         <div>
-          <p className="mb-1" style={{ ...sectionLabel, fontSize: '11px', marginBottom: '4px' }}>
+          <p style={{
+            fontFamily: fonts.mono,
+            fontSize: '9px',
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'rgba(255,255,255,0.4)',
+            marginBottom: '8px',
+          }}>
             Region
           </p>
-          <div className="flex flex-wrap gap-1">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
             {REGION_FILTERS.map((filter) => {
               const isSelected = selectedRegions.includes(filter.id)
               return (
                 <button
                   key={filter.id}
                   onClick={() => handleRegionToggle(filter.id)}
-                  className="px-2 py-0.5 rounded-full text-[11px]"
                   style={{
-                    ...(isSelected ? chipActive : chipInactive),
-                    fontFamily: fonts.body,
-                    fontWeight: isSelected ? 500 : 400,
+                    padding: '6px 12px',
+                    borderRadius: '20px',
+                    border: 'none',
+                    fontFamily: fonts.mono,
+                    fontSize: '10px',
+                    fontWeight: 500,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    cursor: 'pointer',
                     transition: transitions.snappy,
+                    background: isSelected ? colors.accent : 'rgba(255,255,255,0.05)',
+                    color: isSelected ? '#111114' : 'rgba(255,255,255,0.6)',
                   }}
                 >
                   {filter.label}
@@ -190,26 +246,47 @@ export function DiscoverTab() {
       </div>
 
       {/* Results count + Clear filters */}
-      <div className="px-3 pb-1.5 flex items-center justify-between flex-shrink-0">
-        <p className="text-[11px]" style={{ color: colors.textMuted, fontFamily: fonts.body }}>
+      <div style={{
+        padding: '0 16px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <p style={{
+          fontFamily: fonts.mono,
+          fontSize: '10px',
+          color: 'rgba(255,255,255,0.4)',
+          margin: 0,
+        }}>
           {filteredRoutes.length} route{filteredRoutes.length !== 1 ? 's' : ''}
           {hasActiveFilters && ' found'}
         </p>
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="text-[11px] font-medium"
-            style={{ color: colors.accent, fontFamily: fonts.body }}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontFamily: fonts.mono,
+              fontSize: '10px',
+              fontWeight: 500,
+              color: colors.accent,
+              cursor: 'pointer',
+            }}
           >
             Clear all
           </button>
         )}
       </div>
 
-      {/* Route Grid - 2 columns, tight spacing */}
-      <div className="px-3 pb-4 flex-1">
+      {/* Route Grid */}
+      <div style={{ padding: '0 16px 100px' }}>
         {filteredRoutes.length > 0 ? (
-          <div className="grid grid-cols-2 gap-2.5">
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '12px',
+          }}>
             {filteredRoutes.map((route) => (
               <DiscoverGridCard
                 key={route.id}
@@ -220,21 +297,32 @@ export function DiscoverTab() {
             ))}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            {/* Empty state icon */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '48px 0',
+            textAlign: 'center',
+          }}>
             <svg
-              width="36"
-              height="36"
+              width="40"
+              height="40"
               viewBox="0 0 24 24"
               fill="none"
-              stroke={colors.textMuted}
+              stroke="rgba(255,255,255,0.2)"
               strokeWidth="1.5"
-              className="mb-2"
+              style={{ marginBottom: '12px' }}
             >
               <circle cx="11" cy="11" r="8" />
               <path d="M21 21l-4.35-4.35" />
             </svg>
-            <p className="text-sm" style={{ color: colors.textSecondary, fontFamily: fonts.body }}>
+            <p style={{
+              fontFamily: fonts.primary,
+              fontSize: '14px',
+              color: 'rgba(255,255,255,0.5)',
+              margin: 0,
+            }}>
               {DISCOVERY_ROUTES.length === 0
                 ? 'Routes coming soon to this area'
                 : 'No routes match your search'}
@@ -242,8 +330,16 @@ export function DiscoverTab() {
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
-                className="mt-2 text-xs font-medium"
-                style={{ color: colors.accent, fontFamily: fonts.body }}
+                style={{
+                  marginTop: '12px',
+                  background: 'none',
+                  border: 'none',
+                  fontFamily: fonts.mono,
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  color: colors.accent,
+                  cursor: 'pointer',
+                }}
               >
                 Clear filters
               </button>
