@@ -175,6 +175,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       paint: {
         'line-color': colors.accent,
         'line-width': 4,
+        'line-opacity': 1.0,
       },
     })
 
