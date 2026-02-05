@@ -47,7 +47,7 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      className="absolute inset-0 z-50 flex flex-col items-center justify-center"
       style={{ background: colors.bgDeep }}
     >
       {/* Background glow - using accent orange */}

@@ -350,7 +350,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   // ========================================
   if (isLoadingRoute) {
     return (
-      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
+      <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
         <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
@@ -358,7 +358,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
 
   if (loadError) {
     return (
-      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4">
+      <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4">
         <p className="text-red-400">{loadError}</p>
         <button onClick={onBack} className="px-4 py-2 bg-white/10 rounded">Back</button>
       </div>
@@ -404,7 +404,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   // MAIN RENDER
   // ========================================
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f]">
+    <div className="absolute inset-0 bg-[#0a0a0f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
 
       {/* TOP BAR */}

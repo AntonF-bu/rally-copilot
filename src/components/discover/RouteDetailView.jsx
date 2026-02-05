@@ -264,12 +264,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
 
   return (
     <div
-      className="fixed inset-0 z-50"
+      className="absolute inset-0 z-50"
       style={{
         background: '#0a0a0f',
-        // Full viewport coverage for mobile Safari
-        height: '100dvh',
-        minHeight: '-webkit-fill-available',
       }}
     >
       {/* Map Container */}

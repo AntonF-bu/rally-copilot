@@ -39,7 +39,7 @@ export default function PreviewLoader({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      className="absolute inset-0 z-50 flex flex-col items-center justify-center"
       style={{ background: colors.bgDeep }}
     >
       {/* Animated background gradient - using accent orange */}

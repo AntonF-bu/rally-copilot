@@ -23,7 +23,7 @@ export function CurveListModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex flex-col">
+    <div className="absolute inset-0 bg-black/90 z-50 flex flex-col">
       <div className="flex items-center justify-between p-4 pt-12 border-b border-white/10">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-bold text-white">{curves.length} Curves</h2>
