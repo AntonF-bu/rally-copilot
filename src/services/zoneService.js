@@ -16,9 +16,9 @@ export const ROUTE_CHARACTER = {
 // SLEEVE colors for UI (distinct from route line warm colors)
 // These show WHERE you are (context/mode) - BOLD and visible
 export const CHARACTER_COLORS = {
-  technical: { primary: '#22d3ee', bg: 'rgba(34, 211, 238, 0.2)', label: 'Technical' },  // Bright Cyan
-  transit: { primary: '#3b82f6', bg: 'rgba(59, 130, 246, 0.2)', label: 'Highway' },      // Blue
-  urban: { primary: '#f472b6', bg: 'rgba(244, 114, 182, 0.2)', label: 'Urban' }          // Pink
+  technical: { primary: '#00FF94', bg: 'rgba(0, 255, 148, 0.2)', label: 'Technical' },   // Green
+  transit: { primary: '#CBD5E1', bg: 'rgba(203, 213, 225, 0.2)', label: 'Highway' },     // Gray
+  urban: { primary: '#FFD60A', bg: 'rgba(255, 214, 10, 0.2)', label: 'Urban' }           // Yellow
 }
 
 // Callout behavior per character
