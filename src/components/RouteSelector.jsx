@@ -5,6 +5,7 @@ import { BottomNav } from './BottomNav'
 import { HomeTab } from './tabs/HomeTab'
 import { DiscoverTab } from './tabs/DiscoverTab'
 import { ProfileTab } from './tabs/ProfileTab'
+import { colors } from '../styles/theme'
 
 // ================================
 // Route Selection Screen - v5
@@ -129,7 +130,7 @@ export default function RouteSelector() {
     <div
       className="fixed inset-0 flex flex-col"
       style={{
-        background: '#0a0a0f',
+        background: colors.bgDeep,
         // Use 100dvh for mobile Safari dynamic viewport
         height: '100dvh',
         minHeight: '-webkit-fill-available',

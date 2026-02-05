@@ -1,5 +1,6 @@
 // Bottom Navigation Tab Bar
 // Tabs: Home, Discover, Profile
+import { colors, fonts, transitions } from '../styles/theme'
 
 const tabs = [
   {
@@ -44,10 +45,10 @@ export function BottomNav({ activeTab, onTabChange }) {
       style={{
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        background: '#0d1117',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'rgba(6, 10, 19, 0.88)',
+        backdropFilter: 'blur(28px)',
+        WebkitBackdropFilter: 'blur(28px)',
+        borderTop: `1px solid ${colors.glassBorder}`,
       }}
     >
       {/* Tab buttons */}
@@ -60,17 +61,18 @@ export function BottomNav({ activeTab, onTabChange }) {
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className="flex flex-col items-center gap-1 px-6 py-1 transition-all"
+              className="flex flex-col items-center gap-1 px-6 py-1"
               style={{
-                color: isActive ? '#FF6B35' : 'rgba(255, 255, 255, 0.4)',
+                color: isActive ? colors.accent : colors.textMuted,
+                transition: transitions.snappy,
               }}
             >
               <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
               <span
                 style={{
-                  fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                  fontFamily: fonts.heading,
                   fontSize: '10px',
-                  fontWeight: isActive ? 600 : 500,
+                  fontWeight: isActive ? 600 : 400,
                   letterSpacing: '0.08em',
                   textTransform: 'uppercase',
                 }}

@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
+import { colors, fonts, glassPanel, transitions } from '../styles/theme'
 
 // ================================
 // Preview Loader - Shows while route is being analyzed
 // Displays progress for zones, curves, and AI enhancement
+// Refactored to use theme system
 // ================================
 
-export default function PreviewLoader({ 
-  isLoading, 
+export default function PreviewLoader({
+  isLoading,
   stages = {},
   routeName = 'Route'
 }) {
   const [dots, setDots] = useState('')
-  
+
   useEffect(() => {
     if (!isLoading) return
     const interval = setInterval(() => {
@@ -34,15 +36,18 @@ export default function PreviewLoader({
 
   // Find current active stage
   const activeStageIndex = stageConfig.findIndex(s => stages[s.key] === 'loading')
-  
+
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] z-50 flex flex-col items-center justify-center">
-      {/* Animated background gradient */}
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      style={{ background: colors.bgDeep }}
+    >
+      {/* Animated background gradient - using accent orange */}
       <div className="absolute inset-0 overflow-hidden">
-        <div 
+        <div
           className="absolute w-[600px] h-[600px] rounded-full blur-[120px] opacity-20"
           style={{
-            background: 'radial-gradient(circle, #00d4ff 0%, #8b5cf6 50%, transparent 70%)',
+            background: `radial-gradient(circle, ${colors.accent} 0%, #8b5cf6 50%, transparent 70%)`,
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
@@ -53,14 +58,30 @@ export default function PreviewLoader({
 
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center px-6 max-w-md w-full">
-        
+
         {/* Route name */}
-        <h2 className="text-white/90 text-lg font-medium mb-1 text-center truncate max-w-full">
+        <h2
+          className="mb-1 text-center truncate max-w-full"
+          style={{
+            color: colors.textPrimary,
+            fontSize: '18px',
+            fontWeight: 500,
+            fontFamily: fonts.body,
+          }}
+        >
           {routeName}
         </h2>
-        
+
         {/* Main status */}
-        <div className="text-cyan-400 text-sm mb-8">
+        <div
+          className="mb-8"
+          style={{
+            color: colors.accent,
+            fontSize: '14px',
+            fontFamily: fonts.heading,
+            letterSpacing: '0.05em',
+          }}
+        >
           Preparing your co-pilot{dots}
         </div>
 
@@ -71,20 +92,20 @@ export default function PreviewLoader({
             const isActive = status === 'loading'
             const isComplete = status === 'complete'
             const isPending = !status || status === 'pending'
-            
+
             // Skip stages that haven't started and aren't next
             if (isPending && index > activeStageIndex + 1) return null
-            
+
             return (
-              <div 
+              <div
                 key={stage.key}
-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-300 ${
-                  isActive 
-                    ? 'bg-white/10 border border-cyan-500/30' 
-                    : isComplete 
-                      ? 'bg-white/5 opacity-60' 
-                      : 'opacity-30'
-                }`}
+                className="flex items-center gap-3 px-4 py-2 rounded-lg"
+                style={{
+                  ...glassPanel,
+                  borderColor: isActive ? `${colors.accent}50` : colors.glassBorder,
+                  opacity: isComplete ? 0.6 : isPending ? 0.3 : 1,
+                  transition: transitions.smooth,
+                }}
               >
                 {/* Status indicator */}
                 <div className="w-6 h-6 flex items-center justify-center">
@@ -94,20 +115,41 @@ export default function PreviewLoader({
                       <polyline points="22 4 12 14.01 9 11.01"/>
                     </svg>
                   ) : isActive ? (
-                    <div className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                    <div
+                      className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
+                      style={{ borderColor: `${colors.accent} transparent ${colors.accent} ${colors.accent}` }}
+                    />
                   ) : (
-                    <div className="w-3 h-3 rounded-full bg-white/20" />
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ background: colors.textMuted }}
+                    />
                   )}
                 </div>
-                
+
                 {/* Label */}
-                <span className={`text-sm flex-1 ${isActive ? 'text-white' : 'text-white/70'}`}>
+                <span
+                  className="text-sm flex-1"
+                  style={{
+                    color: isActive ? colors.textPrimary : colors.textSecondary,
+                    fontFamily: fonts.body,
+                  }}
+                >
                   {stage.label}
                 </span>
-                
+
                 {/* AI badge for AI stages */}
                 {(stage.key === 'aiZones' || stage.key === 'aiCurves') && isComplete && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">
+                  <span
+                    className="px-1.5 py-0.5 rounded font-medium"
+                    style={{
+                      fontSize: '9px',
+                      background: 'rgba(139, 92, 246, 0.2)',
+                      color: '#a78bfa',
+                      fontFamily: fonts.heading,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
                     AI
                   </span>
                 )}
@@ -117,7 +159,7 @@ export default function PreviewLoader({
         </div>
 
         {/* Tip */}
-        <div className="text-white/30 text-xs text-center">
+        <div style={{ color: colors.textMuted, fontSize: '12px', textAlign: 'center' }}>
           AI analysis makes your callouts smarter and more accurate
         </div>
       </div>
