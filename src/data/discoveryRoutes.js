@@ -1,31 +1,169 @@
 // Seeded discovery routes for the Discover tab
 // These are curated routes users can browse and save
+// 10 real Boston-area routes with actual coordinates
 
 export const DISCOVERY_ROUTES = [
   {
     id: 'tower-road-technical',
     name: 'Tower Road Technical',
     region: 'boston-area',
-    start: {
-      lat: 42.366919,
-      lng: -71.304276,
-      label: 'Weston'
-    },
-    end: {
-      lat: 42.425628,
-      lng: -71.304242,
-      label: 'Lincoln'
-    },
-    // Waypoints to force specific routing through Tower Road
+    start: { lat: 42.3669, lng: -71.3043, label: 'Weston' },
+    end: { lat: 42.4256, lng: -71.3042, label: 'Lincoln' },
     waypoints: [],
-    // Pre-computed route geometry (fetched on save if not present)
     geometry: null,
     distance: 5,
     duration: 15,
     difficulty: 'moderate',
     tags: ['technical', 'twisty', 'quick', 'backroads'],
-    description: 'Quick technical fix close to Boston. Forest roads, quiet residential.',
-    claimedBy: null,
+    description: 'Quick technical fix close to Boston. Forest roads, tight corners through Lincoln conservation land.',
+  },
+  {
+    id: 'blue-hills-serpentine',
+    name: 'Blue Hills Serpentine',
+    region: 'boston-area',
+    start: { lat: 42.2168, lng: -71.1054, label: 'Canton' },
+    end: { lat: 42.2510, lng: -71.0023, label: 'Quincy' },
+    waypoints: [
+      { lat: 42.2132, lng: -71.0583 }
+    ],
+    geometry: null,
+    distance: 12,
+    duration: 22,
+    difficulty: 'hard',
+    tags: ['technical', 'twisty', 'scenic', 'backroads'],
+    description: 'Tight elevation changes through Blue Hills Reservation. The closest thing to mountain roads near Boston.',
+  },
+  {
+    id: 'north-shore-coastal',
+    name: 'North Shore Coastal',
+    region: 'north-shore',
+    start: { lat: 42.5195, lng: -70.8967, label: 'Salem' },
+    end: { lat: 42.6590, lng: -70.6148, label: 'Rockport' },
+    waypoints: [
+      { lat: 42.5584, lng: -70.8805 },
+      { lat: 42.6159, lng: -70.6620 }
+    ],
+    geometry: null,
+    distance: 22,
+    duration: 40,
+    difficulty: 'moderate',
+    tags: ['scenic', 'chill', 'backroads', 'night'],
+    description: 'Classic coastal cruise along 127/127A. Ocean views, harbor towns, winding seaside roads.',
+  },
+  {
+    id: 'mohawk-trail-west',
+    name: 'Mohawk Trail West',
+    region: 'western-ma',
+    start: { lat: 42.5876, lng: -72.5990, label: 'Greenfield' },
+    end: { lat: 42.7009, lng: -73.1110, label: 'North Adams' },
+    waypoints: [
+      { lat: 42.6336, lng: -72.7785 },
+      { lat: 42.6758, lng: -72.9875 }
+    ],
+    geometry: null,
+    distance: 41,
+    duration: 55,
+    difficulty: 'hard',
+    tags: ['technical', 'twisty', 'scenic', 'backroads'],
+    description: 'The legendary Route 2 through the Berkshires. Hairpin Turn, elevation swings, the real deal.',
+  },
+  {
+    id: 'cape-ann-loop',
+    name: 'Cape Ann Loop',
+    region: 'north-shore',
+    start: { lat: 42.6159, lng: -70.6620, label: 'Gloucester' },
+    end: { lat: 42.6320, lng: -70.7821, label: 'Essex' },
+    waypoints: [
+      { lat: 42.6590, lng: -70.6148 },
+      { lat: 42.6915, lng: -70.6247 }
+    ],
+    geometry: null,
+    distance: 28,
+    duration: 45,
+    difficulty: 'moderate',
+    tags: ['scenic', 'chill', 'twisty', 'night'],
+    description: 'Full loop around Cape Ann. Rocky coastline, lighthouses, harbor bends through Rockport and Lanesville.',
+  },
+  {
+    id: 'quabbin-reservoir-run',
+    name: 'Quabbin Reservoir Run',
+    region: 'western-ma',
+    start: { lat: 42.2779, lng: -72.3468, label: 'Belchertown' },
+    end: { lat: 42.4630, lng: -72.1868, label: 'Petersham' },
+    waypoints: [
+      { lat: 42.3520, lng: -72.3148 },
+      { lat: 42.4270, lng: -72.2580 }
+    ],
+    geometry: null,
+    distance: 35,
+    duration: 48,
+    difficulty: 'hard',
+    tags: ['technical', 'backroads', 'scenic', 'twisty'],
+    description: 'Empty forest roads circling the reservoir. Zero traffic, pure driving. Best in fall foliage.',
+  },
+  {
+    id: 'reservoir-loop',
+    name: 'Reservoir Loop',
+    region: 'boston-area',
+    start: { lat: 42.3317, lng: -71.1912, label: 'Newton' },
+    end: { lat: 42.3418, lng: -71.1367, label: 'Brookline' },
+    waypoints: [],
+    geometry: null,
+    distance: 8,
+    duration: 18,
+    difficulty: 'easy',
+    tags: ['chill', 'quick', 'scenic'],
+    description: 'Relaxed loop past Chestnut Hill Reservoir and through Brookline neighborhoods. Good warmup run.',
+  },
+  {
+    id: 'route-2a-mountain',
+    name: 'Route 2A Mountain',
+    region: 'western-ma',
+    start: { lat: 42.4473, lng: -71.2290, label: 'Lexington' },
+    end: { lat: 42.5834, lng: -71.8023, label: 'Fitchburg' },
+    waypoints: [
+      { lat: 42.4862, lng: -71.4332 },
+      { lat: 42.5210, lng: -71.5753 }
+    ],
+    geometry: null,
+    distance: 38,
+    duration: 50,
+    difficulty: 'hard',
+    tags: ['technical', 'backroads', 'twisty'],
+    description: 'The back way out of Boston through Harvard and Shirley. Surprising elevation and tight sequences.',
+  },
+  {
+    id: 'south-shore-sweep',
+    name: 'South Shore Sweep',
+    region: 'south-shore',
+    start: { lat: 42.0821, lng: -70.8115, label: 'Marshfield' },
+    end: { lat: 41.9584, lng: -70.6679, label: 'Plymouth' },
+    waypoints: [
+      { lat: 42.0455, lng: -70.7094 },
+      { lat: 42.0040, lng: -70.6399 }
+    ],
+    geometry: null,
+    distance: 24,
+    duration: 35,
+    difficulty: 'easy',
+    tags: ['scenic', 'chill', 'backroads'],
+    description: 'Coastal route through Duxbury and Kingston. Marshes, ocean glimpses, relaxed pace.',
+  },
+  {
+    id: 'wachusett-ascent',
+    name: 'Wachusett Ascent',
+    region: 'western-ma',
+    start: { lat: 42.4530, lng: -71.8880, label: 'Sterling' },
+    end: { lat: 42.5030, lng: -71.8863, label: 'Princeton' },
+    waypoints: [
+      { lat: 42.4850, lng: -71.8890 }
+    ],
+    geometry: null,
+    distance: 14,
+    duration: 22,
+    difficulty: 'moderate',
+    tags: ['technical', 'scenic', 'quick', 'twisty'],
+    description: 'Climb up to Wachusett Mountain. Switchbacks, elevation gain, summit views on clear days.',
   },
 ]
 

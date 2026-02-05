@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import useStore from '../store'
 import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 import { BottomNav } from './BottomNav'
@@ -83,16 +83,45 @@ export default function RouteSelector() {
   const [error, setError] = useState(null)
   const [hasLocation, setHasLocation] = useState(false)
 
-  // Placeholder logbook stats (will wire up real data later)
-  const logbookStats = {
-    rank: 'Road Scout',
-    totalMiles: 847,
-    nextRank: 'Pace Setter',
-    nextRankMiles: 1000,
-    routeCount: 23,
-    weekMiles: 124,
-    weekChange: '+18%',
-  }
+  // Compute real logbook stats from recentRoutes
+  const logbookStats = useMemo(() => {
+    const totalMiles = recentRoutes?.reduce((acc, route) => {
+      return acc + (route.distance ? route.distance / 1609.34 : 0)
+    }, 0) || 0
+
+    const totalCurves = recentRoutes?.reduce((acc, route) => {
+      return acc + (route.curveCount || 0)
+    }, 0) || 0
+
+    const routeCount = recentRoutes?.length || 0
+
+    // Calculate week stats (routes from last 7 days)
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const weekRoutes = recentRoutes?.filter(r => r.timestamp && r.timestamp > oneWeekAgo) || []
+    const weekMiles = weekRoutes.reduce((acc, route) => {
+      return acc + (route.distance ? route.distance / 1609.34 : 0)
+    }, 0)
+
+    // Determine rank based on total miles
+    let rank = 'Rookie'
+    let nextRank = 'Road Scout'
+    let nextRankMiles = 100
+    if (totalMiles >= 100) { rank = 'Road Scout'; nextRank = 'Pace Setter'; nextRankMiles = 500 }
+    if (totalMiles >= 500) { rank = 'Pace Setter'; nextRank = 'Road Master'; nextRankMiles = 1000 }
+    if (totalMiles >= 1000) { rank = 'Road Master'; nextRank = 'Rally Legend'; nextRankMiles = 2500 }
+    if (totalMiles >= 2500) { rank = 'Rally Legend'; nextRank = 'Achieved'; nextRankMiles = totalMiles }
+
+    return {
+      rank,
+      totalMiles: Math.round(totalMiles),
+      nextRank,
+      nextRankMiles,
+      routeCount,
+      totalCurves,
+      weekMiles: Math.round(weekMiles),
+      weekChange: null, // Would need historical data to calculate
+    }
+  }, [recentRoutes])
 
   // Get location on mount
   useEffect(() => {
@@ -213,10 +242,15 @@ export default function RouteSelector() {
               isLoading={isLoading}
               error={error}
               onClearError={() => setError(null)}
+              onNavigateToSettings={handleNavigateToSettings}
+              onTabChange={setActiveTab}
             />
           )}
           {activeTab === 'discover' && (
-            <DiscoverTab />
+            <DiscoverTab
+              onStartDrive={handleStartDrive}
+              onTabChange={setActiveTab}
+            />
           )}
           {activeTab === 'profile' && (
             <ProfileTab
