@@ -36,9 +36,9 @@ export const colors = {
 
   // Zone colors (route analysis)
   zones: {
-    technical: '#00FFAA',
-    transit: '#E2E8F0',
-    urban: '#FFEA00',
+    technical: '#00FFB3',
+    transit: '#93C5FD',
+    urban: '#FDE047',
   },
 
   // Difficulty badges

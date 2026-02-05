@@ -166,7 +166,7 @@ export default function RouteEditor({ onBack, onSave }) {
         id: 'route-line',
         type: 'line',
         source: 'route',
-        paint: { 'line-color': '#22c55e', 'line-width': 6, 'line-opacity': 1.0 }
+        paint: { 'line-color': '#22c55e', 'line-width': 4, 'line-opacity': 0.8 }
       })
     }
     

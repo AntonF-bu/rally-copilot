@@ -95,9 +95,9 @@ export function useMapSetup({
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': seg.color,
-          'line-width': 20,
-          'line-blur': 8,
-          'line-opacity': 0.6
+          'line-width': 12,
+          'line-blur': 5,
+          'line-opacity': 0.4
         }
       })
 
@@ -107,7 +107,7 @@ export function useMapSetup({
         type: 'line',
         source: srcId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': seg.color, 'line-width': 6, 'line-opacity': 1.0 }
+        paint: { 'line-color': seg.color, 'line-width': 4 }
       })
     })
   }, [buildSleeveSegments])
