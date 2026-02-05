@@ -139,8 +139,9 @@ export function RouteDetailView({ route, onClose }) {
       new mapboxgl.LngLatBounds(coordinates[0], coordinates[0])
     )
 
+    // Increased padding to ensure route is visible above the info panel
     map.current.fitBounds(bounds, {
-      padding: { top: 80, bottom: 280, left: 40, right: 40 },
+      padding: { top: 100, bottom: 350, left: 60, right: 60 },
       duration: 500,
     })
   }, [mapLoaded, routeGeometry])
@@ -213,7 +214,15 @@ export function RouteDetailView({ route, onClose }) {
   const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
 
   return (
-    <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
+    <div
+      className="fixed inset-0 z-50"
+      style={{
+        background: '#0a0a0f',
+        // Full viewport coverage for mobile Safari
+        height: '100dvh',
+        minHeight: '-webkit-fill-available',
+      }}
+    >
       {/* Map Container */}
       <div ref={mapContainer} className="absolute inset-0" />
 
@@ -224,39 +233,47 @@ export function RouteDetailView({ route, onClose }) {
         </div>
       )}
 
-      {/* Back Button */}
+      {/* Back Button - high contrast pill for visibility on any map background */}
       <button
         onClick={onClose}
-        className="absolute top-4 left-4 z-10 w-10 h-10 rounded-full flex items-center justify-center"
+        className="absolute z-10 flex items-center gap-1.5 rounded-full shadow-lg"
         style={{
-          background: 'rgba(10, 10, 15, 0.8)',
+          top: 'max(16px, env(safe-area-inset-top, 16px))',
+          left: '16px',
+          padding: '10px 14px',
+          background: 'rgba(0, 0, 0, 0.7)',
           backdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          WebkitBackdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
         }}
       >
         {/* ChevronLeft icon */}
         <svg
-          width="20"
-          height="20"
+          width="18"
+          height="18"
           viewBox="0 0 24 24"
           fill="none"
           stroke="white"
-          strokeWidth="2"
+          strokeWidth="2.5"
         >
           <path d="M15 18l-6-6 6-6" />
         </svg>
+        <span className="text-white text-sm font-medium">Back</span>
       </button>
 
       {/* Bottom Info Panel */}
       <div
         className="absolute bottom-0 left-0 right-0 z-10 rounded-t-3xl"
         style={{
-          background: 'rgba(10, 10, 15, 0.95)',
+          background: 'rgba(10, 10, 15, 0.98)',
           backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+          // Ensure safe area padding for home indicator
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
-        <div className="p-5 pb-8">
+        <div className="p-5 pb-6">
           {/* Route Name */}
           <h2 className="text-xl font-bold text-white mb-2">{route.name}</h2>
 

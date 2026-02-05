@@ -39,17 +39,20 @@ const tabs = [
 
 export function BottomNav({ activeTab, onTabChange }) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50">
-      {/* Frosted glass background */}
-      <div
-        className="flex justify-around items-center py-3 px-4"
-        style={{
-          background: 'rgba(10, 10, 15, 0.85)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-        }}
-      >
+    <nav
+      className="fixed left-0 right-0 z-50"
+      style={{
+        bottom: 0,
+        // Ensure it's at actual bottom on mobile
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        background: 'rgba(10, 10, 15, 0.95)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+      }}
+    >
+      {/* Tab buttons */}
+      <div className="flex justify-around items-center py-3 px-4">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -77,14 +80,6 @@ export function BottomNav({ activeTab, onTabChange }) {
           )
         })}
       </div>
-
-      {/* Safe area padding for iOS */}
-      <div
-        style={{
-          background: 'rgba(10, 10, 15, 0.85)',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        }}
-      />
     </nav>
   )
 }

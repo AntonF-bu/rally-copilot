@@ -122,16 +122,26 @@ export default function RouteSelector() {
     toggleSettings()
   }
 
+  // Calculate nav height including safe area
+  const navHeight = 'calc(70px + env(safe-area-inset-bottom, 0px))'
+
   return (
     <div
       className="fixed inset-0 flex flex-col"
       style={{
         background: '#0a0a0f',
-        paddingBottom: '70px', // Space for bottom nav
+        // Use 100dvh for mobile Safari dynamic viewport
+        height: '100dvh',
+        minHeight: '-webkit-fill-available',
       }}
     >
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className="flex-1 overflow-y-auto overscroll-contain"
+        style={{
+          paddingBottom: navHeight,
+        }}
+      >
         {activeTab === 'home' && (
           <HomeTab
             hasLocation={hasLocation}
