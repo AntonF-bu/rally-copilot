@@ -100,7 +100,8 @@ export function useMapSetup({
           'line-color': seg.color,
           'line-width': 12,
           'line-blur': 5,
-          'line-opacity': 0.4
+          'line-opacity': 0.4,
+          'line-emissive-strength': 1.0
         }
       })
 
@@ -110,7 +111,7 @@ export function useMapSetup({
         type: 'line',
         source: srcId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': seg.color, 'line-width': 4, 'line-opacity': 1.0 }
+        paint: { 'line-color': seg.color, 'line-width': 4, 'line-opacity': 1.0, 'line-emissive-strength': 1.0 }
       })
 
       console.log(`🎨 Drawing segment ${i}: color=${seg.color}, glow-opacity=0.4, line-width=4`)

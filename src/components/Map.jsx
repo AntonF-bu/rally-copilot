@@ -117,7 +117,7 @@ export default function Map() {
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4 }
+          paint: { 'line-color': seg.color, 'line-width': 12, 'line-blur': 5, 'line-opacity': 0.4, 'line-emissive-strength': 1.0 }
         })
 
         // Main line
@@ -126,7 +126,7 @@ export default function Map() {
           type: 'line',
           source: srcId,
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': seg.color, 'line-width': 4, 'line-opacity': 1.0 }
+          paint: { 'line-color': seg.color, 'line-width': 4, 'line-opacity': 1.0, 'line-emissive-strength': 1.0 }
         })
 
         routeLayersRef.current.push(srcId, glowId, lineId)
