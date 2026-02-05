@@ -73,9 +73,12 @@ export function useMapSetup({
       const glowId = `glow-${i}`
       const lineId = `line-${i}`
 
+      const outlineId = `outline-${i}`
+
       // Clean up existing layers
-      if (map.getLayer(glowId)) map.removeLayer(glowId)
       if (map.getLayer(lineId)) map.removeLayer(lineId)
+      if (map.getLayer(glowId)) map.removeLayer(glowId)
+      if (map.getLayer(outlineId)) map.removeLayer(outlineId)
       if (map.getSource(srcId)) map.removeSource(srcId)
 
       // Add source
@@ -87,7 +90,23 @@ export function useMapSetup({
         }
       })
 
-      // Add glow layer
+      // DEBUG: Log the color being used
+      console.log(`🎨 ZONE ${i}: character=${seg.character}, color=${seg.color}`)
+
+      // Add dark outline layer (underneath everything for contrast)
+      map.addLayer({
+        id: outlineId,
+        type: 'line',
+        source: srcId,
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': '#000000',
+          'line-width': 8,
+          'line-opacity': 0.8
+        }
+      })
+
+      // Add glow layer - increased opacity for better visibility
       map.addLayer({
         id: glowId,
         type: 'line',
@@ -95,19 +114,19 @@ export function useMapSetup({
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': seg.color,
-          'line-width': 12,
-          'line-blur': 5,
-          'line-opacity': 0.4
+          'line-width': 14,
+          'line-blur': 6,
+          'line-opacity': 0.5
         }
       })
 
-      // Add line layer
+      // Add line layer - explicit opacity 1.0 to ensure full brightness
       map.addLayer({
         id: lineId,
         type: 'line',
         source: srcId,
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': seg.color, 'line-width': 4 }
+        paint: { 'line-color': seg.color, 'line-width': 5, 'line-opacity': 1.0 }
       })
     })
   }, [buildSleeveSegments])

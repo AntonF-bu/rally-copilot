@@ -69,7 +69,7 @@ export function buildZoneSegments(coordinates, zones, totalDistance, zoneColors)
   if (!coordinates?.length || !zones?.length) {
     return [{
       coordinates,
-      color: zoneColors.technical || '#22d3ee'
+      color: zoneColors.technical || '#00E68A'
     }]
   }
 
@@ -117,7 +117,7 @@ export function buildZoneSegments(coordinates, zones, totalDistance, zoneColors)
   if (segments.length === 0) {
     return [{
       coordinates,
-      color: zoneColors.technical || '#22d3ee'
+      color: zoneColors.technical || '#00E68A'
     }]
   }
 
