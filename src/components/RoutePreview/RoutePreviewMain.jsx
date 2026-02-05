@@ -257,6 +257,18 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     finally { setIsDownloading(false) }
   }, [isDownloading, routeData, preloadRouteAudio])
 
+  const handleRecenter = useCallback(() => {
+    if (!mapRef.current || !routeData?.coordinates) return
+    const bounds = routeData.coordinates.reduce(
+      (b, c) => b.extend(c),
+      new mapboxgl.LngLatBounds(routeData.coordinates[0], routeData.coordinates[0])
+    )
+    mapRef.current.fitBounds(bounds, {
+      padding: { top: 80, bottom: 200, left: 40, right: 40 },
+      duration: 1000
+    })
+  }, [mapRef, routeData])
+
   const handleStart = useCallback(async () => {
     await initAudio()
     setIsPreparingCopilot(true)
@@ -351,7 +363,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   if (isLoadingRoute) {
     return (
       <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
@@ -408,8 +420,8 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
       <div ref={mapContainerRef} className="absolute inset-0" />
 
       {/* TOP BAR */}
-      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent">
-        <div className="flex items-center justify-between p-2 pt-10">
+      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-[#0a0a0f] via-[#0a0a0f]/90 to-transparent" style={{ paddingTop: 'env(safe-area-inset-top, 12px)' }}>
+        <div className="flex items-center justify-between p-2 pt-3">
           {/* Left: Navigation + Map controls */}
           <div className="flex items-center gap-1.5">
             <button onClick={onBack} className="w-9 h-9 rounded-full bg-black/70 border border-white/10 flex items-center justify-center">
@@ -460,7 +472,11 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
 
           {/* Right: Route info badges + favorite */}
           <div className="flex items-center gap-1.5">
-            <span className={`text-[9px] font-bold px-2 py-1 rounded-full ${selectedMode === HIGHWAY_MODE.COMPANION ? 'bg-amber-500/20 text-amber-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+            <span className="text-[9px] font-bold px-2 py-1 rounded-full"
+              style={{
+                background: selectedMode === HIGHWAY_MODE.COMPANION ? 'rgba(251,191,36,0.2)' : 'rgba(249,115,22,0.2)',
+                color: selectedMode === HIGHWAY_MODE.COMPANION ? '#FBBF24' : '#F97316'
+              }}>
               {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMPANION' : 'BASIC'}
             </span>
             <div className="px-2 py-1 rounded-full bg-black/70 border border-white/10 flex items-center gap-1">
@@ -481,7 +497,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
 
       {/* Elevation mini widget */}
       {elevationData.length > 0 && (
-        <div className="absolute right-2 z-20" style={{ top: '180px' }}>
+        <div className="absolute right-2 z-20" style={{ top: '70px' }}>
           <div className="bg-black/80 rounded-lg p-1.5 border border-white/10 w-24">
             <div className="text-[8px] text-white/50 mb-0.5">ELEVATION</div>
             <MiniElevation data={elevationData} color={modeColor} />
@@ -598,13 +614,13 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
         <div className="flex items-center justify-end gap-1.5 mb-2">
           {/* TODO: Re-enable edit button when zone editing is complete */}
           {/* <Btn icon="edit" onClick={onEdit} tip="Edit" highlight={hasEdits} /> */}
-          <Btn icon="fly" onClick={startFly} disabled={isFlying} tip="Preview" />
+          <Btn icon="recenter" onClick={handleRecenter} tip="Recenter" />
           <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
           <Btn icon="share" onClick={handleShare} tip="Share" />
         </div>
 
         {/* Start button */}
-        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: modeColor }}>
+        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: colors.accent }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
           START NAVIGATION
         </button>
@@ -663,7 +679,7 @@ function Btn({ icon, onClick, disabled, success, loading, tip, highlight }) {
   const icons = {
     edit: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
     reverse: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>,
-    fly: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
+    recenter: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>,
     voice: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
     share: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>,
     download: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,

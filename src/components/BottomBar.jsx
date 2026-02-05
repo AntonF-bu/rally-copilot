@@ -216,19 +216,6 @@ export default function BottomBar() {
         </div>
       )}
 
-      {/* Mode Selector */}
-      <div className="flex justify-center mb-2">
-        <div className="inline-flex bg-black/60 backdrop-blur-xl rounded-full p-1 border border-white/10">
-          {['cruise', 'fast', 'race'].map((m) => (
-            <button key={m} onClick={() => setMode(m)}
-              className="px-5 py-1.5 rounded-full text-xs font-bold tracking-wider transition-all"
-              style={{ background: mode === m ? modeColors[m] : 'transparent', color: mode === m ? (m === 'fast' ? 'black' : 'white') : 'rgba(255,255,255,0.5)' }}>
-              {m.toUpperCase()}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Main Controls */}
       <div className="px-3 pb-3">
         <div className="flex items-center gap-2">

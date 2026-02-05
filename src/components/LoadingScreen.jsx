@@ -139,7 +139,7 @@ export default function LoadingScreen({
               className={`h-full rounded-full transition-all duration-500 ${
                 mode === HIGHWAY_MODE.COMPANION 
                   ? 'bg-gradient-to-r from-amber-500 to-amber-400' 
-                  : 'bg-gradient-to-r from-cyan-500 to-cyan-400'
+                  : 'bg-gradient-to-r from-orange-500 to-orange-400'
               }`}
               style={{ width: `${progress}%` }}
             />

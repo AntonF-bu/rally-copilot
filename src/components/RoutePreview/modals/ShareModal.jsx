@@ -13,7 +13,7 @@ export default function ShareModal({ name, onClose }) {
         <p className="text-white/60 text-sm mb-4">{name || 'Rally Route'}</p>
         <button
           onClick={copyLink}
-          className="w-full py-3 bg-cyan-500 text-black font-bold rounded-xl mb-2"
+          className="w-full py-3 bg-orange-500 text-black font-bold rounded-xl mb-2"
         >
           Copy Link
         </button>

@@ -41,7 +41,7 @@ export function FlyControls({
               onClick={() => onSetSpeed(s)}
               className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all ${
                 flySpeed === s
-                  ? 'bg-cyan-500 text-black'
+                  ? 'bg-orange-500 text-black'
                   : 'text-white/60 hover:text-white'
               }`}
             >

@@ -366,7 +366,7 @@ export default function RouteEditor({ onBack, onSave }) {
                 Reset
               </button>
             )}
-            <button onClick={handleSaveRoute} className="px-4 py-1.5 rounded-lg bg-cyan-500 text-black text-xs font-bold">
+            <button onClick={handleSaveRoute} className="px-4 py-1.5 rounded-lg bg-orange-500 text-black text-xs font-bold">
               Save Route
             </button>
           </div>
@@ -408,7 +408,7 @@ export default function RouteEditor({ onBack, onSave }) {
       {/* Zone Loading Indicator */}
       {isLoadingZones && (
         <div className="absolute top-32 right-3 z-20 bg-black/80 rounded-lg px-3 py-2 border border-white/10 flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
           <span className="text-xs text-white/60">Detecting zones...</span>
         </div>
       )}
@@ -477,7 +477,7 @@ export default function RouteEditor({ onBack, onSave }) {
             )}
             {isLoadingZones && (
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
                 <span className="text-white/40 text-xs">Analyzing route character...</span>
               </div>
             )}
@@ -535,7 +535,7 @@ export default function RouteEditor({ onBack, onSave }) {
 
       {!mapLoaded && (
         <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center z-40">
-          <div className="w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
     </div>
