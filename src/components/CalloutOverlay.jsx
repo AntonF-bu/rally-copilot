@@ -543,13 +543,9 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 // Helper: Get color for curated callout
 // ========================================
 function getCalloutColor(callout) {
-  // Zone-based default
-  const zoneColors = {
-    technical: '#22d3ee',
-    transit: '#3b82f6',
-    urban: '#f472b6'
-  }
-  
+  // Zone-based default - use theme colors
+  const zoneColors = ZONE_COLORS
+
   // Type-based override
   if (callout.type === 'danger' || callout.text?.toLowerCase().includes('caution')) {
     return '#ef4444' // Red
@@ -563,7 +559,7 @@ function getCalloutColor(callout) {
   if (callout.type === 'wake_up') {
     return '#10b981' // Green
   }
-  
+
   return zoneColors[callout.zone] || '#22c55e'
 }
 
