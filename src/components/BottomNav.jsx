@@ -1,6 +1,6 @@
-// Bottom Navigation Tab Bar
+// Bottom Navigation Tab Bar - Night Stage Design
 // Tabs: Home, Discover, Profile
-import { colors, fonts, transitions } from '../styles/theme'
+import { colors, fonts, transitions, layout } from '../styles/theme'
 
 const tabs = [
   {
@@ -45,43 +45,54 @@ export function BottomNav({ activeTab, onTabChange }) {
       style={{
         bottom: 0,
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        background: 'rgba(6, 10, 19, 0.88)',
-        backdropFilter: 'blur(28px)',
-        WebkitBackdropFilter: 'blur(28px)',
-        borderTop: `1px solid ${colors.glassBorder}`,
       }}
     >
-      {/* Tab buttons */}
-      <div className="flex justify-around items-center py-2.5 px-4">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          const isActive = activeTab === tab.id
+      {/* Glass container with rounded top corners */}
+      <div
+        style={{
+          maxWidth: layout.maxWidth,
+          margin: '0 auto',
+          background: 'rgba(17, 17, 20, 0.85)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderRadius: '20px 20px 0 0',
+          borderTop: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
+          borderLeft: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
+          borderRight: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
+        }}
+      >
+        {/* Tab buttons */}
+        <div className="flex justify-around items-center py-3 px-4">
+          {tabs.map((tab) => {
+            const Icon = tab.icon
+            const isActive = activeTab === tab.id
 
-          return (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className="flex flex-col items-center gap-1 px-6 py-1"
-              style={{
-                color: isActive ? colors.accent : colors.textMuted,
-                transition: transitions.snappy,
-              }}
-            >
-              <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
-              <span
+            return (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className="flex flex-col items-center gap-1.5 px-6 py-1"
                 style={{
-                  fontFamily: fonts.heading,
-                  fontSize: '10px',
-                  fontWeight: isActive ? 600 : 400,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
+                  color: isActive ? colors.accent : colors.textMuted,
+                  transition: transitions.snappy,
                 }}
               >
-                {tab.label}
-              </span>
-            </button>
-          )
-        })}
+                <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
+                <span
+                  style={{
+                    fontFamily: fonts.mono,
+                    fontSize: '8px',
+                    fontWeight: 500,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {tab.label}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </nav>
   )

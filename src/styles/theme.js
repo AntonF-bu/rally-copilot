@@ -1,12 +1,17 @@
 // src/styles/theme.js — Rally Co-Pilot Design System
 // SINGLE SOURCE OF TRUTH. Every component imports from here.
+// Night Stage v2 — Premium dark aesthetic
 
+// ================================
+// COLORS
+// ================================
 export const colors = {
   // Backgrounds
-  bgDeep: '#060A13',
+  bgDeep: '#080B12',
   bgPrimary: '#0B1120',
-  bgCard: 'rgba(16, 22, 38, 0.7)',
-  bgGlass: 'rgba(16, 22, 38, 0.5)',
+  bgCard: 'rgba(16, 20, 30, 0.85)',
+  bgGlass: 'rgba(16, 20, 30, 0.5)',
+  bgNav: 'rgba(17, 17, 20, 0.85)',
 
   // Brand
   accent: '#FF6B35',        // Rally orange — primary brand/action color
@@ -20,12 +25,14 @@ export const colors = {
 
   // Text hierarchy
   textPrimary: 'rgba(255,255,255,0.92)',
-  textSecondary: 'rgba(255,255,255,0.42)',
-  textMuted: 'rgba(255,255,255,0.22)',
+  textSecondary: 'rgba(255,255,255,0.55)',
+  textMuted: 'rgba(255,255,255,0.35)',
+  textDim: 'rgba(255,255,255,0.25)',
 
   // Borders
-  glassBorder: 'rgba(255,255,255,0.05)',
-  warmBorder: 'rgba(255,107,53,0.06)',
+  glassBorder: 'rgba(255,255,255,0.06)',
+  borderLight: 'rgba(255,255,255,0.08)',
+  warmBorder: 'rgba(255,107,53,0.15)',
 
   // Zone colors (route analysis)
   zones: {
@@ -36,10 +43,11 @@ export const colors = {
 
   // Difficulty badges
   difficulty: {
-    easy:        { bg: 'rgba(76,175,80,0.12)',  text: '#6FCF73', border: 'rgba(76,175,80,0.1)' },
-    moderate:    { bg: 'rgba(255,107,53,0.15)',  text: '#FF8B5E', border: 'rgba(255,107,53,0.15)' },
-    challenging: { bg: 'rgba(255,107,53,0.2)',   text: '#FF8B5E', border: 'rgba(255,107,53,0.2)' },
-    expert:      { bg: 'rgba(255,59,59,0.12)',   text: '#FF6B6B', border: 'rgba(255,59,59,0.1)' },
+    easy:        { bg: 'rgba(76,175,80,0.15)',  text: '#6FCF73', border: 'rgba(76,175,80,0.2)' },
+    moderate:    { bg: 'rgba(255,193,7,0.15)',  text: '#FFC107', border: 'rgba(255,193,7,0.2)' },
+    hard:        { bg: 'rgba(255,107,53,0.2)',  text: '#FF8B5E', border: 'rgba(255,107,53,0.25)' },
+    challenging: { bg: 'rgba(255,107,53,0.2)',  text: '#FF8B5E', border: 'rgba(255,107,53,0.25)' },
+    expert:      { bg: 'rgba(244,67,54,0.15)',  text: '#FF6B6B', border: 'rgba(244,67,54,0.2)' },
   },
 
   // Callout severity markers on map
@@ -56,10 +64,26 @@ export const colors = {
   highwayBend: '#3b82f6',
 }
 
+// ================================
+// FONTS
+// ================================
 export const fonts = {
+  // Night Stage primary fonts
+  primary: "'Sora', -apple-system, sans-serif",
+  mono: "'JetBrains Mono', monospace",
+  // Legacy Barlow (for backwards compatibility)
   heading: "'Barlow Condensed', sans-serif",
   body: "'Barlow', -apple-system, sans-serif",
 }
+
+// ================================
+// MAPBOX
+// ================================
+export const mapboxStyle = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
+
+// ================================
+// GLASS EFFECTS
+// ================================
 
 // Glass card effect — use for all cards, panels, modals
 export const glass = {
@@ -67,12 +91,12 @@ export const glass = {
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
   border: `1px solid ${colors.glassBorder}`,
-  borderRadius: '12px',
+  borderRadius: '16px',
 }
 
 // Glass card hover state additions
 export const glassHover = {
-  borderColor: 'rgba(255,107,53,0.15)',
+  borderColor: colors.warmBorder,
   boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,107,53,0.06)',
   transform: 'translateY(-2px)',
 }
@@ -83,30 +107,44 @@ export const glassPanel = {
   backdropFilter: 'blur(24px)',
   WebkitBackdropFilter: 'blur(24px)',
   border: `1px solid ${colors.glassBorder}`,
-  borderRadius: '8px',
+  borderRadius: '12px',
 }
 
-// Section label style ("REGION", "EDITOR'S PICK", etc.)
+// ================================
+// TYPOGRAPHY STYLES
+// ================================
+
+// Section label style ("VIBES", "REGION", etc.)
 export const sectionLabel = {
-  fontFamily: fonts.heading,
+  fontFamily: fonts.mono,
   textTransform: 'uppercase',
-  fontSize: '10px',
-  fontWeight: 400,
-  letterSpacing: '0.2em',
+  fontSize: '9px',
+  fontWeight: 600,
+  letterSpacing: '0.14em',
   color: colors.textMuted,
-  marginBottom: '10px',
+  marginBottom: '8px',
 }
 
 // Page title style
 export const pageTitle = {
-  fontFamily: fonts.heading,
-  textTransform: 'uppercase',
-  fontSize: '28px',
-  fontWeight: 300,
-  letterSpacing: '0.14em',
+  fontFamily: fonts.primary,
+  fontSize: '24px',
+  fontWeight: 700,
   color: colors.textPrimary,
-  lineHeight: 1.1,
+  lineHeight: 1.2,
 }
+
+// Page subtitle
+export const pageSubtitle = {
+  fontFamily: fonts.primary,
+  fontSize: '13px',
+  fontWeight: 400,
+  color: colors.textMuted,
+}
+
+// ================================
+// COMPONENT STYLES
+// ================================
 
 // Gradient divider
 export const dividerStyle = {
@@ -116,17 +154,17 @@ export const dividerStyle = {
 
 // Active chip
 export const chipActive = {
-  background: 'rgba(255,107,53,0.1)',
-  borderColor: 'rgba(255,107,53,0.25)',
-  color: colors.accentSoft,
-  boxShadow: '0 0 16px rgba(255,107,53,0.05)',
+  background: 'rgba(249,115,22,0.1)',
+  border: '1px solid rgba(249,115,22,0.25)',
+  color: colors.accent,
+  boxShadow: '0 0 12px rgba(255,107,53,0.08)',
 }
 
 // Inactive chip
 export const chipInactive = {
   background: 'transparent',
-  border: '1px solid rgba(255,255,255,0.07)',
-  color: 'rgba(255,255,255,0.35)',
+  border: `1px solid ${colors.borderLight}`,
+  color: colors.textDim,
 }
 
 // Toggle colors
@@ -136,9 +174,20 @@ export const toggle = {
   thumbColor: '#FFFFFF',
 }
 
-// Transition presets
+// ================================
+// TRANSITIONS
+// ================================
 export const transitions = {
   smooth: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
   snappy: 'all 0.15s ease',
   springy: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
+}
+
+// ================================
+// LAYOUT
+// ================================
+export const layout = {
+  maxWidth: '420px',
+  contentPadding: '16px',
+  navHeight: '70px',
 }

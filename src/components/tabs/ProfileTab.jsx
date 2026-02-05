@@ -1,8 +1,7 @@
-// Profile Tab - Logbook stats, badges, settings
-// Contains content moved from landing page
-// Refactored to use theme system
+// Profile Tab - Night Stage Design
+// Logbook stats, badges, settings with premium dark aesthetic
 
-import { colors, fonts, glass, glassPanel, transitions } from '../../styles/theme'
+import { colors, fonts, transitions } from '../../styles/theme'
 
 export function ProfileTab({ onNavigateToSettings, logbookStats }) {
   // Default stats if not provided
@@ -19,44 +18,75 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
   const progressPercent = (stats.totalMiles / stats.nextRankMiles) * 100
   const milesRemaining = stats.nextRankMiles - stats.totalMiles
 
+  // Glass card style
+  const glassCard = {
+    background: 'rgba(255,255,255,0.03)',
+    borderRadius: '16px',
+    border: '1px solid rgba(255,255,255,0.06)',
+    padding: '16px',
+  }
+
   return (
-    <div className="px-4 py-6 pb-24">
+    <div style={{ padding: '24px 16px 100px' }}>
       {/* Profile Header */}
-      <div className="flex items-center gap-4 mb-6">
-        <div
-          className="w-16 h-16 rounded-full flex items-center justify-center"
-          style={{ background: colors.accentGlow }}
-        >
-          {/* User icon */}
-          <svg
-            width="32"
-            height="32"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={colors.accent}
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        marginBottom: '24px',
+      }}>
+        {/* Avatar */}
+        <div style={{
+          width: '64px',
+          height: '64px',
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, rgba(255,107,53,0.2) 0%, rgba(255,107,53,0.05) 100%)',
+          border: '2px solid rgba(255,107,53,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <span style={{
+            fontFamily: fonts.primary,
+            fontSize: '24px',
+            fontWeight: 600,
+            color: colors.accent,
+          }}>
+            A
+          </span>
         </div>
         <div>
-          <h2
-            className="text-xl font-semibold"
-            style={{ color: colors.textPrimary, fontFamily: fonts.heading }}
-          >
-            Driver
+          <h2 style={{
+            fontFamily: fonts.primary,
+            fontSize: '22px',
+            fontWeight: 600,
+            color: colors.textPrimary,
+            margin: 0,
+          }}>
+            Anton
           </h2>
-          <p className="text-sm" style={{ color: colors.textSecondary }}>{stats.rank}</p>
+          <p style={{
+            fontFamily: fonts.mono,
+            fontSize: '10px',
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: colors.accent,
+            margin: '4px 0 0',
+          }}>
+            {stats.rank}
+          </p>
         </div>
       </div>
 
-      {/* Logbook Stats Card */}
-      <div className="p-4 mb-4" style={glass}>
-        <div className="flex items-center gap-2 mb-3">
-          {/* BookOpen icon */}
+      {/* Logbook Card */}
+      <div style={{ ...glassCard, marginBottom: '16px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '16px',
+        }}>
           <svg
             width="18"
             height="18"
@@ -64,57 +94,145 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             fill="none"
             stroke={colors.accent}
             strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
           >
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
           </svg>
-          <span style={{ color: colors.textPrimary, fontFamily: fonts.body, fontWeight: 500 }}>Logbook</span>
+          <span style={{
+            fontFamily: fonts.primary,
+            fontSize: '14px',
+            fontWeight: 500,
+            color: colors.textPrimary,
+          }}>
+            Logbook
+          </span>
         </div>
 
         {/* Progress bar */}
-        <div className="mb-3">
-          <div className="flex justify-between text-sm mb-1">
-            <span style={{ color: colors.textSecondary, fontFamily: fonts.body }}>{stats.rank}</span>
-            <span style={{ color: colors.textMuted, fontFamily: fonts.body }}>{stats.totalMiles} / {stats.nextRankMiles} mi</span>
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginBottom: '8px',
+          }}>
+            <span style={{
+              fontFamily: fonts.primary,
+              fontSize: '13px',
+              color: colors.textPrimary,
+            }}>
+              {stats.rank}
+            </span>
+            <span style={{
+              fontFamily: fonts.mono,
+              fontSize: '11px',
+              color: 'rgba(255,255,255,0.4)',
+            }}>
+              {stats.totalMiles} / {stats.nextRankMiles} mi
+            </span>
           </div>
-          <div
-            className="h-2 rounded-full overflow-hidden"
-            style={{ background: colors.glassBorder }}
-          >
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(progressPercent, 100)}%`,
-                background: `linear-gradient(90deg, ${colors.accent}, ${colors.accentSoft})`,
-                transition: transitions.smooth,
-              }}
-            />
+          <div style={{
+            height: '6px',
+            borderRadius: '3px',
+            background: 'rgba(255,255,255,0.06)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${Math.min(progressPercent, 100)}%`,
+              borderRadius: '3px',
+              background: `linear-gradient(90deg, ${colors.accent}, #FF8F5C)`,
+              transition: transitions.smooth,
+            }} />
           </div>
-          <p className="text-xs mt-1" style={{ color: colors.textMuted, fontFamily: fonts.body }}>{milesRemaining} mi to {stats.nextRank}</p>
+          <p style={{
+            fontFamily: fonts.mono,
+            fontSize: '10px',
+            color: 'rgba(255,255,255,0.4)',
+            marginTop: '6px',
+          }}>
+            {milesRemaining} mi to {stats.nextRank}
+          </p>
         </div>
 
         {/* Stats grid */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3" style={glassPanel}>
-            <p className="text-xs mb-1" style={{ color: colors.textSecondary, fontFamily: fonts.body }}>This Week</p>
-            <p className="font-semibold" style={{ color: colors.textPrimary, fontFamily: fonts.body }}>{stats.weekMiles} mi</p>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '12px',
+        }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '12px',
+            padding: '12px',
+          }}>
+            <p style={{
+              fontFamily: fonts.mono,
+              fontSize: '9px',
+              fontWeight: 500,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'rgba(255,255,255,0.4)',
+              margin: '0 0 4px',
+            }}>
+              This Week
+            </p>
+            <p style={{
+              fontFamily: fonts.primary,
+              fontSize: '18px',
+              fontWeight: 600,
+              color: colors.textPrimary,
+              margin: 0,
+            }}>
+              {stats.weekMiles} mi
+            </p>
             {stats.weekChange && (
-              <p className="text-emerald-400 text-xs">{stats.weekChange}</p>
+              <p style={{
+                fontFamily: fonts.mono,
+                fontSize: '10px',
+                color: '#4ade80',
+                margin: '4px 0 0',
+              }}>
+                {stats.weekChange}
+              </p>
             )}
           </div>
-          <div className="p-3" style={glassPanel}>
-            <p className="text-xs mb-1" style={{ color: colors.textSecondary, fontFamily: fonts.body }}>Total Routes</p>
-            <p className="font-semibold" style={{ color: colors.textPrimary, fontFamily: fonts.body }}>{stats.routeCount}</p>
+          <div style={{
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '12px',
+            padding: '12px',
+          }}>
+            <p style={{
+              fontFamily: fonts.mono,
+              fontSize: '9px',
+              fontWeight: 500,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'rgba(255,255,255,0.4)',
+              margin: '0 0 4px',
+            }}>
+              Total Routes
+            </p>
+            <p style={{
+              fontFamily: fonts.primary,
+              fontSize: '18px',
+              fontWeight: 600,
+              color: colors.textPrimary,
+              margin: 0,
+            }}>
+              {stats.routeCount}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Badges section */}
-      <div className="p-4 mb-4" style={glass}>
-        <div className="flex items-center gap-2 mb-3">
-          {/* Award icon */}
+      {/* Badges Card */}
+      <div style={{ ...glassCard, marginBottom: '16px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '12px',
+        }}>
           <svg
             width="18"
             height="18"
@@ -122,87 +240,127 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             fill="none"
             stroke={colors.accent}
             strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
           >
             <circle cx="12" cy="8" r="7"/>
             <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
           </svg>
-          <span style={{ color: colors.textPrimary, fontFamily: fonts.body, fontWeight: 500 }}>Badges</span>
+          <span style={{
+            fontFamily: fonts.primary,
+            fontSize: '14px',
+            fontWeight: 500,
+            color: colors.textPrimary,
+          }}>
+            Badges
+          </span>
         </div>
 
         {/* Badge items */}
-        <div className="flex flex-wrap gap-2">
-          <span
-            className="px-3 py-1.5 text-xs flex items-center gap-1.5"
-            style={{
-              ...glassPanel,
-              color: colors.textSecondary,
-              fontFamily: fonts.body,
-            }}
-          >
-            {/* Moon icon */}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 12px',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '8px',
+            fontFamily: fonts.mono,
+            fontSize: '10px',
+            fontWeight: 500,
+            color: 'rgba(255,255,255,0.6)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
             </svg>
             Night Owl
           </span>
-          <span
-            className="px-3 py-1.5 text-xs flex items-center gap-1.5"
-            style={{
-              ...glassPanel,
-              color: colors.textSecondary,
-              fontFamily: fonts.body,
-            }}
-          >
-            {/* Repeat icon */}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 12px',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '8px',
+            fontFamily: fonts.mono,
+            fontSize: '10px',
+            fontWeight: 500,
+            color: 'rgba(255,255,255,0.6)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
             Repeat Driver
           </span>
+          <span style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 12px',
+            background: 'rgba(255,255,255,0.03)',
+            borderRadius: '8px',
+            fontFamily: fonts.mono,
+            fontSize: '10px',
+            fontWeight: 500,
+            color: 'rgba(255,255,255,0.6)',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            Early Adopter
+          </span>
         </div>
 
-        <p className="text-xs mt-3" style={{ color: colors.textMuted, fontFamily: fonts.body }}>Complete drives to earn more badges</p>
+        <p style={{
+          fontFamily: fonts.primary,
+          fontSize: '12px',
+          color: 'rgba(255,255,255,0.4)',
+          marginTop: '12px',
+          margin: '12px 0 0',
+        }}>
+          Complete drives to earn more badges
+        </p>
       </div>
 
-      {/* Settings link */}
+      {/* Settings Row */}
       <button
         onClick={onNavigateToSettings}
-        className="w-full p-4 flex items-center justify-between"
         style={{
-          ...glass,
+          ...glassCard,
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
           transition: transitions.smooth,
         }}
       >
-        <div className="flex items-center gap-3">
-          {/* Settings icon */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <svg
-            width="18"
-            height="18"
+            width="20"
+            height="20"
             viewBox="0 0 24 24"
             fill="none"
-            stroke={colors.textSecondary}
+            stroke="rgba(255,255,255,0.5)"
             strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
           >
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          <span style={{ color: colors.textPrimary, fontFamily: fonts.body }}>Settings</span>
+          <span style={{
+            fontFamily: fonts.primary,
+            fontSize: '14px',
+            color: colors.textPrimary,
+          }}>
+            Settings
+          </span>
         </div>
-        {/* ChevronRight icon */}
         <svg
-          width="18"
-          height="18"
+          width="20"
+          height="20"
           viewBox="0 0 24 24"
           fill="none"
-          stroke={colors.textMuted}
+          stroke="rgba(255,255,255,0.3)"
           strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
         >
           <polyline points="9 18 15 12 9 6"/>
         </svg>

@@ -156,13 +156,7 @@ export function HomeTab({
 
   return (
     <div className="ns-container">
-      {/* Atmospheric backgrounds */}
-      <div className="ns-atmosphere">
-        <div className="ns-warm-glow" />
-        <div className="ns-cool-glow" />
-        <div className="ns-topo-texture" />
-        <div className="ns-noise" />
-      </div>
+      {/* Atmospheric backgrounds now in RouteSelector app shell */}
 
       {/* Main content */}
       <div className="ns-content">
@@ -275,17 +269,29 @@ export function HomeTab({
             <div className="ns-stats-grid">
               <div className="ns-stat">
                 <div className="ns-stat-value">
-                  {heroRoute.distance
-                    ? Math.round(heroRoute.distance / 1609.34)
-                    : heroRoute.distance || '--'}
+                  {(() => {
+                    // Discovery routes have distance in miles, recent routes in meters
+                    if (!heroRoute.distance) return '--'
+                    // If distance > 500, assume meters; otherwise assume miles
+                    const miles = heroRoute.distance > 500
+                      ? Math.round(heroRoute.distance / 1609.34)
+                      : heroRoute.distance
+                    return miles
+                  })()}
                 </div>
                 <div className="ns-stat-label">Miles</div>
               </div>
               <div className="ns-stat">
                 <div className="ns-stat-value">
-                  {heroRoute.duration
-                    ? Math.round(heroRoute.duration / 60)
-                    : heroRoute.duration || '--'}
+                  {(() => {
+                    // Discovery routes have duration in minutes, recent routes in seconds
+                    if (!heroRoute.duration) return '--'
+                    // If duration > 500, assume seconds; otherwise assume minutes
+                    const mins = heroRoute.duration > 500
+                      ? Math.round(heroRoute.duration / 60)
+                      : heroRoute.duration
+                    return mins
+                  })()}
                 </div>
                 <div className="ns-stat-label">Minutes</div>
               </div>

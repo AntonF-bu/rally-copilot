@@ -1,11 +1,11 @@
 // RoutePreview Constants
-import { colors } from '../../styles/theme'
+import { colors, mapboxStyle } from '../../styles/theme'
 
 export const DEMO_START = [-71.0589, 42.3601]
 export const DEMO_END = [-71.3012, 42.3665]
 
 export const MAP_STYLES = {
-  dark: 'mapbox://styles/mapbox/dark-v11',
+  dark: mapboxStyle,
   satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
 }
 
