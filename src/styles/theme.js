@@ -11,13 +11,13 @@ export const colors = {
   bgPrimary: '#0B1120',
   bgCard: 'rgba(16, 20, 30, 0.85)',
   bgGlass: 'rgba(16, 20, 30, 0.5)',
-  bgNav: 'rgba(17, 17, 20, 0.85)',
+  bgNav: 'rgba(18, 18, 26, 0.88)',
 
-  // Brand
-  accent: '#FF6B35',        // Rally orange — primary brand/action color
-  accentSoft: '#FF8B5E',
-  accentGlow: 'rgba(255, 107, 53, 0.15)',
-  accentDim: 'rgba(255, 107, 53, 0.06)',
+  // Brand — Standardized orange #F97316
+  accent: '#F97316',
+  accentSoft: '#FB923C',
+  accentGlow: 'rgba(249, 115, 22, 0.15)',
+  accentDim: 'rgba(249, 115, 22, 0.06)',
 
   // Info/secondary
   cyan: '#00D4FF',
@@ -27,12 +27,12 @@ export const colors = {
   textPrimary: 'rgba(255,255,255,0.92)',
   textSecondary: 'rgba(255,255,255,0.55)',
   textMuted: 'rgba(255,255,255,0.35)',
-  textDim: 'rgba(255,255,255,0.25)',
+  textDim: 'rgba(255,255,255,0.22)',
 
   // Borders
   glassBorder: 'rgba(255,255,255,0.06)',
   borderLight: 'rgba(255,255,255,0.08)',
-  warmBorder: 'rgba(255,107,53,0.15)',
+  warmBorder: 'rgba(249,115,22,0.15)',
 
   // Zone colors (route analysis)
   zones: {
@@ -68,12 +68,12 @@ export const colors = {
 // FONTS
 // ================================
 export const fonts = {
-  // Night Stage primary fonts
+  // Night Stage design system fonts
   primary: "'Sora', -apple-system, sans-serif",
   mono: "'JetBrains Mono', monospace",
-  // Legacy Barlow (for backwards compatibility)
-  heading: "'Barlow Condensed', sans-serif",
-  body: "'Barlow', -apple-system, sans-serif",
+  // Unified font system - Sora for all UI
+  heading: "'Sora', -apple-system, sans-serif",
+  body: "'Sora', -apple-system, sans-serif",
 }
 
 // ================================
@@ -97,7 +97,7 @@ export const glass = {
 // Glass card hover state additions
 export const glassHover = {
   borderColor: colors.warmBorder,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,107,53,0.06)',
+  boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(249,115,22,0.06)',
   transform: 'translateY(-2px)',
 }
 
@@ -149,7 +149,7 @@ export const pageSubtitle = {
 // Gradient divider
 export const dividerStyle = {
   height: '1px',
-  background: 'linear-gradient(90deg, transparent 0%, rgba(255,107,53,0.1) 30%, rgba(255,255,255,0.03) 70%, transparent 100%)',
+  background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.1) 30%, rgba(255,255,255,0.03) 70%, transparent 100%)',
 }
 
 // Active chip
@@ -157,7 +157,7 @@ export const chipActive = {
   background: 'rgba(249,115,22,0.1)',
   border: '1px solid rgba(249,115,22,0.25)',
   color: colors.accent,
-  boxShadow: '0 0 12px rgba(255,107,53,0.08)',
+  boxShadow: '0 0 12px rgba(249,115,22,0.08)',
 }
 
 // Inactive chip

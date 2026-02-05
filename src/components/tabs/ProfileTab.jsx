@@ -4,18 +4,19 @@
 import { colors, fonts, transitions } from '../../styles/theme'
 
 export function ProfileTab({ onNavigateToSettings, logbookStats }) {
-  // Default stats if not provided
+  // Use provided stats or show zeros honestly
   const stats = logbookStats || {
-    rank: 'Road Scout',
-    totalMiles: 847,
-    nextRank: 'Pace Setter',
-    nextRankMiles: 1000,
-    routeCount: 23,
-    weekMiles: 124,
-    weekChange: '+18%',
+    rank: 'Rookie',
+    totalMiles: 0,
+    nextRank: 'Road Scout',
+    nextRankMiles: 100,
+    routeCount: 0,
+    weekMiles: 0,
+    weekChange: null,
   }
 
-  const progressPercent = (stats.totalMiles / stats.nextRankMiles) * 100
+  const hasData = stats.routeCount > 0
+  const progressPercent = stats.nextRankMiles > 0 ? (stats.totalMiles / stats.nextRankMiles) * 100 : 0
   const milesRemaining = stats.nextRankMiles - stats.totalMiles
 
   // Glass card style

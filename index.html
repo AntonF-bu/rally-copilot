@@ -29,20 +29,21 @@
     <!-- Mapbox GL CSS -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
 
-    <!-- Google Fonts - Barlow Condensed for headings -->
+    <!-- Google Fonts - Sora + JetBrains Mono (Night Stage design system) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
       /* Brand CSS Variables */
       :root {
-        --accent-orange: #FF6B35;
+        --accent-orange: #F97316;
         --accent-cyan: #00D4FF;
         --accent-red: #FF3B3B;
         --accent-green: #4CAF50;
-        --font-heading: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-        --bg-dark: #0a0a0f;
+        --font-heading: 'Sora', -apple-system, sans-serif;
+        --font-mono: 'JetBrains Mono', monospace;
+        --bg-dark: #080B12;
         --bg-card: #141820;
       }
 
@@ -57,7 +58,12 @@
       /* Heading font utility */
       .font-rally {
         font-family: var(--font-heading);
-        text-transform: uppercase;
+        letter-spacing: 0.02em;
+      }
+
+      /* Mono font utility */
+      .font-mono {
+        font-family: var(--font-mono);
         letter-spacing: 0.05em;
       }
       /* Prevent overscroll/bounce on iOS */

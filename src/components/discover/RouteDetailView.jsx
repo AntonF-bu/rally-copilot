@@ -8,7 +8,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
 import { colors, mapboxStyle } from '../../styles/theme'
 
-export function RouteDetailView({ route, onClose }) {
+export function RouteDetailView({ route, onClose, onStartDrive }) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -16,6 +16,29 @@ export function RouteDetailView({ route, onClose }) {
   const [loadingRoute, setLoadingRoute] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [heartAnimating, setHeartAnimating] = useState(false)
+
+  // Handle Start Drive - build route object and call parent handler
+  const handleStartDrive = () => {
+    if (!onStartDrive) return
+
+    const routeObject = {
+      name: route.name,
+      destination: route.end.label,
+      origin: route.start.label,
+      distance: route.distance * 1609.34, // Convert miles to meters
+      duration: route.duration * 60, // Convert minutes to seconds
+      startCoords: [route.start.lng, route.start.lat],
+      endCoords: [route.end.lng, route.end.lat],
+      waypoints: route.waypoints || [],
+      geometry: routeGeometry,
+      isDiscoveryRoute: true,
+      discoveryId: route.id,
+      discoveryData: route,
+    }
+
+    onClose() // Close the detail view
+    onStartDrive(routeObject)
+  }
 
   // Store access
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
@@ -485,16 +508,17 @@ export function RouteDetailView({ route, onClose }) {
 
             {/* Start Drive Button */}
             <button
+              onClick={handleStartDrive}
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl"
               style={{
-                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontFamily: "'Sora', -apple-system, sans-serif",
                 fontSize: '14px',
                 fontWeight: 700,
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
-                background: 'linear-gradient(135deg, #FF6B35 0%, #E85A2A 100%)',
+                background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
                 color: '#fff',
-                boxShadow: '0 4px 15px rgba(255, 107, 53, 0.3)',
+                boxShadow: '0 4px 15px rgba(249, 115, 22, 0.3)',
               }}
             >
               {/* Play icon */}

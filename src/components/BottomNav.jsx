@@ -52,13 +52,13 @@ export function BottomNav({ activeTab, onTabChange }) {
         style={{
           maxWidth: layout.maxWidth,
           margin: '0 auto',
-          background: 'rgba(17, 17, 20, 0.85)',
+          background: colors.bgNav,
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
           borderRadius: '20px 20px 0 0',
-          borderTop: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
-          borderLeft: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
-          borderRight: `1px solid ${colors.borderLight || 'rgba(255,255,255,0.06)'}`,
+          borderTop: `1px solid ${colors.borderLight}`,
+          borderLeft: `1px solid ${colors.borderLight}`,
+          borderRight: `1px solid ${colors.borderLight}`,
         }}
       >
         {/* Tab buttons */}
@@ -73,7 +73,7 @@ export function BottomNav({ activeTab, onTabChange }) {
                 onClick={() => onTabChange(tab.id)}
                 className="flex flex-col items-center gap-1.5 px-6 py-1"
                 style={{
-                  color: isActive ? colors.accent : colors.textMuted,
+                  color: isActive ? colors.accent : colors.textDim,
                   transition: transitions.snappy,
                 }}
               >

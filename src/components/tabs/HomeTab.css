@@ -13,16 +13,16 @@
   --ns-bg-deep: #080B12;
   --ns-bg-card: rgba(16, 20, 30, 0.85);
   --ns-bg-card-hover: rgba(20, 25, 38, 0.9);
-  --ns-accent: #FF6B35;
-  --ns-accent-soft: #FF8B5E;
-  --ns-accent-glow: rgba(255, 107, 53, 0.15);
+  --ns-accent: #F97316;
+  --ns-accent-soft: #FB923C;
+  --ns-accent-glow: rgba(249, 115, 22, 0.15);
   --ns-cyan: #00D4FF;
   --ns-cyan-glow: rgba(0, 212, 255, 0.15);
   --ns-text-primary: rgba(255, 255, 255, 0.92);
   --ns-text-secondary: rgba(255, 255, 255, 0.55);
   --ns-text-muted: rgba(255, 255, 255, 0.35);
   --ns-border: rgba(255, 255, 255, 0.06);
-  --ns-border-accent: rgba(255, 107, 53, 0.2);
+  --ns-border-accent: rgba(249, 115, 22, 0.2);
   --ns-font-primary: 'Sora', -apple-system, sans-serif;
   --ns-font-mono: 'JetBrains Mono', monospace;
 }
@@ -526,6 +526,40 @@
     transparent 100%
   );
   animation: ns-shimmer 3s ease-in-out infinite;
+}
+
+/* Simple Hero (no recent routes) */
+.ns-hero-simple {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 24px;
+}
+
+.ns-hero-simple-content {
+  margin-bottom: 24px;
+}
+
+.ns-hero-simple-title {
+  font-family: var(--ns-font-primary);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ns-text-primary);
+  margin: 0 0 8px;
+}
+
+.ns-hero-simple-subtitle {
+  font-family: var(--ns-font-primary);
+  font-size: 14px;
+  color: var(--ns-text-secondary);
+  margin: 0;
+  max-width: 280px;
+}
+
+.ns-cta-large {
+  padding: 18px 32px;
+  font-size: 16px;
 }
 
 /* ================================ */
