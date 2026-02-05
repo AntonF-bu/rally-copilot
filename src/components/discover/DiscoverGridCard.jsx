@@ -36,7 +36,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
     fetchRoute()
   }, [route, hasValidToken, mapboxToken, routePath])
 
-  // Build static map URL - smaller dimensions for grid
+  // Build static map URL - compact dimensions, no attribution
   const staticMapUrl = useMemo(() => {
     if (!hasValidToken) return null
 
@@ -49,8 +49,8 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
       pathOverlay = `path-3+00d4ff-0.9(${encodeURIComponent(routePath)}),`
     }
 
-    // Smaller image for grid cards
-    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/300x200@2x?padding=40,40,40,40&access_token=${mapboxToken}`
+    // Compact card image with no logo/attribution
+    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/300x150@2x?padding=30,30,30,30&logo=false&attribution=false&access_token=${mapboxToken}`
   }, [hasValidToken, route, routePath, mapboxToken])
 
   const difficultyColors = {
@@ -64,18 +64,18 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
   return (
     <button
       onClick={() => onSelect?.(route)}
-      className="w-full text-left rounded-xl overflow-hidden transition-all duration-150 active:scale-[0.97] hover:brightness-110"
+      className="w-full text-left rounded-lg overflow-hidden transition-all duration-150 active:scale-[0.97] hover:brightness-110"
       style={{
         background: 'rgba(255, 255, 255, 0.04)',
         border: isSaved
           ? '1px solid rgba(0, 212, 255, 0.35)'
-          : '1px solid rgba(255, 255, 255, 0.08)',
+          : '1px solid rgba(255, 255, 255, 0.06)',
       }}
     >
-      {/* Map Thumbnail - 60% of card height */}
+      {/* Map Thumbnail - compact 2:1 aspect ratio */}
       <div
         className="w-full relative overflow-hidden"
-        style={{ aspectRatio: '4/3', backgroundColor: '#0a0a1a' }}
+        style={{ aspectRatio: '2/1', backgroundColor: '#0a0a1a' }}
       >
         {staticMapUrl ? (
           <img
@@ -110,15 +110,15 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
         {/* Saved heart indicator */}
         {isSaved && (
           <div
-            className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full flex items-center justify-center"
+            className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
             style={{
               background: 'rgba(0, 212, 255, 0.3)',
               backdropFilter: 'blur(4px)',
             }}
           >
             <svg
-              width="12"
-              height="12"
+              width="10"
+              height="10"
               viewBox="0 0 24 24"
               fill="#00d4ff"
               stroke="#00d4ff"
@@ -131,7 +131,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
         {/* Difficulty badge on map */}
         <div
-          className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded text-xs font-medium"
+          className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-medium capitalize"
           style={{
             background: diffColor.bg,
             color: diffColor.text,
@@ -142,33 +142,23 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
         </div>
       </div>
 
-      {/* Content - compact */}
-      <div className="p-2.5">
+      {/* Content - very compact */}
+      <div className="px-2 py-1.5">
         {/* Route name - truncate */}
         <h3
-          className="text-white font-semibold text-sm leading-tight truncate"
+          className="text-white font-medium text-xs leading-tight truncate"
           title={route.name}
         >
           {route.name}
         </h3>
 
-        {/* Location */}
+        {/* Location + Stats on same line */}
         <p
-          className="text-xs mt-0.5 truncate"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
+          className="text-[11px] mt-0.5 truncate"
+          style={{ color: 'rgba(255,255,255,0.45)' }}
         >
-          {route.start.label} → {route.end.label}
+          {route.start.label} → {route.end.label} · {route.distance}mi · {route.duration}m
         </p>
-
-        {/* Stats row */}
-        <div
-          className="flex items-center gap-2 mt-1.5 text-xs"
-          style={{ color: 'rgba(255,255,255,0.6)' }}
-        >
-          <span>{route.distance} mi</span>
-          <span style={{ color: 'rgba(255,255,255,0.3)' }}>·</span>
-          <span>{route.duration} min</span>
-        </div>
       </div>
     </button>
   )
