@@ -157,9 +157,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       },
       paint: {
         'line-color': colors.accent,
-        'line-width': 10,
-        'line-opacity': 0.2,
-        'line-blur': 4,
+        'line-width': 20,
+        'line-opacity': 0.6,
+        'line-blur': 8,
       },
     })
 
@@ -174,8 +174,8 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       },
       paint: {
         'line-color': colors.accent,
-        'line-width': 4,
-        'line-opacity': 0.95,
+        'line-width': 6,
+        'line-opacity': 1.0,
       },
     })
 
