@@ -3,33 +3,23 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { buildZoneSegments as buildZoneSegmentsShared } from '../utils/routeGeometry'
+import { colors } from '../styles/theme'
 
 // ================================
 // Map Component - v23
 // UPDATED: Route rendering now matches RoutePreview style
 // - Removed dark outline, matched line widths
 // - Simplified callout color logic
+// - Refactored to use theme system
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
-// Zone colors - MUST match Preview and zoneService
-const ZONE_COLORS = {
-  technical: '#22d3ee',  // Cyan
-  transit: '#3b82f6',    // Blue
-  urban: '#f472b6'       // Pink
-}
+// Zone colors from theme
+const ZONE_COLORS = colors.zones
 
-// Callout marker colors based on type
-const CALLOUT_COLORS = {
-  danger: '#ef4444',      // Red
-  significant: '#f97316', // Orange
-  sweeper: '#3b82f6',     // Blue
-  wake_up: '#10b981',     // Green
-  sequence: '#ec4899',    // Pink
-  transition: '#8b5cf6',  // Purple
-  grouped: '#f59e0b'      // Amber
-}
+// Callout marker colors from theme
+const CALLOUT_COLORS = colors.callouts
 
 export default function Map() {
   const mapContainer = useRef(null)
@@ -58,7 +48,8 @@ export default function Map() {
   const curatedHighwayCallouts = useStore(state => state.curatedHighwayCallouts) || []
   const simulationProgress = useStore(state => state.simulationProgress)
 
-  const modeColors = { cruise: '#00d4ff', fast: '#ffd500', race: '#ff3366' }
+  // Mode colors for map visualization (cyan for cruise is acceptable for data viz)
+  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
   // Check if a distance is in a transit zone

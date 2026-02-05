@@ -1,5 +1,8 @@
 // Filter pills for Discover tab
 // "What are you looking for?" and "Where?" sections
+// Refactored to use theme system
+
+import { colors, fonts, chipActive, chipInactive, transitions } from '../../styles/theme'
 
 export function DiscoverFilters({
   vibeFilters,
@@ -15,7 +18,7 @@ export function DiscoverFilters({
       <div className="mb-4">
         <p
           className="text-sm mb-2"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
+          style={{ color: colors.textSecondary, fontFamily: fonts.body }}
         >
           What are you looking for?
         </p>
@@ -26,17 +29,11 @@ export function DiscoverFilters({
               <button
                 key={filter.id}
                 onClick={() => onVibeToggle(filter.id)}
-                className="px-3 py-1.5 rounded-full text-sm transition-all"
+                className="px-3 py-1.5 rounded-full text-sm"
                 style={{
-                  background: isSelected
-                    ? 'rgba(0, 212, 255, 0.2)'
-                    : 'rgba(255, 255, 255, 0.05)',
-                  border: isSelected
-                    ? '1px solid rgba(0, 212, 255, 0.5)'
-                    : '1px solid rgba(255, 255, 255, 0.1)',
-                  color: isSelected
-                    ? '#00d4ff'
-                    : 'rgba(255, 255, 255, 0.7)',
+                  ...(isSelected ? chipActive : chipInactive),
+                  fontFamily: fonts.body,
+                  transition: transitions.snappy,
                 }}
               >
                 {filter.label}
@@ -50,7 +47,7 @@ export function DiscoverFilters({
       <div>
         <p
           className="text-sm mb-2"
-          style={{ color: 'rgba(255,255,255,0.5)' }}
+          style={{ color: colors.textSecondary, fontFamily: fonts.body }}
         >
           Where?
         </p>
@@ -61,17 +58,11 @@ export function DiscoverFilters({
               <button
                 key={filter.id}
                 onClick={() => onRegionToggle(filter.id)}
-                className="px-3 py-1.5 rounded-full text-sm transition-all"
+                className="px-3 py-1.5 rounded-full text-sm"
                 style={{
-                  background: isSelected
-                    ? 'rgba(0, 212, 255, 0.2)'
-                    : 'rgba(255, 255, 255, 0.05)',
-                  border: isSelected
-                    ? '1px solid rgba(0, 212, 255, 0.5)'
-                    : '1px solid rgba(255, 255, 255, 0.1)',
-                  color: isSelected
-                    ? '#00d4ff'
-                    : 'rgba(255, 255, 255, 0.7)',
+                  ...(isSelected ? chipActive : chipInactive),
+                  fontFamily: fonts.body,
+                  transition: transitions.snappy,
                 }}
               >
                 {filter.label}

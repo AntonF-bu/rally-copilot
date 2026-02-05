@@ -1,5 +1,8 @@
 // Profile Tab - Logbook stats, badges, settings
 // Contains content moved from landing page
+// Refactored to use theme system
+
+import { colors, fonts, glass, glassPanel, transitions } from '../../styles/theme'
 
 export function ProfileTab({ onNavigateToSettings, logbookStats }) {
   // Default stats if not provided
@@ -22,7 +25,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
       <div className="flex items-center gap-4 mb-6">
         <div
           className="w-16 h-16 rounded-full flex items-center justify-center"
-          style={{ background: 'rgba(0, 212, 255, 0.15)' }}
+          style={{ background: colors.accentGlow }}
         >
           {/* User icon */}
           <svg
@@ -30,7 +33,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             height="32"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#00d4ff"
+            stroke={colors.accent}
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -40,19 +43,18 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
           </svg>
         </div>
         <div>
-          <h2 className="text-xl font-semibold text-white">Driver</h2>
-          <p className="text-white/50 text-sm">{stats.rank}</p>
+          <h2
+            className="text-xl font-semibold"
+            style={{ color: colors.textPrimary, fontFamily: fonts.heading }}
+          >
+            Driver
+          </h2>
+          <p className="text-sm" style={{ color: colors.textSecondary }}>{stats.rank}</p>
         </div>
       </div>
 
       {/* Logbook Stats Card */}
-      <div
-        className="p-4 rounded-2xl mb-4"
-        style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-        }}
-      >
+      <div className="p-4 mb-4" style={glass}>
         <div className="flex items-center gap-2 mb-3">
           {/* BookOpen icon */}
           <svg
@@ -60,7 +62,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             height="18"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#00d4ff"
+            stroke={colors.accent}
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -68,60 +70,49 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
           </svg>
-          <span className="text-white font-medium">Logbook</span>
+          <span style={{ color: colors.textPrimary, fontFamily: fonts.body, fontWeight: 500 }}>Logbook</span>
         </div>
 
         {/* Progress bar */}
         <div className="mb-3">
           <div className="flex justify-between text-sm mb-1">
-            <span className="text-white/70">{stats.rank}</span>
-            <span className="text-white/50">{stats.totalMiles} / {stats.nextRankMiles} mi</span>
+            <span style={{ color: colors.textSecondary, fontFamily: fonts.body }}>{stats.rank}</span>
+            <span style={{ color: colors.textMuted, fontFamily: fonts.body }}>{stats.totalMiles} / {stats.nextRankMiles} mi</span>
           </div>
           <div
             className="h-2 rounded-full overflow-hidden"
-            style={{ background: 'rgba(255, 255, 255, 0.1)' }}
+            style={{ background: colors.glassBorder }}
           >
             <div
-              className="h-full rounded-full transition-all duration-500"
+              className="h-full rounded-full"
               style={{
                 width: `${Math.min(progressPercent, 100)}%`,
-                background: 'linear-gradient(90deg, #00d4ff, #00a8cc)',
+                background: `linear-gradient(90deg, ${colors.accent}, ${colors.accentSoft})`,
+                transition: transitions.smooth,
               }}
             />
           </div>
-          <p className="text-white/40 text-xs mt-1">{milesRemaining} mi to {stats.nextRank}</p>
+          <p className="text-xs mt-1" style={{ color: colors.textMuted, fontFamily: fonts.body }}>{milesRemaining} mi to {stats.nextRank}</p>
         </div>
 
         {/* Stats grid */}
         <div className="grid grid-cols-2 gap-3">
-          <div
-            className="p-3 rounded-xl"
-            style={{ background: 'rgba(255, 255, 255, 0.03)' }}
-          >
-            <p className="text-white/50 text-xs mb-1">This Week</p>
-            <p className="text-white font-semibold">{stats.weekMiles} mi</p>
+          <div className="p-3" style={glassPanel}>
+            <p className="text-xs mb-1" style={{ color: colors.textSecondary, fontFamily: fonts.body }}>This Week</p>
+            <p className="font-semibold" style={{ color: colors.textPrimary, fontFamily: fonts.body }}>{stats.weekMiles} mi</p>
             {stats.weekChange && (
               <p className="text-emerald-400 text-xs">{stats.weekChange}</p>
             )}
           </div>
-          <div
-            className="p-3 rounded-xl"
-            style={{ background: 'rgba(255, 255, 255, 0.03)' }}
-          >
-            <p className="text-white/50 text-xs mb-1">Total Routes</p>
-            <p className="text-white font-semibold">{stats.routeCount}</p>
+          <div className="p-3" style={glassPanel}>
+            <p className="text-xs mb-1" style={{ color: colors.textSecondary, fontFamily: fonts.body }}>Total Routes</p>
+            <p className="font-semibold" style={{ color: colors.textPrimary, fontFamily: fonts.body }}>{stats.routeCount}</p>
           </div>
         </div>
       </div>
 
       {/* Badges section */}
-      <div
-        className="p-4 rounded-2xl mb-4"
-        style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-        }}
-      >
+      <div className="p-4 mb-4" style={glass}>
         <div className="flex items-center gap-2 mb-3">
           {/* Award icon */}
           <svg
@@ -129,7 +120,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             height="18"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#00d4ff"
+            stroke={colors.accent}
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -137,16 +128,17 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             <circle cx="12" cy="8" r="7"/>
             <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>
           </svg>
-          <span className="text-white font-medium">Badges</span>
+          <span style={{ color: colors.textPrimary, fontFamily: fonts.body, fontWeight: 500 }}>Badges</span>
         </div>
 
         {/* Badge items */}
         <div className="flex flex-wrap gap-2">
           <span
-            className="px-3 py-1.5 rounded-lg text-xs text-white/60 flex items-center gap-1.5"
+            className="px-3 py-1.5 text-xs flex items-center gap-1.5"
             style={{
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
+              ...glassPanel,
+              color: colors.textSecondary,
+              fontFamily: fonts.body,
             }}
           >
             {/* Moon icon */}
@@ -156,10 +148,11 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             Night Owl
           </span>
           <span
-            className="px-3 py-1.5 rounded-lg text-xs text-white/60 flex items-center gap-1.5"
+            className="px-3 py-1.5 text-xs flex items-center gap-1.5"
             style={{
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
+              ...glassPanel,
+              color: colors.textSecondary,
+              fontFamily: fonts.body,
             }}
           >
             {/* Repeat icon */}
@@ -171,16 +164,16 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
           </span>
         </div>
 
-        <p className="text-white/30 text-xs mt-3">Complete drives to earn more badges</p>
+        <p className="text-xs mt-3" style={{ color: colors.textMuted, fontFamily: fonts.body }}>Complete drives to earn more badges</p>
       </div>
 
       {/* Settings link */}
       <button
         onClick={onNavigateToSettings}
-        className="w-full p-4 rounded-2xl flex items-center justify-between transition-all duration-200 hover:bg-white/[0.05]"
+        className="w-full p-4 flex items-center justify-between"
         style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          ...glass,
+          transition: transitions.smooth,
         }}
       >
         <div className="flex items-center gap-3">
@@ -190,7 +183,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             height="18"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="rgba(255, 255, 255, 0.5)"
+            stroke={colors.textSecondary}
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -198,7 +191,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          <span className="text-white">Settings</span>
+          <span style={{ color: colors.textPrimary, fontFamily: fonts.body }}>Settings</span>
         </div>
         {/* ChevronRight icon */}
         <svg
@@ -206,7 +199,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats }) {
           height="18"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="rgba(255, 255, 255, 0.3)"
+          stroke={colors.textMuted}
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"

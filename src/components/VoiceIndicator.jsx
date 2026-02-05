@@ -1,7 +1,9 @@
 import useStore from '../store'
+import { colors as themeColors } from '../styles/theme'
 
 // ================================
 // Voice Indicator - Shows when speaking
+// Refactored to use theme system
 // ================================
 
 export default function VoiceIndicator() {
@@ -9,29 +11,30 @@ export default function VoiceIndicator() {
 
   if (!isSpeaking) return null
 
-  const colors = {
-    cruise: '#00d4ff',
+  // Mode colors - cyan for cruise is acceptable for mode visualization
+  const modeColors = {
+    cruise: themeColors.cyan,
     fast: '#ffd500',
     race: '#ff3366'
   }
-  const color = colors[mode] || colors.cruise
+  const color = modeColors[mode] || modeColors.cruise
 
   return (
-    <div 
+    <div
       className="fixed left-1/2 -translate-x-1/2 z-30 pointer-events-none"
       style={{ bottom: '180px' }}
     >
-      <div 
+      <div
         className="bg-black/90 backdrop-blur-xl px-5 py-3 rounded-full flex items-center gap-3 border border-white/10"
         style={{ boxShadow: `0 4px 20px ${color}30` }}
       >
         {/* Audio waves */}
         <div className="flex gap-1 items-center h-5">
           {[0, 1, 2, 3, 4].map(i => (
-            <div 
+            <div
               key={i}
               className="w-1 rounded-full"
-              style={{ 
+              style={{
                 background: color,
                 height: '100%',
                 animation: `wave 0.5s ease-in-out infinite`,
@@ -40,7 +43,7 @@ export default function VoiceIndicator() {
             />
           ))}
         </div>
-        
+
         {/* Text */}
         <span className="text-sm font-medium text-white">
           {lastSpokenText}

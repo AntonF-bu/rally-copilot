@@ -1,10 +1,12 @@
 // Route detail view with interactive Mapbox map
 // Shows when user taps a route card in Discover tab
+// Refactored to use theme system
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
+import { colors } from '../../styles/theme'
 
 export function RouteDetailView({ route, onClose }) {
   const mapContainer = useRef(null)
@@ -77,8 +79,8 @@ export function RouteDetailView({ route, onClose }) {
     map.current.on('load', () => {
       setMapLoaded(true)
 
-      // Add start marker (cyan)
-      new mapboxgl.Marker({ color: '#00d4ff' })
+      // Add start marker (cyan for route visualization)
+      new mapboxgl.Marker({ color: colors.cyan })
         .setLngLat([route.start.lng, route.start.lat])
         .addTo(map.current)
 
@@ -127,7 +129,7 @@ export function RouteDetailView({ route, onClose }) {
         'line-cap': 'round',
       },
       paint: {
-        'line-color': '#00d4ff',
+        'line-color': colors.cyan,
         'line-width': 4,
         'line-opacity': 0.8,
       },
