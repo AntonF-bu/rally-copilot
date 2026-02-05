@@ -128,6 +128,24 @@ export function useMapSetup({
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': seg.color, 'line-width': 5, 'line-opacity': 1.0 }
       })
+
+      console.log(`🎨 Drawing segment ${i}: color=${seg.color}, glow-opacity=0.5, line-width=5`)
+    })
+
+    // Force route layers to top of stack
+    const style = map.getStyle()
+    const allLayerIds = style.layers.map(l => l.id)
+    const routeLayerIds = allLayerIds.filter(id =>
+      id.startsWith('route-') || id.startsWith('glow-') || id.startsWith('line-') || id.startsWith('outline-')
+    )
+
+    // Also log ALL layers for debugging
+    console.log('📋 ALL MAP LAYERS:', allLayerIds)
+    console.log('🛣️ ROUTE LAYERS:', routeLayerIds)
+
+    // Move each route layer to top
+    routeLayerIds.forEach(id => {
+      try { map.moveLayer(id) } catch(e) {}
     })
   }, [buildSleeveSegments])
 
