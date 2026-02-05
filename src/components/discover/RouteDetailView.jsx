@@ -316,11 +316,11 @@ export function RouteDetailView({ route, onClose }) {
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          // Ensure safe area padding for home indicator
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          // Account for bottom nav bar (70px) + safe area
+          paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
         }}
       >
-        <div className="p-5 pb-6">
+        <div className="p-5 pb-4">
           {/* Route Name */}
           <h2 className="text-xl font-bold text-white mb-2">{route.name}</h2>
 

@@ -78,17 +78,17 @@ export function DiscoverTab() {
   return (
     <div className="flex flex-col min-h-full" style={{ background: '#0a0a0f' }}>
       {/* Header */}
-      <div className="px-4 pt-5 pb-3 flex-shrink-0">
-        <h1 className="text-xl font-bold text-white">Discover</h1>
-        <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
+      <div className="px-3 pt-4 pb-2 flex-shrink-0">
+        <h1 className="text-lg font-bold text-white">Discover</h1>
+        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
           Browse curated routes near you
         </p>
       </div>
 
-      {/* Search Bar */}
-      <div className="px-4 pb-3 flex-shrink-0">
+      {/* Search Bar - compact height */}
+      <div className="px-3 pb-2 flex-shrink-0">
         <div
-          className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+          className="flex items-center gap-2 px-2.5 py-2 rounded-lg"
           style={{
             background: 'rgba(255, 255, 255, 0.05)',
             border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -96,8 +96,8 @@ export function DiscoverTab() {
         >
           {/* Search icon */}
           <svg
-            width="18"
-            height="18"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="rgba(255,255,255,0.4)"
@@ -111,7 +111,7 @@ export function DiscoverTab() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search routes, roads, or areas..."
-            className="flex-1 bg-transparent text-white text-sm placeholder-white/40 outline-none"
+            className="flex-1 bg-transparent text-white text-xs placeholder-white/40 outline-none"
           />
           {searchQuery && (
             <button
@@ -127,31 +127,31 @@ export function DiscoverTab() {
         </div>
       </div>
 
-      {/* Filter Chips */}
-      <div className="px-4 pb-3 flex-shrink-0">
+      {/* Filter Chips - compact */}
+      <div className="px-3 pb-2 flex-shrink-0">
         {/* Vibes */}
-        <div className="mb-2.5">
-          <p className="text-xs mb-1.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            What are you looking for?
+        <div className="mb-2">
+          <p className="text-[10px] mb-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            VIBES
           </p>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1">
             {VIBE_FILTERS.map((filter) => {
               const isSelected = selectedVibes.includes(filter.id)
               return (
                 <button
                   key={filter.id}
                   onClick={() => handleVibeToggle(filter.id)}
-                  className="px-2.5 py-1 rounded-full text-xs transition-all"
+                  className="px-2 py-0.5 rounded-full text-[11px] transition-all"
                   style={{
                     background: isSelected
                       ? 'rgba(0, 212, 255, 0.25)'
                       : 'rgba(255, 255, 255, 0.05)',
                     border: isSelected
                       ? '1px solid rgba(0, 212, 255, 0.5)'
-                      : '1px solid rgba(255, 255, 255, 0.1)',
+                      : '1px solid rgba(255, 255, 255, 0.08)',
                     color: isSelected
                       ? '#00d4ff'
-                      : 'rgba(255, 255, 255, 0.6)',
+                      : 'rgba(255, 255, 255, 0.55)',
                     fontWeight: isSelected ? 500 : 400,
                   }}
                 >
@@ -164,27 +164,27 @@ export function DiscoverTab() {
 
         {/* Regions */}
         <div>
-          <p className="text-xs mb-1.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            Where?
+          <p className="text-[10px] mb-1" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            REGION
           </p>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1">
             {REGION_FILTERS.map((filter) => {
               const isSelected = selectedRegions.includes(filter.id)
               return (
                 <button
                   key={filter.id}
                   onClick={() => handleRegionToggle(filter.id)}
-                  className="px-2.5 py-1 rounded-full text-xs transition-all"
+                  className="px-2 py-0.5 rounded-full text-[11px] transition-all"
                   style={{
                     background: isSelected
                       ? 'rgba(0, 212, 255, 0.25)'
                       : 'rgba(255, 255, 255, 0.05)',
                     border: isSelected
                       ? '1px solid rgba(0, 212, 255, 0.5)'
-                      : '1px solid rgba(255, 255, 255, 0.1)',
+                      : '1px solid rgba(255, 255, 255, 0.08)',
                     color: isSelected
                       ? '#00d4ff'
-                      : 'rgba(255, 255, 255, 0.6)',
+                      : 'rgba(255, 255, 255, 0.55)',
                     fontWeight: isSelected ? 500 : 400,
                   }}
                 >
@@ -197,15 +197,15 @@ export function DiscoverTab() {
       </div>
 
       {/* Results count + Clear filters */}
-      <div className="px-4 pb-2 flex items-center justify-between flex-shrink-0">
-        <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+      <div className="px-3 pb-1.5 flex items-center justify-between flex-shrink-0">
+        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
           {filteredRoutes.length} route{filteredRoutes.length !== 1 ? 's' : ''}
           {hasActiveFilters && ' found'}
         </p>
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="text-xs font-medium"
+            className="text-[11px] font-medium"
             style={{ color: '#00d4ff' }}
           >
             Clear all
@@ -213,10 +213,10 @@ export function DiscoverTab() {
         )}
       </div>
 
-      {/* Route Grid */}
-      <div className="px-4 pb-4 flex-1">
+      {/* Route Grid - 2 columns, tight spacing */}
+      <div className="px-3 pb-4 flex-1">
         {filteredRoutes.length > 0 ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             {filteredRoutes.map((route) => (
               <DiscoverGridCard
                 key={route.id}
