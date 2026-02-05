@@ -44,21 +44,20 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
 
     const startCoord = `${route.start.lng},${route.start.lat}`
     const endCoord = `${route.end.lng},${route.end.lat}`
-    const markers = `pin-s-a+00d4ff(${startCoord}),pin-s-b+ff9500(${endCoord})`
 
-    // Calculate center and appropriate zoom
-    const centerLng = (route.start.lng + route.end.lng) / 2
-    const centerLat = (route.start.lat + route.end.lat) / 2
+    // Use small circle markers instead of pins for cleaner look
+    const markers = `pin-s+00d4ff(${startCoord}),pin-s+ff9500(${endCoord})`
 
     // Build path overlay if we have the route geometry
     let pathOverlay = ''
     if (routePath) {
-      // Use cyan color with good width for visibility
-      pathOverlay = `path-4+00d4ff-0.9(${encodeURIComponent(routePath)}),`
+      // Cyan route line, 3px width, good opacity
+      pathOverlay = `path-3+00d4ff-0.85(${encodeURIComponent(routePath)}),`
     }
 
-    // Use navigation-night-v1 for slightly better visibility than dark-v11
-    return `https://api.mapbox.com/styles/v1/mapbox/navigation-night-v1/static/${pathOverlay}${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
+    // Use dark-v11 for clean minimal look (no traffic/road highlights)
+    // Use 'auto' to automatically fit bounds to path and markers with padding
+    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/400x180@2x?padding=50,50,50,50&access_token=${mapboxToken}`
   }, [hasValidToken, route, routePath, mapboxToken])
 
   const difficultyColors = {
@@ -72,7 +71,7 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
   return (
     <button
       onClick={() => onSelect?.(route)}
-      className="w-full text-left rounded-2xl overflow-hidden transition-all active:scale-[0.98]"
+      className="w-full text-left rounded-2xl overflow-hidden transition-all duration-150 active:scale-[0.98] active:brightness-110 hover:brightness-105"
       style={{
         background: 'rgba(255, 255, 255, 0.03)',
         border: isSaved
@@ -195,7 +194,7 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
         )}
 
         {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 mb-3">
+        <div className="flex flex-wrap gap-1.5">
           {route.tags.map((tag) => (
             <span
               key={tag}
@@ -217,24 +216,6 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
           >
             {route.difficulty}
           </span>
-        </div>
-
-        {/* Tap hint */}
-        <div
-          className="flex items-center justify-end gap-1 text-xs"
-          style={{ color: 'rgba(255,255,255,0.3)' }}
-        >
-          <span>Tap to view</span>
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path d="M9 18l6-6-6-6" />
-          </svg>
         </div>
       </div>
     </button>
