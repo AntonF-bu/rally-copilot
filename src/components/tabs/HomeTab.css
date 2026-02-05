@@ -854,6 +854,24 @@
 }
 
 /* ================================ */
+/* SAVED ROUTES */
+/* ================================ */
+.ns-saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ns-saved-icon {
+  background: var(--ns-accent-glow) !important;
+}
+
+.ns-saved-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ================================ */
 /* SEARCH MODAL */
 /* ================================ */
 .ns-modal-overlay {
@@ -934,7 +952,7 @@
 }
 
 .ns-search-input:focus {
-  border-color: rgba(255, 107, 53, 0.4);
+  border-color: var(--ns-border-accent);
 }
 
 .ns-search-spinner {

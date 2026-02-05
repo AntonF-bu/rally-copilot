@@ -102,13 +102,13 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
     map.current.on('load', () => {
       setMapLoaded(true)
 
-      // Add start marker (cyan for route visualization)
+      // Add start marker (cyan for start)
       new mapboxgl.Marker({ color: colors.cyan })
         .setLngLat([route.start.lng, route.start.lat])
         .addTo(map.current)
 
-      // Add end marker (orange)
-      new mapboxgl.Marker({ color: '#ff9500' })
+      // Add end marker (orange - accent color)
+      new mapboxgl.Marker({ color: colors.accent })
         .setLngLat([route.end.lng, route.end.lat])
         .addTo(map.current)
     })
@@ -125,9 +125,12 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
   useEffect(() => {
     if (!map.current || !mapLoaded || !routeGeometry) return
 
-    // Remove existing layer/source if present
+    // Remove existing layers/source if present
     if (map.current.getLayer('route-line')) {
       map.current.removeLayer('route-line')
+    }
+    if (map.current.getLayer('route-line-glow')) {
+      map.current.removeLayer('route-line-glow')
     }
     if (map.current.getSource('route')) {
       map.current.removeSource('route')
@@ -143,6 +146,24 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       },
     })
 
+    // Add glow layer first (underneath)
+    map.current.addLayer({
+      id: 'route-line-glow',
+      type: 'line',
+      source: 'route',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round',
+      },
+      paint: {
+        'line-color': colors.accent,
+        'line-width': 10,
+        'line-opacity': 0.2,
+        'line-blur': 4,
+      },
+    })
+
+    // Main route line in orange for visibility
     map.current.addLayer({
       id: 'route-line',
       type: 'line',
@@ -152,9 +173,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         'line-cap': 'round',
       },
       paint: {
-        'line-color': colors.cyan,
+        'line-color': colors.accent,
         'line-width': 4,
-        'line-opacity': 0.8,
+        'line-opacity': 0.95,
       },
     })
 
@@ -238,14 +259,8 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
     }
   }
 
-  // Brand difficulty colors
-  const difficultyColors = {
-    easy: { bg: 'rgba(76, 175, 80, 0.2)', text: '#4CAF50' },
-    moderate: { bg: 'rgba(255, 107, 53, 0.2)', text: '#FF6B35' },
-    hard: { bg: 'rgba(255, 59, 59, 0.2)', text: '#FF3B3B' },
-  }
-
-  const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
+  // Use theme difficulty colors
+  const diffColor = colors.difficulty[route.difficulty] || colors.difficulty.moderate
 
   return (
     <div
@@ -263,7 +278,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       {/* Loading overlay */}
       {loadingRoute && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: '#FF6B35', borderTopColor: 'transparent' }} />
+          <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
         </div>
       )}
 
@@ -315,14 +330,14 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         }}
       >
         {isSaving ? (
-          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: '#FF6B35', borderTopColor: 'transparent' }} />
+          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
         ) : (
           <svg
             width="22"
             height="22"
             viewBox="0 0 24 24"
-            fill={isSaved ? '#FF6B35' : 'none'}
-            stroke={isSaved ? '#FF6B35' : 'white'}
+            fill={isSaved ? colors.accent : 'none'}
+            stroke={isSaved ? colors.accent : 'white'}
             strokeWidth="2"
             className="transition-all duration-150"
             style={{
@@ -350,7 +365,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
           <h2
             className="text-white mb-2"
             style={{
-              fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+              fontFamily: "'Sora', -apple-system, sans-serif",
               fontSize: '24px',
               fontWeight: 700,
               textTransform: 'uppercase',
@@ -432,7 +447,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
                 key={tag}
                 className="px-2.5 py-1 rounded-full"
                 style={{
-                  fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                  fontFamily: "'Sora', -apple-system, sans-serif",
                   fontSize: '11px',
                   fontWeight: 500,
                   textTransform: 'uppercase',
@@ -448,7 +463,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
             <span
               className="px-2.5 py-1 rounded-full"
               style={{
-                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontFamily: "'Sora', -apple-system, sans-serif",
                 fontSize: '11px',
                 fontWeight: 600,
                 textTransform: 'uppercase',
@@ -469,7 +484,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
               disabled={isSaving}
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all disabled:opacity-70"
               style={{
-                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontFamily: "'Sora', -apple-system, sans-serif",
                 fontSize: '14px',
                 fontWeight: 600,
                 textTransform: 'uppercase',
@@ -480,7 +495,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
                 border: isSaved
                   ? '1px solid rgba(255, 107, 53, 0.5)'
                   : '1px solid rgba(255, 255, 255, 0.1)',
-                color: isSaved ? '#FF6B35' : 'rgba(255,255,255,0.9)',
+                color: isSaved ? colors.accent : 'rgba(255,255,255,0.9)',
               }}
             >
               {isSaving ? (
@@ -495,7 +510,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
                     width="20"
                     height="20"
                     viewBox="0 0 24 24"
-                    fill={isSaved ? '#FF6B35' : 'none'}
+                    fill={isSaved ? colors.accent : 'none'}
                     stroke="currentColor"
                     strokeWidth="2"
                   >

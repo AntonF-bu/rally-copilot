@@ -493,6 +493,17 @@ export default function App() {
     goToDriving()
   }
 
+  // iOS mobile container styles - consistent 420px width across all screens
+  const mobileContainerStyle = {
+    maxWidth: '420px',
+    margin: '0 auto',
+    height: '100dvh',
+    minHeight: '-webkit-fill-available',
+    position: 'relative',
+    overflow: 'hidden',
+    background: '#080B12',
+  }
+
   // Render
   if (showRouteSelector) {
     return <RouteSelector onRouteSelected={goToPreview} />
@@ -500,31 +511,43 @@ export default function App() {
 
   if (showRoutePreview) {
     return (
-      <RoutePreview 
-        onStartNavigation={handleStartNavigation} 
-        onBack={() => { clearRouteData(); goToMenu() }}
-        onEdit={goToEditor}
-      />
+      <div style={mobileContainerStyle}>
+        <RoutePreview
+          onStartNavigation={handleStartNavigation}
+          onBack={() => { clearRouteData(); goToMenu() }}
+          onEdit={goToEditor}
+        />
+      </div>
     )
   }
-  
+
   if (showRouteEditor) {
-    return <RouteEditor onBack={goToPreview} onSave={goToPreview} />
+    return (
+      <div style={mobileContainerStyle}>
+        <RouteEditor onBack={goToPreview} onSave={goToPreview} />
+      </div>
+    )
   }
 
   if (showTripSummary) {
-    return <TripSummary onClose={() => { clearRouteData(); goToMenu() }} />
+    return (
+      <div style={mobileContainerStyle}>
+        <TripSummary onClose={() => { clearRouteData(); goToMenu() }} />
+      </div>
+    )
   }
 
   return (
-    <div className="fixed inset-0" style={{ background: 'var(--bg-deep)' }}>
-      <AmbientBackground />
-      <div className="relative z-[1] w-full h-full">
-        <Map />
-        <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
-        <BottomBar />
-        <SettingsPanel />
-        <VoiceIndicator />
+    <div style={mobileContainerStyle}>
+      <div className="fixed inset-0" style={{ background: 'var(--bg-deep)' }}>
+        <AmbientBackground />
+        <div className="relative z-[1] w-full h-full">
+          <Map />
+          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
+          <BottomBar />
+          <SettingsPanel />
+          <VoiceIndicator />
+        </div>
       </div>
     </div>
   )
