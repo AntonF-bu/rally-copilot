@@ -7,7 +7,7 @@ export default function ShareModal({ name, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
       <div className="bg-[#1a1a24] rounded-2xl p-6 w-full max-w-sm">
         <h3 className="text-lg font-bold text-white mb-4">Share Route</h3>
         <p className="text-white/60 text-sm mb-4">{name || 'Rally Route'}</p>

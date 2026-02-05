@@ -119,7 +119,7 @@ export default function LoadingScreen({
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col items-center justify-center p-6">
+    <div className="absolute inset-0 bg-[#0a0a0f] flex flex-col items-center justify-center p-6">
       {/* Main Content */}
       <div className="w-full max-w-md">
         {/* Title */}

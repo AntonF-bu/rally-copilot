@@ -344,7 +344,7 @@ export default function RouteEditor({ onBack, onSave }) {
   const editedCount = editedCurves.filter(e => !e.isDeleted && e.isEdited).length
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f]">
+    <div className="absolute inset-0 bg-[#0a0a0f]">
       <div ref={mapContainerRef} className="absolute inset-0" />
 
       {/* Top Bar */}

@@ -502,6 +502,7 @@ export default function App() {
     position: 'relative',
     overflow: 'hidden',
     background: '#080B12',
+    boxShadow: '0 0 80px rgba(0,0,0,0.5)',
   }
 
   // Render

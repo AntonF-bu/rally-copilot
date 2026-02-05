@@ -33,7 +33,7 @@ export default function ModeSelection({ routeData, onSelect, onBack }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col">
+    <div className="absolute inset-0 bg-[#0a0a0f] flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-white/10">
         <button 

@@ -34,7 +34,7 @@ export default function SettingsPanel() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center">
+    <div className="absolute inset-0 z-50 flex items-end justify-center">
       {/* Backdrop */}
       <div
         className="absolute inset-0 backdrop-blur-sm"

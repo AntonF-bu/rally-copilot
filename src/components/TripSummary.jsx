@@ -266,18 +266,18 @@ export default function TripSummary() {
 
   if (!summary) {
     return (
-      <div className="fixed inset-0 bg-[#0a0a0f] flex items-center justify-center">
+      <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
         <p className="text-white/30 text-sm">No trip data</p>
       </div>
     )
   }
 
-  const completionPercent = curveInsights?.total > 0 
+  const completionPercent = curveInsights?.total > 0
     ? Math.round((curveInsights.completed / curveInsights.total) * 100)
     : 100
 
   return (
-    <div className="fixed inset-0 bg-[#0a0a0f] flex flex-col overflow-hidden">
+    <div className="absolute inset-0 bg-[#0a0a0f] flex flex-col overflow-hidden">
       
       {/* Ambient background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
