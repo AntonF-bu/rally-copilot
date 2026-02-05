@@ -1,21 +1,65 @@
 // Route card for Discover tab
 // Tappable preview card that opens route detail view
 
+import { useState, useEffect, useMemo } from 'react'
+
 export function DiscoverRouteCard({ route, isSaved, onSelect }) {
+  const [routePath, setRoutePath] = useState(null)
+
   // Generate Mapbox Static Image URL
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const hasValidToken = mapboxToken && mapboxToken.length > 10
 
-  // Build static map URL if token exists
-  let staticMapUrl = null
-  if (hasValidToken) {
+  // Fetch route geometry for the path overlay
+  useEffect(() => {
+    if (!hasValidToken || routePath) return
+
+    const fetchRoute = async () => {
+      try {
+        const coords = [
+          `${route.start.lng},${route.start.lat}`,
+          ...(route.waypoints || []).map((wp) => `${wp.lng},${wp.lat}`),
+          `${route.end.lng},${route.end.lat}`,
+        ].join(';')
+
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=polyline&overview=full&access_token=${mapboxToken}`
+        const response = await fetch(url)
+        const data = await response.json()
+
+        if (data.routes?.[0]?.geometry) {
+          // geometry is already polyline encoded
+          setRoutePath(data.routes[0].geometry)
+        }
+      } catch (err) {
+        console.error('Failed to fetch route for preview:', err)
+      }
+    }
+
+    fetchRoute()
+  }, [route, hasValidToken, mapboxToken, routePath])
+
+  // Build static map URL with route path overlay
+  const staticMapUrl = useMemo(() => {
+    if (!hasValidToken) return null
+
     const startCoord = `${route.start.lng},${route.start.lat}`
     const endCoord = `${route.end.lng},${route.end.lat}`
     const markers = `pin-s-a+00d4ff(${startCoord}),pin-s-b+ff9500(${endCoord})`
+
+    // Calculate center and appropriate zoom
     const centerLng = (route.start.lng + route.end.lng) / 2
     const centerLat = (route.start.lat + route.end.lat) / 2
-    staticMapUrl = `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
-  }
+
+    // Build path overlay if we have the route geometry
+    let pathOverlay = ''
+    if (routePath) {
+      // Use cyan color with good width for visibility
+      pathOverlay = `path-4+00d4ff-0.9(${encodeURIComponent(routePath)}),`
+    }
+
+    // Use navigation-night-v1 for slightly better visibility than dark-v11
+    return `https://api.mapbox.com/styles/v1/mapbox/navigation-night-v1/static/${pathOverlay}${markers}/${centerLng},${centerLat},11,0/400x180@2x?access_token=${mapboxToken}`
+  }, [hasValidToken, route, routePath, mapboxToken])
 
   const difficultyColors = {
     easy: { bg: 'rgba(0, 255, 136, 0.15)', text: '#00ff88' },

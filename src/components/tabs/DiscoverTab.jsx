@@ -66,9 +66,9 @@ export function DiscoverTab() {
   const hasActiveFilters = selectedVibes.length > 0 || selectedRegions.length > 0
 
   return (
-    <div className="min-h-screen pb-24" style={{ background: '#0a0a0f' }}>
+    <div className="flex flex-col" style={{ background: '#0a0a0f' }}>
       {/* Header */}
-      <div className="px-4 pt-6 pb-2">
+      <div className="px-4 pt-6 pb-2 flex-shrink-0">
         <h1 className="text-2xl font-bold text-white">Discover</h1>
         <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.5)' }}>
           Browse curated routes near you
