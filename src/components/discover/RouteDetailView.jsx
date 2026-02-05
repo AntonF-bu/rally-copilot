@@ -213,10 +213,11 @@ export function RouteDetailView({ route, onClose }) {
     }
   }
 
+  // Brand difficulty colors
   const difficultyColors = {
-    easy: { bg: 'rgba(0, 255, 136, 0.15)', text: '#00ff88' },
-    moderate: { bg: 'rgba(255, 170, 0, 0.15)', text: '#ffaa00' },
-    hard: { bg: 'rgba(255, 68, 68, 0.15)', text: '#ff4444' },
+    easy: { bg: 'rgba(76, 175, 80, 0.2)', text: '#4CAF50' },
+    moderate: { bg: 'rgba(255, 107, 53, 0.2)', text: '#FF6B35' },
+    hard: { bg: 'rgba(255, 59, 59, 0.2)', text: '#FF3B3B' },
   }
 
   const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
@@ -237,7 +238,7 @@ export function RouteDetailView({ route, onClose }) {
       {/* Loading overlay */}
       {loadingRoute && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <div className="w-8 h-8 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: '#FF6B35', borderTopColor: 'transparent' }} />
         </div>
       )}
 
@@ -279,24 +280,24 @@ export function RouteDetailView({ route, onClose }) {
           right: '16px',
           width: '44px',
           height: '44px',
-          background: isSaved ? 'rgba(0, 212, 255, 0.25)' : 'rgba(0, 0, 0, 0.7)',
+          background: isSaved ? 'rgba(255, 107, 53, 0.25)' : 'rgba(0, 0, 0, 0.7)',
           backdropFilter: 'blur(10px)',
           WebkitBackdropFilter: 'blur(10px)',
           border: isSaved
-            ? '1px solid rgba(0, 212, 255, 0.4)'
+            ? '1px solid rgba(255, 107, 53, 0.5)'
             : '1px solid rgba(255, 255, 255, 0.15)',
           transform: heartAnimating ? 'scale(1.2)' : 'scale(1)',
         }}
       >
         {isSaving ? (
-          <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: '#FF6B35', borderTopColor: 'transparent' }} />
         ) : (
           <svg
             width="22"
             height="22"
             viewBox="0 0 24 24"
-            fill={isSaved ? '#00d4ff' : 'none'}
-            stroke={isSaved ? '#00d4ff' : 'white'}
+            fill={isSaved ? '#FF6B35' : 'none'}
+            stroke={isSaved ? '#FF6B35' : 'white'}
             strokeWidth="2"
             className="transition-all duration-150"
             style={{
@@ -310,19 +311,29 @@ export function RouteDetailView({ route, onClose }) {
 
       {/* Bottom Info Panel */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-10 rounded-t-3xl"
+        className="absolute bottom-0 left-0 right-0 z-10 rounded-t-3xl topo-bg"
         style={{
-          background: 'rgba(10, 10, 15, 0.98)',
+          backgroundColor: 'rgba(10, 10, 15, 0.98)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          // Account for bottom nav bar (70px) + safe area
           paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
         }}
       >
         <div className="p-5 pb-4">
           {/* Route Name */}
-          <h2 className="text-xl font-bold text-white mb-2">{route.name}</h2>
+          <h2
+            className="text-white mb-2"
+            style={{
+              fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+              fontSize: '24px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}
+          >
+            {route.name}
+          </h2>
 
           {/* Location */}
           <div
@@ -394,9 +405,15 @@ export function RouteDetailView({ route, onClose }) {
             {route.tags.map((tag) => (
               <span
                 key={tag}
-                className="px-2.5 py-1 rounded-full text-xs capitalize"
+                className="px-2.5 py-1 rounded-full"
                 style={{
-                  background: 'rgba(255, 255, 255, 0.08)',
+                  fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
                   color: 'rgba(255, 255, 255, 0.7)',
                 }}
               >
@@ -404,8 +421,13 @@ export function RouteDetailView({ route, onClose }) {
               </span>
             ))}
             <span
-              className="px-2.5 py-1 rounded-full text-xs capitalize"
+              className="px-2.5 py-1 rounded-full"
               style={{
+                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontSize: '11px',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
                 background: diffColor.bg,
                 color: diffColor.text,
               }}
@@ -422,13 +444,18 @@ export function RouteDetailView({ route, onClose }) {
               disabled={isSaving}
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all disabled:opacity-70"
               style={{
+                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontSize: '14px',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
                 background: isSaved
-                  ? 'rgba(0, 212, 255, 0.2)'
+                  ? 'rgba(255, 107, 53, 0.2)'
                   : 'rgba(255, 255, 255, 0.08)',
                 border: isSaved
-                  ? '1px solid rgba(0, 212, 255, 0.5)'
+                  ? '1px solid rgba(255, 107, 53, 0.5)'
                   : '1px solid rgba(255, 255, 255, 0.1)',
-                color: isSaved ? '#00d4ff' : 'rgba(255,255,255,0.9)',
+                color: isSaved ? '#FF6B35' : 'rgba(255,255,255,0.9)',
               }}
             >
               {isSaving ? (
@@ -443,7 +470,7 @@ export function RouteDetailView({ route, onClose }) {
                     width="20"
                     height="20"
                     viewBox="0 0 24 24"
-                    fill={isSaved ? '#00d4ff' : 'none'}
+                    fill={isSaved ? '#FF6B35' : 'none'}
                     stroke="currentColor"
                     strokeWidth="2"
                   >
@@ -458,15 +485,20 @@ export function RouteDetailView({ route, onClose }) {
             <button
               className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl"
               style={{
-                background: 'linear-gradient(135deg, #00d4ff 0%, #00a3cc 100%)',
-                color: '#000',
-                fontWeight: 600,
+                fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                fontSize: '14px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                background: 'linear-gradient(135deg, #FF6B35 0%, #E85A2A 100%)',
+                color: '#fff',
+                boxShadow: '0 4px 15px rgba(255, 107, 53, 0.3)',
               }}
             >
               {/* Play icon */}
               <svg
-                width="20"
-                height="20"
+                width="18"
+                height="18"
                 viewBox="0 0 24 24"
                 fill="currentColor"
                 stroke="none"

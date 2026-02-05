@@ -28,8 +28,38 @@
     
     <!-- Mapbox GL CSS -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
-    
+
+    <!-- Google Fonts - Barlow Condensed for headings -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+
     <style>
+      /* Brand CSS Variables */
+      :root {
+        --accent-orange: #FF6B35;
+        --accent-cyan: #00D4FF;
+        --accent-red: #FF3B3B;
+        --accent-green: #4CAF50;
+        --font-heading: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+        --bg-dark: #0a0a0f;
+        --bg-card: #141820;
+      }
+
+      /* Topographic background texture */
+      .topo-bg {
+        background-color: var(--bg-dark);
+        background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40,100 Q60,60 100,50 Q140,40 160,80 Q180,120 140,140 Q100,160 60,130 Q40,100 40,100' fill='none' stroke='rgba(255,255,255,0.04)' stroke-width='0.5'/%3E%3Cpath d='M50,100 Q65,70 100,62 Q130,55 150,85 Q165,115 135,130 Q100,145 70,125 Q50,100 50,100' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3Cpath d='M20,50 Q40,20 80,30 Q100,35 90,60 Q80,80 40,70 Q20,50 20,50' fill='none' stroke='rgba(255,255,255,0.035)' stroke-width='0.5'/%3E%3Cpath d='M130,170 Q160,150 180,170 Q190,190 160,195 Q130,190 130,170' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3Cpath d='M160,30 Q180,10 195,40 Q200,60 175,70 Q150,60 160,30' fill='none' stroke='rgba(255,255,255,0.035)' stroke-width='0.5'/%3E%3Cpath d='M5,150 Q25,130 50,145 Q60,160 40,175 Q15,170 5,150' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3C/svg%3E");
+        background-repeat: repeat;
+        background-size: 200px 200px;
+      }
+
+      /* Heading font utility */
+      .font-rally {
+        font-family: var(--font-heading);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
       /* Prevent overscroll/bounce on iOS */
       html, body {
         position: fixed;
