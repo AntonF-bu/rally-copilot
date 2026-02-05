@@ -43,16 +43,15 @@ export function BottomNav({ activeTab, onTabChange }) {
       className="fixed left-0 right-0 z-50"
       style={{
         bottom: 0,
-        // Ensure it's at actual bottom on mobile
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        background: 'rgba(10, 10, 15, 0.95)',
+        background: '#0d1117',
         backdropFilter: 'blur(12px)',
         WebkitBackdropFilter: 'blur(12px)',
         borderTop: '1px solid rgba(255, 255, 255, 0.08)',
       }}
     >
       {/* Tab buttons */}
-      <div className="flex justify-around items-center py-3 px-4">
+      <div className="flex justify-around items-center py-2.5 px-4">
         {tabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -63,15 +62,17 @@ export function BottomNav({ activeTab, onTabChange }) {
               onClick={() => onTabChange(tab.id)}
               className="flex flex-col items-center gap-1 px-6 py-1 transition-all"
               style={{
-                color: isActive ? '#00d4ff' : 'rgba(255, 255, 255, 0.5)',
+                color: isActive ? '#FF6B35' : 'rgba(255, 255, 255, 0.4)',
               }}
             >
               <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
               <span
-                className="text-xs"
                 style={{
-                  fontWeight: isActive ? 600 : 400,
-                  letterSpacing: '0.02em',
+                  fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+                  fontSize: '10px',
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
                 }}
               >
                 {tab.label}

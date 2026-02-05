@@ -53,10 +53,11 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
     return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/300x150@2x?padding=30,30,30,30&logo=false&attribution=false&access_token=${mapboxToken}`
   }, [hasValidToken, route, routePath, mapboxToken])
 
+  // Brand difficulty colors
   const difficultyColors = {
-    easy: { bg: 'rgba(0, 255, 136, 0.2)', text: '#00ff88' },
-    moderate: { bg: 'rgba(255, 170, 0, 0.2)', text: '#ffaa00' },
-    hard: { bg: 'rgba(255, 68, 68, 0.2)', text: '#ff4444' },
+    easy: { bg: 'rgba(76, 175, 80, 0.25)', text: '#4CAF50' },
+    moderate: { bg: 'rgba(255, 107, 53, 0.25)', text: '#FF6B35' },
+    hard: { bg: 'rgba(255, 59, 59, 0.25)', text: '#FF3B3B' },
   }
 
   const diffColor = difficultyColors[route.difficulty] || difficultyColors.moderate
@@ -64,12 +65,13 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
   return (
     <button
       onClick={() => onSelect?.(route)}
-      className="w-full text-left rounded-lg overflow-hidden transition-all duration-150 active:scale-[0.97] hover:brightness-110"
+      className="w-full text-left rounded-xl overflow-hidden transition-all duration-150 active:scale-[0.97]"
       style={{
-        background: 'rgba(255, 255, 255, 0.04)',
+        background: '#141820',
         border: isSaved
-          ? '1px solid rgba(0, 212, 255, 0.35)'
-          : '1px solid rgba(255, 255, 255, 0.06)',
+          ? '1px solid rgba(255, 107, 53, 0.4)'
+          : '1px solid rgba(255, 107, 53, 0.12)',
+        boxShadow: isSaved ? '0 0 15px rgba(255, 107, 53, 0.1)' : 'none',
       }}
     >
       {/* Map Thumbnail - compact 2:1 aspect ratio */}
@@ -112,7 +114,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
           <div
             className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
             style={{
-              background: 'rgba(0, 212, 255, 0.3)',
+              background: 'rgba(255, 107, 53, 0.35)',
               backdropFilter: 'blur(4px)',
             }}
           >
@@ -120,8 +122,8 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
               width="10"
               height="10"
               viewBox="0 0 24 24"
-              fill="#00d4ff"
-              stroke="#00d4ff"
+              fill="#FF6B35"
+              stroke="#FF6B35"
               strokeWidth="2"
             >
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -131,8 +133,13 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
         {/* Difficulty badge on map */}
         <div
-          className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-medium capitalize"
+          className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded"
           style={{
+            fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+            fontSize: '9px',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
             background: diffColor.bg,
             color: diffColor.text,
             backdropFilter: 'blur(4px)',
@@ -146,8 +153,15 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
       <div className="px-2 py-1.5">
         {/* Route name - truncate */}
         <h3
-          className="text-white font-medium text-xs leading-tight truncate"
+          className="text-white leading-tight truncate"
           title={route.name}
+          style={{
+            fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif",
+            fontSize: '13px',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.03em',
+          }}
         >
           {route.name}
         </h3>
