@@ -1,5 +1,5 @@
-// Home Tab - Night Stage Design
-// Premium dark aesthetic with atmospheric backgrounds and animated route visualization
+// Home Tab - Tramo Brand Identity
+// Clean dark aesthetic with precise typography and minimal accents
 
 import { useState, useEffect, useMemo } from 'react'
 import useStore from '../../store'
@@ -191,7 +191,7 @@ export function HomeTab({
           <div className="ns-topbar-left">
             <div className="ns-avatar">{displayName.charAt(0).toUpperCase()}</div>
             <div className="ns-brand">
-              <span className="ns-brand-name">Rally Co-Pilot</span>
+              <span className="ns-brand-name">Tramo</span>
               <div className="ns-location">
                 <div className={`ns-gps-dot ${!hasLocation ? 'acquiring' : ''}`} />
                 <span>{hasLocation ? 'Boston, MA' : 'Acquiring GPS...'}</span>
@@ -230,7 +230,7 @@ export function HomeTab({
             <div className="ns-voice-bar" />
             <div className="ns-voice-bar" />
           </div>
-          <span className="ns-voice-text">Co-Pilot Voice Ready</span>
+          <span className="ns-voice-text">Voice Guide Ready</span>
         </div>
 
         {/* Hero Stage Card - Show full card only when user has recent routes */}
@@ -253,8 +253,8 @@ export function HomeTab({
               <svg className="ns-route-svg" viewBox="0 0 300 120" preserveAspectRatio="xMidYMid meet">
                 <defs>
                   <linearGradient id="ns-route-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#F97316" />
-                    <stop offset="100%" stopColor="#64B5F6" />
+                    <stop offset="0%" stopColor="#E8622C" />
+                    <stop offset="100%" stopColor="#888888" />
                   </linearGradient>
                 </defs>
                 {(() => {
@@ -337,7 +337,7 @@ export function HomeTab({
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" />
               </svg>
-              Start Co-Pilot
+              Start Drive
             </button>
           </div>
         ) : (
@@ -418,8 +418,8 @@ export function HomeTab({
                       <svg className="ns-recent-svg" viewBox="0 0 150 60" preserveAspectRatio="xMidYMid meet">
                         <defs>
                           <linearGradient id={`ns-recent-grad-${idx}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                            <stop offset="0%" stopColor="#F97316" />
-                            <stop offset="100%" stopColor="#64B5F6" />
+                            <stop offset="0%" stopColor="#E8622C" />
+                            <stop offset="100%" stopColor="#888888" />
                           </linearGradient>
                         </defs>
                         <path
@@ -427,8 +427,8 @@ export function HomeTab({
                           d={d}
                           stroke={`url(#ns-recent-grad-${idx})`}
                         />
-                        <circle cx={start.x} cy={start.y} r="4" fill="#F97316" />
-                        <circle cx={end.x} cy={end.y} r="4" fill="#64B5F6" />
+                        <circle cx={start.x} cy={start.y} r="4" fill="#E8622C" />
+                        <circle cx={end.x} cy={end.y} r="4" fill="#888888" />
                       </svg>
                     </div>
                     <div className="ns-recent-content">
@@ -477,7 +477,7 @@ export function HomeTab({
                   >
                     <div className={`ns-nearby-accent ${difficulty}`} />
                     <div className="ns-nearby-icon ns-saved-icon">
-                      <svg viewBox="0 0 24 24" fill="#F97316" stroke="#F97316" strokeWidth="2">
+                      <svg viewBox="0 0 24 24" fill="#E8622C" stroke="#E8622C" strokeWidth="2">
                         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                       </svg>
                     </div>
@@ -529,13 +529,7 @@ export function HomeTab({
                   >
                     <div className={`ns-nearby-accent ${difficulty}`} />
                     <div className="ns-nearby-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="url(#ns-nearby-icon-grad)" strokeWidth="2">
-                        <defs>
-                          <linearGradient id="ns-nearby-icon-grad" x1="0%" y1="100%" x2="100%" y2="0%">
-                            <stop offset="0%" stopColor="#F97316" />
-                            <stop offset="100%" stopColor="#64B5F6" />
-                          </linearGradient>
-                        </defs>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M12 2L4 7l8 5 8-5-8-5z" />
                         <path d="M4 12l8 5 8-5" />
                         <path d="M4 17l8 5 8-5" />
@@ -609,7 +603,7 @@ export function HomeTab({
           onClose={() => setShowRecentList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
-          accentColor="#F97316"
+          accentColor="#E8622C"
         />
       )}
 
@@ -623,7 +617,7 @@ export function HomeTab({
           onClose={() => setShowFavoritesList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
-          accentColor="#f59e0b"
+          accentColor="#E8622C"
           isFavorites
         />
       )}
