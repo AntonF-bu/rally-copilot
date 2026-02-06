@@ -8,6 +8,7 @@ import useStore from '../../store'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import TramoLogo from '../TramoLogo'
 import { fetchRouteDriveCountBySlug } from '../../services/driveLogService'
+import { fetchRouteRating, fetchUserRatingForRoute } from '../../services/ratingService'
 
 // Difficulty color mapping
 const DIFFICULTY_COLORS = {
@@ -29,19 +30,24 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
   const [loadingRoute, setLoadingRoute] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [driveCount, setDriveCount] = useState(0)
+  const [ratingData, setRatingData] = useState({ averageRating: 0, totalRatings: 0 })
+  const [userRating, setUserRating] = useState(null)
 
-  // Store access for favorites
+  // Store access for favorites and user
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
   const addFavoriteRoute = useStore((state) => state.addFavoriteRoute)
   const removeFavoriteRoute = useStore((state) => state.removeFavoriteRoute)
+  const user = useStore((state) => state.user)
 
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const mapboxStyle = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
 
-  // Fetch drive count for this route
+  // Fetch drive count and ratings for this route
   useEffect(() => {
-    const loadDriveCount = async () => {
+    const loadRouteStats = async () => {
       if (!route.id) return
+
+      // Fetch drive count
       try {
         const count = await fetchRouteDriveCountBySlug(route.id)
         setDriveCount(count)
@@ -49,9 +55,28 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
       } catch (err) {
         console.error('🗄️ Failed to fetch drive count:', err)
       }
+
+      // Fetch rating data
+      try {
+        const rating = await fetchRouteRating(route.id)
+        setRatingData(rating)
+        console.log(`🗄️ Route ${route.id} rating: ${rating.averageRating} (${rating.totalRatings} ratings)`)
+      } catch (err) {
+        console.error('🗄️ Failed to fetch route rating:', err)
+      }
+
+      // Fetch user's rating if logged in
+      if (user?.id) {
+        try {
+          const myRating = await fetchUserRatingForRoute(user.id, route.id)
+          setUserRating(myRating)
+        } catch (err) {
+          console.error('🗄️ Failed to fetch user rating:', err)
+        }
+      }
     }
-    loadDriveCount()
-  }, [route.id])
+    loadRouteStats()
+  }, [route.id, user?.id])
 
   // Check if route is saved
   const isSaved = favoriteRoutes.some(
@@ -421,16 +446,47 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
               <span style={styles.statLabel}>Minutes</span>
             </div>
             <div style={styles.statCard}>
-              <span style={{ ...styles.statValue, color: difficultyColor }}>
-                {route.difficulty === 'easy' ? '1' : route.difficulty === 'moderate' ? '2' : route.difficulty === 'hard' ? '3' : '4'}
+              <div style={styles.ratingValue}>
+                <span style={styles.statValue}>
+                  {ratingData.totalRatings > 0 ? ratingData.averageRating.toFixed(1) : '—'}
+                </span>
+                {ratingData.totalRatings > 0 && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#E8622C" stroke="none" style={{ marginLeft: '2px' }}>
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                )}
+              </div>
+              <span style={styles.statLabel}>
+                {ratingData.totalRatings > 0 ? `${ratingData.totalRatings} Ratings` : 'No Ratings'}
               </span>
-              <span style={styles.statLabel}>Difficulty</span>
             </div>
             <div style={styles.statCard}>
               <span style={styles.statValue}>{driveCount}</span>
               <span style={styles.statLabel}>Drives</span>
             </div>
           </div>
+
+          {/* User's Rating */}
+          {userRating && (
+            <div style={styles.userRatingRow}>
+              <span style={styles.userRatingLabel}>You rated:</span>
+              <div style={styles.userRatingStars}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <svg
+                    key={star}
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill={userRating.rating >= star ? '#E8622C' : 'none'}
+                    stroke={userRating.rating >= star ? '#E8622C' : '#666666'}
+                    strokeWidth="1.5"
+                  >
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Description Section */}
           <div style={styles.section}>
@@ -665,6 +721,29 @@ const styles = {
     textTransform: 'uppercase',
     color: '#666666',
     marginTop: '4px',
+  },
+  ratingValue: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userRatingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginBottom: '20px',
+    marginTop: '-16px',
+  },
+  userRatingLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    color: '#666666',
+  },
+  userRatingStars: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px',
   },
   section: {
     marginBottom: '20px',
