@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
+import { useSwipeBack } from '../hooks/useSwipeBack'
 import { getCurveColor } from '../data/routes'
 import { analyzeRouteCharacter, ROUTE_CHARACTER, CHARACTER_COLORS, CHARACTER_BEHAVIORS } from '../services/zoneService'
 import { mapboxStyle } from '../styles/theme'
@@ -22,6 +23,9 @@ const CUSTOM_CALLOUT_TYPES = [
 ]
 
 export default function RouteEditor({ onBack, onSave }) {
+  // Enable iOS-style swipe-back gesture
+  useSwipeBack(onBack)
+
   const mapRef = useRef(null)
   const markersRef = useRef([])
   const zoneLayersRef = useRef([])
