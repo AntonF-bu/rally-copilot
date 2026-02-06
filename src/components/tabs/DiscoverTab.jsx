@@ -41,6 +41,8 @@ function DifficultyBadge({ difficulty }) {
 function FeaturedRouteCard({ route, stats, onSelect }) {
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const hasValidToken = mapboxToken && mapboxToken.length > 10
+  // Use Tramo's custom dark style (same as RouteDetailPage)
+  const customMapStyle = 'antonflk/cml9m9s1j001401sgggri2ovp'
 
   // Get first sentence of description for excerpt
   const excerpt = useMemo(() => {
@@ -49,7 +51,7 @@ function FeaturedRouteCard({ route, stats, onSelect }) {
     return firstSentence.length > 80 ? firstSentence.substring(0, 80) + '...' : firstSentence + '.'
   }, [route.description])
 
-  // Generate static map URL
+  // Generate static map URL with Tramo custom style and no watermarks
   const mapUrl = useMemo(() => {
     if (!hasValidToken) return null
 
@@ -58,14 +60,14 @@ function FeaturedRouteCard({ route, stats, onSelect }) {
       const coords = route.geometry.coordinates
       const midIdx = Math.floor(coords.length / 2)
       const [lng, lat] = coords[midIdx]
-      return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${lng},${lat},10,0/400x200@2x?access_token=${mapboxToken}`
+      return `https://api.mapbox.com/styles/v1/${customMapStyle}/static/${lng},${lat},10,0/400x200@2x?access_token=${mapboxToken}&logo=false&attribution=false`
     }
 
     // Fallback: use midpoint between start and end
     if (route.start?.lat && route.end?.lat) {
       const midLat = (route.start.lat + route.end.lat) / 2
       const midLng = (route.start.lng + route.end.lng) / 2
-      return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${midLng},${midLat},11,0/400x200@2x?access_token=${mapboxToken}`
+      return `https://api.mapbox.com/styles/v1/${customMapStyle}/static/${midLng},${midLat},11,0/400x200@2x?access_token=${mapboxToken}&logo=false&attribution=false`
     }
 
     return null

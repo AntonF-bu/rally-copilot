@@ -12,7 +12,6 @@ export function ProfileTab() {
   const profile = useStore((state) => state.profile)
   const user = useStore((state) => state.user)
   const setProfile = useStore((state) => state.setProfile)
-  const toggleSettings = useStore((state) => state.toggleSettings)
   const recentRoutes = useStore((state) => state.recentRoutes)
 
   // Stats and drives from database
@@ -50,6 +49,8 @@ export function ProfileTab() {
   const [isSaving, setIsSaving] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const [showAllDrives, setShowAllDrives] = useState(false)
+  const [historyCollapsed, setHistoryCollapsed] = useState(true)
+  const [expandedDriveId, setExpandedDriveId] = useState(null)
 
   // Get display values from profile
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Driver'
@@ -194,13 +195,6 @@ export function ProfileTab() {
             Edit Profile
           </button>
         </div>
-        {/* Settings gear button */}
-        <button onClick={toggleSettings} style={styles.settingsButton}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth="2">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
       </div>
 
       {/* Edit Profile Modal */}
@@ -303,78 +297,134 @@ export function ProfileTab() {
         </div>
       </div>
 
-      {/* Drive History Section */}
+      {/* Drive History Section - Collapsible */}
       <div style={styles.section}>
-        <span style={styles.sectionLabel}>DRIVE HISTORY</span>
+        {(() => {
+          // Filter out meaningless 0-distance, 0-duration drives
+          const validDrives = driveLogs.filter(drive =>
+            (drive.distance_miles && drive.distance_miles > 0) ||
+            (drive.duration_minutes && drive.duration_minutes > 0)
+          )
+          const driveCount = validDrives.length
 
-        {loadingStats ? (
-          <div style={styles.emptyState}>
-            <p style={styles.emptyText}>Loading drives...</p>
-          </div>
-        ) : driveLogs.length === 0 ? (
-          <div style={styles.emptyState}>
-            <p style={styles.emptyText}>No drives yet. Hit the road.</p>
-          </div>
-        ) : (
-          <div style={styles.driveList}>
-            {(() => {
-              // Filter out meaningless 0-distance, 0-duration drives
-              const validDrives = driveLogs.filter(drive =>
-                (drive.distance_miles && drive.distance_miles > 0) ||
-                (drive.duration_minutes && drive.duration_minutes > 0)
-              )
-              const drivesToShow = showAllDrives ? validDrives : validDrives.slice(0, 3)
+          return (
+            <>
+              {/* Collapsible Header */}
+              <button
+                onClick={() => setHistoryCollapsed(!historyCollapsed)}
+                style={styles.collapsibleHeader}
+              >
+                <div style={styles.collapsibleHeaderLeft}>
+                  <span style={styles.sectionLabel}>DRIVE HISTORY</span>
+                  <span style={styles.driveCountBadge}>({driveCount})</span>
+                </div>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#666666"
+                  strokeWidth="2"
+                  style={{
+                    transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s ease',
+                  }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
 
-              return (
-                <>
-                  {drivesToShow.map((drive) => {
-                    const routeName = drive.routes?.name || 'Free Drive'
-                    const hasNoData = (!drive.distance_miles || drive.distance_miles === 0) &&
-                                      (!drive.duration_minutes || drive.duration_minutes === 0)
+              {/* Collapsible Content */}
+              <div
+                style={{
+                  ...styles.collapsibleContent,
+                  maxHeight: historyCollapsed ? '0px' : '2000px',
+                  opacity: historyCollapsed ? 0 : 1,
+                  overflow: 'hidden',
+                  transition: 'max-height 0.3s ease, opacity 0.2s ease',
+                }}
+              >
+                {loadingStats ? (
+                  <div style={styles.emptyState}>
+                    <p style={styles.emptyText}>Loading drives...</p>
+                  </div>
+                ) : driveCount === 0 ? (
+                  <div style={styles.emptyState}>
+                    <p style={styles.emptyText}>No drives yet. Hit the road.</p>
+                  </div>
+                ) : (
+                  <div style={styles.driveList}>
+                    {validDrives.map((drive) => {
+                      const routeName = drive.routes?.name || 'Free Drive'
+                      const routeSlug = drive.routes?.slug || drive.route_id
+                      const isExpanded = expandedDriveId === drive.id
+                      const isCuratedRoute = !!drive.routes?.name
 
-                    return (
-                      <div key={drive.id} style={styles.driveCard}>
-                        <div style={styles.driveHeader}>
-                          <span style={styles.driveName}>{routeName}</span>
-                          <span style={styles.driveDate}>{formatDate(drive.started_at)}</span>
-                        </div>
-                        <div style={styles.driveStats}>
-                          {hasNoData ? (
-                            <span style={styles.driveStat}>No data recorded</span>
-                          ) : (
-                            <>
-                              <span style={styles.driveStat}>
-                                {drive.distance_miles?.toFixed(1) || '0'} mi
-                              </span>
-                              <span style={styles.driveStatDot} />
-                              <span style={styles.driveStat}>
-                                {drive.duration_minutes || 0}m
-                              </span>
-                              <span style={styles.driveStatDot} />
-                              <span style={styles.driveStat}>
-                                {drive.max_speed_mph?.toFixed(0) || '0'} mph max
-                              </span>
-                            </>
+                      return (
+                        <button
+                          key={drive.id}
+                          onClick={() => setExpandedDriveId(isExpanded ? null : drive.id)}
+                          style={{
+                            ...styles.driveCard,
+                            ...(isExpanded ? styles.driveCardExpanded : {}),
+                          }}
+                        >
+                          {/* Collapsed view: route name + date only */}
+                          <div style={styles.driveHeader}>
+                            <span style={styles.driveName}>{routeName}</span>
+                            <span style={styles.driveDate}>{formatDate(drive.started_at)}</span>
+                          </div>
+
+                          {/* Expanded view: full details */}
+                          {isExpanded && (
+                            <div style={styles.driveExpandedContent}>
+                              {/* Stats row */}
+                              <div style={styles.driveStatsExpanded}>
+                                <div style={styles.driveStatItem}>
+                                  <span style={styles.driveStatValue}>
+                                    {drive.distance_miles?.toFixed(1) || '0'}
+                                  </span>
+                                  <span style={styles.driveStatLabel}>miles</span>
+                                </div>
+                                <div style={styles.driveStatItem}>
+                                  <span style={styles.driveStatValue}>
+                                    {drive.duration_minutes || 0}
+                                  </span>
+                                  <span style={styles.driveStatLabel}>min</span>
+                                </div>
+                                <div style={styles.driveStatItem}>
+                                  <span style={styles.driveStatValue}>
+                                    {drive.max_speed_mph?.toFixed(0) || '0'}
+                                  </span>
+                                  <span style={styles.driveStatLabel}>mph max</span>
+                                </div>
+                                <div style={styles.driveStatItem}>
+                                  <span style={styles.driveStatValue}>
+                                    {drive.avg_speed_mph?.toFixed(0) || '0'}
+                                  </span>
+                                  <span style={styles.driveStatLabel}>mph avg</span>
+                                </div>
+                              </div>
+
+                              {/* Curated route link */}
+                              {isCuratedRoute && routeSlug && (
+                                <div style={styles.curatedRouteNote}>
+                                  <span style={styles.curatedRouteText}>
+                                    Curated route: {routeName}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           )}
-                        </div>
-                      </div>
-                    )
-                  })}
-
-                  {/* Show All / Show Less toggle */}
-                  {validDrives.length > 3 && (
-                    <button
-                      onClick={() => setShowAllDrives(!showAllDrives)}
-                      style={styles.showAllButton}
-                    >
-                      {showAllDrives ? 'Show Less' : `Show All (${validDrives.length} drives)`}
-                    </button>
-                  )}
-                </>
-              )
-            })()}
-          </div>
-        )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )
+        })()}
       </div>
 
       {/* Account Section */}
@@ -467,18 +517,6 @@ const styles = {
     color: '#666666',
     textDecoration: 'underline',
     cursor: 'pointer',
-  },
-  settingsButton: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    background: '#111111',
-    border: '1px solid #1A1A1A',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    flexShrink: 0,
   },
 
   // Edit Card
@@ -679,6 +717,32 @@ const styles = {
     margin: 0,
   },
 
+  // Collapsible Header
+  collapsibleHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    padding: '8px 0',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    marginBottom: '8px',
+  },
+  collapsibleHeaderLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  driveCountBadge: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    color: '#666666',
+  },
+  collapsibleContent: {
+    marginTop: '4px',
+  },
+
   // Drive List
   driveList: {
     display: 'flex',
@@ -686,16 +750,23 @@ const styles = {
     gap: '10px',
   },
   driveCard: {
+    width: '100%',
     background: '#111111',
     border: '1px solid #1A1A1A',
     borderRadius: '12px',
     padding: '12px',
+    cursor: 'pointer',
+    textAlign: 'left',
+    transition: 'all 0.2s ease',
+  },
+  driveCardExpanded: {
+    borderLeft: '3px solid #E8622C',
+    background: '#151515',
   },
   driveHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: '6px',
   },
   driveName: {
     fontFamily: "'DM Sans', sans-serif",
@@ -713,6 +784,46 @@ const styles = {
     fontSize: '11px',
     color: '#666666',
     flexShrink: 0,
+  },
+  driveExpandedContent: {
+    marginTop: '12px',
+    paddingTop: '12px',
+    borderTop: '1px solid #1A1A1A',
+  },
+  driveStatsExpanded: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '8px',
+  },
+  driveStatItem: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  driveStatValue: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '16px',
+    fontWeight: 600,
+    color: '#FFFFFF',
+  },
+  driveStatLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    color: '#666666',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    marginTop: '2px',
+  },
+  curatedRouteNote: {
+    marginTop: '10px',
+    padding: '8px 10px',
+    background: 'rgba(232, 98, 44, 0.1)',
+    borderRadius: '6px',
+  },
+  curatedRouteText: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '12px',
+    color: '#E8622C',
   },
   driveStats: {
     display: 'flex',

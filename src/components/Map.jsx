@@ -252,7 +252,7 @@ export default function Map() {
         if (angle >= 70 || text.toLowerCase().includes('hairpin')) {
           color = '#ef4444'  // Red
         } else if (angle >= 45 || text.toLowerCase().includes('chicane')) {
-          color = '#f97316'  // Orange
+          color = '#E8622C'  // Tramo orange
         } else {
           color = '#22c55e'  // Green
         }

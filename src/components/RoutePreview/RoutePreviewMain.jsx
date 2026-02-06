@@ -180,7 +180,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     const score = avgSeverity * 0.5 + hardRatio * 10 * 0.5
     if (score < 2) return { label: 'Easy', color: '#22c55e' }
     if (score < 3) return { label: 'Moderate', color: '#ffd500' }
-    if (score < 4) return { label: 'Challenging', color: '#f97316' }
+    if (score < 4) return { label: 'Challenging', color: '#E8622C' }
     return { label: 'Expert', color: '#ff3366' }
   }, [routeData, severityBreakdown])
 
@@ -462,8 +462,8 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
           <div className="flex items-center gap-1">
             <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full"
               style={{
-                background: selectedMode === HIGHWAY_MODE.COMPANION ? 'rgba(251,191,36,0.2)' : 'rgba(249,115,22,0.2)',
-                color: selectedMode === HIGHWAY_MODE.COMPANION ? '#FBBF24' : '#F97316'
+                background: selectedMode === HIGHWAY_MODE.COMPANION ? 'rgba(251,191,36,0.2)' : 'rgba(232,98,44,0.2)',
+                color: selectedMode === HIGHWAY_MODE.COMPANION ? '#FBBF24' : '#E8622C'
               }}>
               {selectedMode === HIGHWAY_MODE.COMPANION ? 'COMP' : 'BASIC'}
             </span>
@@ -497,11 +497,11 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
         </div>
       </div>
 
-      {/* Elevation mini widget - positioned below top bar */}
+      {/* Elevation mini widget - positioned well below top bar to avoid overlap */}
       {elevationData.length > 0 && (
-        <div className="absolute right-2 z-20" style={{ top: 'calc(env(safe-area-inset-top, 8px) + 90px)' }}>
-          <div className="bg-black/80 rounded-lg p-1.5 border border-white/10 w-24">
-            <div className="text-[8px] text-white/50 mb-0.5">ELEVATION</div>
+        <div className="absolute right-3 z-20" style={{ top: 'calc(env(safe-area-inset-top, 8px) + 110px)' }}>
+          <div className="bg-black/80 rounded-lg p-2 border border-white/10 w-28">
+            <div className="text-[9px] text-white/50 mb-1 font-medium tracking-wide">ELEVATION</div>
             <MiniElevation data={elevationData} color={modeColor} />
           </div>
         </div>
@@ -554,8 +554,6 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
           {/* Right: Action buttons */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <Btn icon="recenter" onClick={handleRecenter} tip="Recenter" />
-            <Btn icon="voice" onClick={handleSampleCallout} tip="Test" />
-            <Btn icon="share" onClick={handleShare} tip="Share" />
           </div>
         </div>
 

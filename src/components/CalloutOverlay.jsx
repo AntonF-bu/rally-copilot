@@ -552,7 +552,7 @@ function getCalloutColor(callout) {
     return '#ef4444' // Red
   }
   if (callout.type === 'significant') {
-    return '#f97316' // Orange
+    return '#E8622C' // Tramo orange
   }
   if (callout.type === 'sequence') {
     return '#ec4899' // Pink

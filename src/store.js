@@ -138,7 +138,7 @@ const useStore = create(
       addFavoriteRoute: (route) => {
         const { favoriteRoutes } = get()
         if (favoriteRoutes.some(r => r.name === route.name)) return
-        
+
         const favorite = {
           id: Date.now(),
           name: route.name || 'Unnamed Route',
@@ -150,6 +150,13 @@ const useStore = create(
           duration: route.duration,
           curveCount: route.curves?.length || 0,
           createdAt: Date.now(),
+          // Preserve discovery route data for proper lookup
+          discoveryId: route.discoveryId,
+          discoveryData: route.discoveryData,
+          isDiscoveryRoute: route.isDiscoveryRoute,
+          startCoords: route.startCoords,
+          endCoords: route.endCoords,
+          geometry: route.geometry,
         }
         set({ favoriteRoutes: [...favoriteRoutes, favorite] })
       },

@@ -70,7 +70,6 @@ export default function RouteSelector() {
     setRouteMode,
     setShowRouteSelector,
     setShowRoutePreview,
-    toggleSettings,
     position,
     setPosition,
     clearRouteData,
@@ -278,10 +277,6 @@ export default function RouteSelector() {
     }
   }
 
-  const handleNavigateToSettings = () => {
-    toggleSettings()
-  }
-
   return (
     <div
       className="absolute inset-0 flex flex-col"
@@ -326,7 +321,6 @@ export default function RouteSelector() {
               isLoading={isLoading}
               error={error}
               onClearError={() => setError(null)}
-              onNavigateToSettings={handleNavigateToSettings}
               onTabChange={setActiveTab}
             />
           )}
@@ -336,9 +330,11 @@ export default function RouteSelector() {
               onTabChange={setActiveTab}
             />
           )}
+          {activeTab === 'settings' && (
+            <SettingsPanel isFullScreen />
+          )}
           {activeTab === 'profile' && (
             <ProfileTab
-              onNavigateToSettings={handleNavigateToSettings}
               logbookStats={logbookStats}
               recentRoutes={recentRoutes}
             />

@@ -388,22 +388,26 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
             disabled={isSaving}
             style={{
               ...styles.saveButton,
-              background: isSaved ? 'rgba(232, 98, 44, 0.3)' : 'rgba(0, 0, 0, 0.6)',
-              borderColor: isSaved ? 'rgba(232, 98, 44, 0.5)' : 'rgba(255, 255, 255, 0.2)',
+              background: isSaved ? 'rgba(232, 98, 44, 0.25)' : 'rgba(17, 17, 17, 0.85)',
+              borderColor: isSaved ? '#E8622C' : 'rgba(255, 255, 255, 0.2)',
               transform: saveAnimating ? 'scale(1.3)' : 'scale(1)',
-              transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease',
+              transition: 'transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease, border-color 0.3s ease',
             }}
           >
             {isSaving ? (
               <div style={styles.smallSpinner} />
             ) : (
               <svg
-                width="20"
-                height="20"
+                width="22"
+                height="22"
                 viewBox="0 0 24 24"
                 fill={isSaved ? '#E8622C' : 'none'}
                 stroke={isSaved ? '#E8622C' : '#666666'}
-                strokeWidth="2"
+                strokeWidth={isSaved ? '0' : '2'}
+                style={{
+                  transition: 'fill 0.3s ease, stroke 0.3s ease',
+                  filter: isSaved ? 'drop-shadow(0 0 4px rgba(232, 98, 44, 0.6))' : 'none',
+                }}
               >
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
               </svg>
@@ -617,32 +621,36 @@ const styles = {
   },
   backButton: {
     position: 'absolute',
-    top: 'max(16px, env(safe-area-inset-top, 16px))',
+    top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
     left: '16px',
     width: '44px',
     height: '44px',
     borderRadius: '8px',
-    background: 'rgba(0, 0, 0, 0.6)',
+    background: 'rgba(17, 17, 17, 0.85)',
     border: '1px solid rgba(255, 255, 255, 0.2)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    zIndex: 10,
+    zIndex: 100,
   },
   saveButton: {
     position: 'absolute',
-    top: 'max(16px, env(safe-area-inset-top, 16px))',
+    top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
     right: '16px',
     width: '44px',
     height: '44px',
     borderRadius: '8px',
     border: '1px solid',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    zIndex: 10,
+    zIndex: 100,
     transition: 'all 0.2s ease',
   },
   mapFallback: {

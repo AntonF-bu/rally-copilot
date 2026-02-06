@@ -15,11 +15,11 @@ export const colors = {
   bgGlass: 'rgba(16, 20, 30, 0.5)',
   bgNav: 'rgba(18, 18, 26, 0.88)',
 
-  // Brand — Standardized orange #F97316
-  accent: '#F97316',
-  accentSoft: '#FB923C',
-  accentGlow: 'rgba(249, 115, 22, 0.15)',
-  accentDim: 'rgba(249, 115, 22, 0.06)',
+  // Brand — Tramo orange #E8622C
+  accent: '#E8622C',
+  accentSoft: '#F07840',
+  accentGlow: 'rgba(232, 98, 44, 0.15)',
+  accentDim: 'rgba(232, 98, 44, 0.06)',
 
   // Info/secondary
   cyan: '#00D4FF',
@@ -34,7 +34,7 @@ export const colors = {
   // Borders
   glassBorder: 'rgba(255,255,255,0.06)',
   borderLight: 'rgba(255,255,255,0.08)',
-  warmBorder: 'rgba(249,115,22,0.15)',
+  warmBorder: 'rgba(232,98,44,0.15)',
 
   // Zone colors (route analysis)
   zones: {
@@ -99,7 +99,7 @@ export const glass = {
 // Glass card hover state additions
 export const glassHover = {
   borderColor: colors.warmBorder,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(249,115,22,0.06)',
+  boxShadow: '0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(232,98,44,0.06)',
   transform: 'translateY(-2px)',
 }
 
@@ -151,15 +151,15 @@ export const pageSubtitle = {
 // Gradient divider
 export const dividerStyle = {
   height: '1px',
-  background: 'linear-gradient(90deg, transparent 0%, rgba(249,115,22,0.1) 30%, rgba(255,255,255,0.03) 70%, transparent 100%)',
+  background: 'linear-gradient(90deg, transparent 0%, rgba(232,98,44,0.1) 30%, rgba(255,255,255,0.03) 70%, transparent 100%)',
 }
 
 // Active chip
 export const chipActive = {
-  background: 'rgba(249,115,22,0.1)',
-  border: '1px solid rgba(249,115,22,0.25)',
+  background: 'rgba(232,98,44,0.1)',
+  border: '1px solid rgba(232,98,44,0.25)',
   color: colors.accent,
-  boxShadow: '0 0 12px rgba(249,115,22,0.08)',
+  boxShadow: '0 0 12px rgba(232,98,44,0.08)',
 }
 
 // Inactive chip
