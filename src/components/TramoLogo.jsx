@@ -1,80 +1,65 @@
 // TramoLogo Component
-// Tramo Brand Identity System - B3 Smooth Sweep Mark
-// A "T" letterform with a racing line flowing through it
+// Tramo Brand Identity System - White T with racing line cut and orange glow
 
-import { memo } from 'react'
+import { memo, useId } from 'react'
 
 /**
  * TramoLogo - The official Tramo brand mark
- *
- * Variants:
- * - 'icon': 64x64 app icon with rounded corners and glow
- * - 'header': 32x32 header logo
- * - 'hero': 80x80 large hero usage
- * - 'inline': 24x24 inline with text
+ * White T letterform with sigmoid curve cut (negative space) and orange glow line
  *
  * @param {Object} props
- * @param {'icon' | 'header' | 'hero' | 'inline'} props.variant - Size variant
- * @param {boolean} props.glow - Whether to show glow effect
+ * @param {number} props.size - Size in pixels (default 48)
+ * @param {string} props.bgColor - Background color for the cut stroke (default "#0a0a0a")
  * @param {string} props.className - Additional CSS classes
  * @param {Object} props.style - Additional inline styles
  */
 function TramoLogo({
-  variant = 'header',
-  glow = false,
+  size = 48,
+  bgColor = '#0a0a0a',
   className = '',
   style = {}
 }) {
-  // Size configurations for each variant
-  const sizes = {
-    inline: { container: 24, svg: 16, radius: 6 },
-    header: { container: 32, svg: 20, radius: 8 },
-    icon: { container: 64, svg: 32, radius: 16 },
-    hero: { container: 80, svg: 44, radius: 20 },
-  }
-
-  const size = sizes[variant] || sizes.header
-
-  // Container styles
-  const containerStyle = {
-    width: size.container,
-    height: size.container,
-    borderRadius: size.radius,
-    background: 'linear-gradient(135deg, #E8622C 0%, #F0854E 100%)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    ...(glow && {
-      boxShadow: '0 8px 32px rgba(232, 98, 44, 0.4)',
-    }),
-    ...style,
-  }
+  // Unique ID for gradient to avoid conflicts when multiple logos render
+  const uniqueId = useId()
+  const gradientId = `tramo-glow-${uniqueId}`
 
   return (
-    <div style={containerStyle} className={className}>
-      <svg
-        width={size.svg}
-        height={size.svg}
-        viewBox="0 0 48 48"
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 130 130"
+      fill="none"
+      className={className}
+      style={style}
+      aria-label="Tramo Logo"
+    >
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#E8622C" stopOpacity="0.95" />
+          <stop offset="60%" stopColor="#E8622C" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="#E8622C" stopOpacity="0.15" />
+        </linearGradient>
+      </defs>
+      {/* T shape - white */}
+      <rect x="22" y="26" width="86" height="10" rx="5" fill="#ffffff" />
+      <rect x="54" y="26" width="22" height="80" rx="5" fill="#ffffff" />
+      {/* Curve cut (negative space) - uses background color */}
+      <path
+        d="M10 16 C45 16, 85 114, 120 114"
+        stroke={bgColor}
+        strokeWidth="12"
         fill="none"
-        aria-label="Tramo Logo"
-      >
-        {/* The T letterform */}
-        <path
-          d="M12 10H36V16H28V38H20V16H12V10Z"
-          fill="#0A0A0A"
-        />
-        {/* Racing line - smooth sweep through the T */}
-        <path
-          d="M8 26C12 22 18 20 24 22C30 24 36 28 42 24"
-          stroke="#0A0A0A"
-          strokeWidth="3"
-          strokeLinecap="round"
-          fill="none"
-        />
-      </svg>
-    </div>
+        strokeLinecap="round"
+      />
+      {/* Orange glow line */}
+      <path
+        d="M10 16 C45 16, 85 114, 120 114"
+        stroke={`url(#${gradientId})`}
+        strokeWidth="3"
+        fill="none"
+        strokeLinecap="round"
+      />
+    </svg>
   )
 }
 
@@ -83,6 +68,7 @@ function TramoLogo({
  */
 export function TramoWordmark({
   size = 'default',
+  bgColor = '#0a0a0a',
   className = '',
   style = {}
 }) {
@@ -106,7 +92,7 @@ export function TramoWordmark({
 
   return (
     <div style={containerStyle} className={className}>
-      <TramoLogo variant={isLarge ? 'icon' : 'header'} />
+      <TramoLogo size={isLarge ? 48 : 32} bgColor={bgColor} />
       <span style={textStyle}>TRAMO</span>
     </div>
   )
@@ -117,6 +103,7 @@ export function TramoWordmark({
  */
 export function TramoTagline({
   tagline = 'Know the road before you see it',
+  bgColor = '#0a0a0a',
   className = '',
   style = {}
 }) {
@@ -150,9 +137,9 @@ export function TramoTagline({
   return (
     <div style={containerStyle} className={className}>
       <div style={logoContainerStyle}>
-        <TramoLogo variant="icon" glow />
+        <TramoLogo size={64} bgColor={bgColor} />
       </div>
-      <h1 style={titleStyle}>Rally Co-Pilot</h1>
+      <h1 style={titleStyle}>Tramo</h1>
       <p style={taglineStyle}>{tagline}</p>
     </div>
   )
