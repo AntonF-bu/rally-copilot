@@ -3,23 +3,35 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { buildZoneSegments as buildZoneSegmentsShared } from '../utils/routeGeometry'
-import { colors, mapboxStyle } from '../styles/theme'
 
 // ================================
-// Map Component - v23
-// UPDATED: Route rendering now matches RoutePreview style
-// - Removed dark outline, matched line widths
-// - Simplified callout color logic
-// - Refactored to use theme system
+// Map Component - v24
+// Tramo Brand Design
+// - Direct color values (no theme.js)
+// - Route rendering matches RoutePreview style
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
-// Zone colors from theme
-const ZONE_COLORS = colors.zones
+// Mapbox style
+const MAPBOX_STYLE = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
 
-// Callout marker colors from theme
-const CALLOUT_COLORS = colors.callouts
+// Zone colors (keep as-is per brand spec)
+const ZONE_COLORS = {
+  technical: '#00E68A',
+  transit: '#66B3FF',
+  urban: '#FF668C',
+}
+
+// Callout marker colors
+const CALLOUT_COLORS = {
+  danger:      '#ef4444',
+  significant: '#f59e0b',
+  sweeper:     '#3b82f6',
+  wake_up:     '#10b981',
+  section:     '#8b5cf6',
+  sequence:    '#ec4899',
+}
 
 export default function Map() {
   const mapContainer = useRef(null)
@@ -48,8 +60,8 @@ export default function Map() {
   const curatedHighwayCallouts = useStore(state => state.curatedHighwayCallouts) || []
   const simulationProgress = useStore(state => state.simulationProgress)
 
-  // Mode colors for map visualization (cyan for cruise is acceptable for data viz)
-  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
+  // Mode colors for map visualization - Tramo orange for cruise
+  const modeColors = { cruise: '#E8622C', fast: '#ffd500', race: '#ff3366' }
   const modeColor = modeColors[mode] || modeColors.cruise
 
   // Check if a distance is in a transit zone
@@ -303,7 +315,7 @@ export default function Map() {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: mapboxStyle,
+      style: MAPBOX_STYLE,
       center: startCoord,
       zoom: 10,    // Match Preview (was 14)
       pitch: 0,    // Match Preview flat view (was 60)

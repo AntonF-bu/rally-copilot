@@ -6,13 +6,20 @@ import { HomeTab } from './tabs/HomeTab'
 import { DiscoverTab } from './tabs/DiscoverTab'
 import { ProfileTab } from './tabs/ProfileTab'
 import SettingsPanel from './SettingsPanel'
-import { colors, layout } from '../styles/theme'
 
 // ================================
-// Route Selection Screen - v6
+// Route Selection Screen - v7
 // Tab-based navigation: Home, Discover, Profile
-// Night Stage design with atmospheric background
+// Tramo Brand Design
 // ================================
+
+// Tramo brand colors and layout
+const BG_DEEP = '#0A0A0A'
+const layout = {
+  maxWidth: '480px',
+  contentPadding: '16px',
+  navHeight: '70px',
+}
 
 // Atmospheric Background Component (shared across all tabs)
 function AtmosphericBackground() {
@@ -255,7 +262,7 @@ export default function RouteSelector() {
     <div
       className="absolute inset-0 flex flex-col"
       style={{
-        background: colors.bgDeep,
+        background: BG_DEEP,
       }}
     >
       {/* Global Atmospheric Background */}

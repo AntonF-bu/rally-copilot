@@ -31,10 +31,7 @@ import ModeSelection from '../ModeSelection'
 import LoadingScreen from '../LoadingScreen'
 
 // Constants
-import { DEMO_START, DEMO_END, MAP_STYLES, MODE_COLORS } from './constants'
-import { colors } from '../../styles/theme'
-
-const HIGHWAY_BEND_COLOR = colors.highwayBend
+import { DEMO_START, DEMO_END, MAP_STYLES, MODE_COLORS, HIGHWAY_BEND_COLOR } from './constants'
 
 /**
  * RoutePreview - Refactored orchestrator
@@ -440,11 +437,11 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
               onClick={toggleSleeve}
               className="w-8 h-8 rounded-full flex items-center justify-center transition-all"
               style={{
-                background: showSleeve ? colors.accentGlow : 'rgba(0,0,0,0.7)',
-                border: `1px solid ${showSleeve ? colors.accent + '80' : 'rgba(255,255,255,0.1)'}`,
+                background: showSleeve ? 'rgba(232,98,44,0.15)' : 'rgba(0,0,0,0.7)',
+                border: `1px solid ${showSleeve ? '#E8622C80' : 'rgba(255,255,255,0.1)'}`,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? colors.accent : 'white'} strokeWidth="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={showSleeve ? '#E8622C' : 'white'} strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
                 <path d="M3 9h18M9 21V9"/>
               </svg>
@@ -563,7 +560,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
         </div>
 
         {/* Start button */}
-        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: colors.accent }}>
+        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: '#E8622C' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
           START NAVIGATION
         </button>

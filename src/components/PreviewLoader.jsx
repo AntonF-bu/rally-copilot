@@ -1,11 +1,27 @@
 import { useEffect, useState } from 'react'
-import { colors, fonts, glassPanel, transitions } from '../styles/theme'
 
 // ================================
 // Preview Loader - Shows while route is being analyzed
 // Displays progress for zones, curves, and AI enhancement
-// Refactored to use theme system
+// Tramo Brand Design
 // ================================
+
+// Tramo brand colors
+const ACCENT = '#E8622C'
+const BG_DEEP = '#0A0A0A'
+const TEXT_PRIMARY = '#FFFFFF'
+const TEXT_SECONDARY = '#888888'
+const TEXT_MUTED = '#666666'
+const GLASS_BORDER = '#1A1A1A'
+
+// Glass panel style
+const glassPanel = {
+  background: 'rgba(17, 17, 17, 0.9)',
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)',
+  border: `1px solid ${GLASS_BORDER}`,
+  borderRadius: '12px',
+}
 
 export default function PreviewLoader({
   isLoading,
@@ -40,14 +56,14 @@ export default function PreviewLoader({
   return (
     <div
       className="absolute inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: colors.bgDeep }}
+      style={{ background: BG_DEEP }}
     >
       {/* Animated background gradient - using accent orange */}
       <div className="absolute inset-0 overflow-hidden">
         <div
           className="absolute w-[600px] h-[600px] rounded-full blur-[120px] opacity-20"
           style={{
-            background: `radial-gradient(circle, ${colors.accent} 0%, #8b5cf6 50%, transparent 70%)`,
+            background: `radial-gradient(circle, ${ACCENT} 0%, #8b5cf6 50%, transparent 70%)`,
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
@@ -63,10 +79,10 @@ export default function PreviewLoader({
         <h2
           className="mb-1 text-center truncate max-w-full"
           style={{
-            color: colors.textPrimary,
+            color: TEXT_PRIMARY,
             fontSize: '18px',
             fontWeight: 500,
-            fontFamily: fonts.body,
+            fontFamily: "'DM Sans', sans-serif",
           }}
         >
           {routeName}
@@ -76,9 +92,9 @@ export default function PreviewLoader({
         <div
           className="mb-8"
           style={{
-            color: colors.accent,
+            color: ACCENT,
             fontSize: '14px',
-            fontFamily: fonts.heading,
+            fontFamily: "'DM Sans', sans-serif",
             letterSpacing: '0.05em',
           }}
         >
@@ -102,9 +118,9 @@ export default function PreviewLoader({
                 className="flex items-center gap-3 px-4 py-2 rounded-lg"
                 style={{
                   ...glassPanel,
-                  borderColor: isActive ? `${colors.accent}50` : colors.glassBorder,
+                  borderColor: isActive ? `${ACCENT}50` : GLASS_BORDER,
                   opacity: isComplete ? 0.6 : isPending ? 0.3 : 1,
-                  transition: transitions.smooth,
+                  transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                 }}
               >
                 {/* Status indicator */}
@@ -117,12 +133,12 @@ export default function PreviewLoader({
                   ) : isActive ? (
                     <div
                       className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
-                      style={{ borderColor: `${colors.accent} transparent ${colors.accent} ${colors.accent}` }}
+                      style={{ borderColor: `${ACCENT} transparent ${ACCENT} ${ACCENT}` }}
                     />
                   ) : (
                     <div
                       className="w-3 h-3 rounded-full"
-                      style={{ background: colors.textMuted }}
+                      style={{ background: TEXT_MUTED }}
                     />
                   )}
                 </div>
@@ -131,8 +147,8 @@ export default function PreviewLoader({
                 <span
                   className="text-sm flex-1"
                   style={{
-                    color: isActive ? colors.textPrimary : colors.textSecondary,
-                    fontFamily: fonts.body,
+                    color: isActive ? TEXT_PRIMARY : TEXT_SECONDARY,
+                    fontFamily: "'DM Sans', sans-serif",
                   }}
                 >
                   {stage.label}
@@ -146,7 +162,7 @@ export default function PreviewLoader({
                       fontSize: '9px',
                       background: 'rgba(139, 92, 246, 0.2)',
                       color: '#a78bfa',
-                      fontFamily: fonts.heading,
+                      fontFamily: "'DM Sans', sans-serif",
                       letterSpacing: '0.05em',
                     }}
                   >
@@ -159,7 +175,7 @@ export default function PreviewLoader({
         </div>
 
         {/* Tip */}
-        <div style={{ color: colors.textMuted, fontSize: '12px', textAlign: 'center' }}>
+        <div style={{ color: TEXT_MUTED, fontSize: '12px', textAlign: 'center' }}>
           AI analysis makes your callouts smarter and more accurate
         </div>
       </div>
