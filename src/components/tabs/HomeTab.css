@@ -38,7 +38,7 @@
 /* ================================ */
 .ns-container {
   min-height: 100vh;
-  background: var(--ns-bg-deep);
+  background: transparent;
   position: relative;
   overflow-x: hidden;
 }
