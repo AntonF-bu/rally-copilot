@@ -1,9 +1,12 @@
 // Route card for Discover tab
 // Tappable preview card that opens route detail view
-// Refactored to use theme system
+// Tramo Brand Design
 
 import { useState, useEffect, useMemo } from 'react'
-import { colors } from '../../styles/theme'
+
+// Tramo brand colors
+const ACCENT = '#E8622C'
+const ACCENT_GLOW = 'rgba(232,98,44,0.15)'
 
 export function DiscoverRouteCard({ route, isSaved, onSelect }) {
   const [routePath, setRoutePath] = useState(null)
@@ -135,7 +138,7 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
           <div
             className="absolute top-2 right-2 px-2 py-1 rounded-full flex items-center gap-1"
             style={{
-              background: colors.accentGlow,
+              background: ACCENT_GLOW,
               backdropFilter: 'blur(8px)',
             }}
           >
@@ -143,13 +146,13 @@ export function DiscoverRouteCard({ route, isSaved, onSelect }) {
               width="12"
               height="12"
               viewBox="0 0 24 24"
-              fill={colors.accent}
-              stroke={colors.accent}
+              fill={ACCENT}
+              stroke={ACCENT}
               strokeWidth="2"
             >
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
-            <span className="text-xs" style={{ color: colors.accent }}>Saved</span>
+            <span className="text-xs" style={{ color: ACCENT }}>Saved</span>
           </div>
         )}
       </div>

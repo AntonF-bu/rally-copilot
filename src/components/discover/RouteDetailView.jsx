@@ -1,13 +1,26 @@
 // Route detail view with interactive Mapbox map
 // Shows when user taps a route card in Discover tab
-// Refactored to use theme system
+// Tramo Brand Design
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
-import { colors, mapboxStyle } from '../../styles/theme'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
+
+// Tramo brand colors
+const ACCENT = '#E8622C'
+const CYAN = '#E8622C'  // Was cyan, now Tramo orange
+const MAPBOX_STYLE = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
+
+// Difficulty color configurations
+const DIFFICULTY_COLORS = {
+  easy:        { bg: 'rgba(76,175,80,0.15)',  text: '#6FCF73', border: 'rgba(76,175,80,0.2)' },
+  moderate:    { bg: 'rgba(255,193,7,0.15)',  text: '#FFC107', border: 'rgba(255,193,7,0.2)' },
+  hard:        { bg: 'rgba(255,107,53,0.2)',  text: '#FF8B5E', border: 'rgba(255,107,53,0.25)' },
+  challenging: { bg: 'rgba(255,107,53,0.2)',  text: '#FF8B5E', border: 'rgba(255,107,53,0.25)' },
+  expert:      { bg: 'rgba(244,67,54,0.15)',  text: '#FF6B6B', border: 'rgba(244,67,54,0.2)' },
+}
 
 export function RouteDetailView({ route, onClose, onStartDrive }) {
   // Enable iOS-style swipe-back gesture
@@ -96,7 +109,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: mapboxStyle,
+      style: MAPBOX_STYLE,
       center: [centerLng, centerLat],
       zoom: 11,
       attributionControl: false,
@@ -105,13 +118,13 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
     map.current.on('load', () => {
       setMapLoaded(true)
 
-      // Add start marker (cyan for start)
-      new mapboxgl.Marker({ color: colors.cyan })
+      // Add start marker (Tramo orange)
+      new mapboxgl.Marker({ color: CYAN })
         .setLngLat([route.start.lng, route.start.lat])
         .addTo(map.current)
 
-      // Add end marker (orange - accent color)
-      new mapboxgl.Marker({ color: colors.accent })
+      // Add end marker (Tramo orange - accent color)
+      new mapboxgl.Marker({ color: ACCENT })
         .setLngLat([route.end.lng, route.end.lat])
         .addTo(map.current)
     })
@@ -159,7 +172,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         'line-cap': 'round',
       },
       paint: {
-        'line-color': colors.accent,
+        'line-color': ACCENT,
         'line-width': 12,
         'line-opacity': 0.4,
         'line-blur': 5,
@@ -177,7 +190,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         'line-cap': 'round',
       },
       paint: {
-        'line-color': colors.accent,
+        'line-color': ACCENT,
         'line-width': 4,
         'line-opacity': 1.0,
         'line-emissive-strength': 1.0,
@@ -264,8 +277,8 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
     }
   }
 
-  // Use theme difficulty colors
-  const diffColor = colors.difficulty[route.difficulty] || colors.difficulty.moderate
+  // Use difficulty colors
+  const diffColor = DIFFICULTY_COLORS[route.difficulty] || DIFFICULTY_COLORS.moderate
 
   return (
     <div
@@ -288,7 +301,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         {/* Loading overlay */}
         {loadingRoute && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-            <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
+            <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: ACCENT, borderTopColor: 'transparent' }} />
           </div>
         )}
 
@@ -340,14 +353,14 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
           }}
         >
           {isSaving ? (
-            <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
+            <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: ACCENT, borderTopColor: 'transparent' }} />
           ) : (
             <svg
               width="22"
               height="22"
               viewBox="0 0 24 24"
-              fill={isSaved ? colors.accent : 'none'}
-              stroke={isSaved ? colors.accent : 'white'}
+              fill={isSaved ? ACCENT : 'none'}
+              stroke={isSaved ? ACCENT : 'white'}
               strokeWidth="2"
               className="transition-all duration-150"
               style={{
@@ -513,7 +526,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
               border: isSaved
                 ? '1px solid rgba(255, 107, 53, 0.5)'
                 : '1px solid rgba(255, 255, 255, 0.1)',
-              color: isSaved ? colors.accent : 'rgba(255,255,255,0.9)',
+              color: isSaved ? ACCENT : 'rgba(255,255,255,0.9)',
             }}
           >
             {isSaving ? (
@@ -528,7 +541,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
                   width="20"
                   height="20"
                   viewBox="0 0 24 24"
-                  fill={isSaved ? colors.accent : 'none'}
+                  fill={isSaved ? ACCENT : 'none'}
                   stroke="currentColor"
                   strokeWidth="2"
                 >
