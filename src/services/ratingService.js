@@ -125,15 +125,20 @@ export async function fetchUserRatingForRoute(userId, routeSlug) {
       return null
     }
 
-    // Fetch user's rating for this route
+    // Fetch user's rating for this route (may not exist)
     const { data, error } = await supabase
       .from('route_ratings')
       .select('rating, review')
       .eq('user_id', userId)
       .eq('route_id', routeData.id)
-      .single()
+      .maybeSingle()
 
-    if (error || !data) {
+    if (error) {
+      console.error('🗄️ Fetch user rating error:', error)
+      return null
+    }
+
+    if (!data) {
       return null
     }
 

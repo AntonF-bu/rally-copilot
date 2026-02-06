@@ -29,6 +29,7 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
   const [routeGeometry, setRouteGeometry] = useState(null)
   const [loadingRoute, setLoadingRoute] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveAnimating, setSaveAnimating] = useState(false)
   const [driveCount, setDriveCount] = useState(0)
   const [ratingData, setRatingData] = useState({ averageRating: 0, totalRatings: 0 })
   const [userRating, setUserRating] = useState(null)
@@ -299,8 +300,12 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
     })
   }, [mapLoaded, routeGeometry])
 
-  // Handle save/unsave
+  // Handle save/unsave with animation
   const handleSave = useCallback(async () => {
+    // Trigger scale animation
+    setSaveAnimating(true)
+    setTimeout(() => setSaveAnimating(false), 200)
+
     if (isSaved) {
       const existing = favoriteRoutes.find(
         (fav) => fav.discoveryId === route.id || fav.id === route.id
@@ -385,6 +390,8 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
               ...styles.saveButton,
               background: isSaved ? 'rgba(232, 98, 44, 0.3)' : 'rgba(0, 0, 0, 0.6)',
               borderColor: isSaved ? 'rgba(232, 98, 44, 0.5)' : 'rgba(255, 255, 255, 0.2)',
+              transform: saveAnimating ? 'scale(1.2)' : 'scale(1)',
+              transition: 'transform 0.2s ease, background 0.2s ease, border-color 0.2s ease',
             }}
           >
             {isSaving ? (
