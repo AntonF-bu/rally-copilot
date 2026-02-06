@@ -197,8 +197,12 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
       const supabaseRoutes = await fetchPublishedRoutes()
 
       if (supabaseRoutes && supabaseRoutes.length > 0) {
-        console.log(`DiscoverTab: Loaded ${supabaseRoutes.length} routes from Supabase`)
-        setRoutes(supabaseRoutes)
+        // Filter out Ocean Drive Newport Loop if it still exists in Supabase
+        const filteredRoutes = supabaseRoutes.filter(
+          (r) => !r.name?.toLowerCase().includes('ocean drive')
+        )
+        console.log(`DiscoverTab: Loaded ${filteredRoutes.length} routes from Supabase (filtered)`)
+        setRoutes(filteredRoutes)
       } else {
         console.log('DiscoverTab: No routes in Supabase, using fallback')
         setRoutes(DISCOVERY_ROUTES)
@@ -228,12 +232,17 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
     loadStats()
   }, [])
 
-  // Get featured route - rotate based on day of week
+  // Get featured route - prefer impressive flagship routes
   const featuredRoute = useMemo(() => {
     if (routes.length === 0) return null
-    const dayOfWeek = new Date().getDay()
-    const index = dayOfWeek % routes.length
-    return routes[index]
+    // Prefer Kancamagus Mountain Run as the flagship TRAMO PICK
+    const kancamagus = routes.find((r) => r.id === 'kancamagus-mountain-run')
+    if (kancamagus) return kancamagus
+    // Fallback to Smugglers' Notch if Kancamagus not available
+    const smugglers = routes.find((r) => r.id === 'smugglers-notch-ascent')
+    if (smugglers) return smugglers
+    // Final fallback to first route
+    return routes[0]
   }, [routes])
 
   // Collection routes - all routes except the featured one

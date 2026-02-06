@@ -174,6 +174,21 @@ export function HomeTab({
     return `${mins} min`
   }
 
+  // Format duration intelligently - handles both seconds and minutes
+  const formatDurationSmart = (duration) => {
+    if (!duration || duration === 0) return null
+    // If duration is large (> 200), it's probably in seconds - convert to minutes
+    // Discovery routes store duration in minutes (e.g., 34, 55)
+    // Free drive routes from API might store in seconds (e.g., 1906)
+    const mins = duration > 200 ? Math.round(duration / 60) : Math.round(duration)
+    if (mins >= 60) {
+      const hours = Math.floor(mins / 60)
+      const remainingMins = mins % 60
+      return `${hours} hr ${remainingMins} min`
+    }
+    return `${mins} min`
+  }
+
   const timeAgo = (timestamp) => {
     if (!timestamp) return ''
     const seconds = Math.floor((Date.now() - timestamp) / 1000)
@@ -549,7 +564,7 @@ export function HomeTab({
                       <div className="ns-nearby-meta">
                         <span>{typeof displayDistance === 'number' && displayDistance < 500 ? `${displayDistance} mi` : formatDist(displayDistance)}</span>
                         <span>·</span>
-                        <span>{displayDuration || '--'} min</span>
+                        <span>{formatDurationSmart(displayDuration) || '--'}</span>
                       </div>
                     </div>
                     <div className="ns-nearby-chevron">
@@ -659,6 +674,7 @@ export function HomeTab({
           onClose={() => setShowRecentList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
+          formatDurationSmart={formatDurationSmart}
           accentColor="#E8622C"
         />
       )}
@@ -673,6 +689,7 @@ export function HomeTab({
           onClose={() => setShowFavoritesList(false)}
           isLoading={isLoading}
           formatDist={formatDist}
+          formatDurationSmart={formatDurationSmart}
           accentColor="#E8622C"
           isFavorites
         />
@@ -770,6 +787,7 @@ function RouteListModal({
   onClose,
   isLoading,
   formatDist,
+  formatDurationSmart,
   accentColor,
   isFavorites,
 }) {
@@ -834,7 +852,7 @@ function RouteListModal({
                   <div className="ns-list-meta">
                     <span>{typeof route.distance === 'number' && route.distance < 500 ? `${route.distance} mi` : formatDist(route.distance)}</span>
                     <span>·</span>
-                    <span>{route.duration || '--'} min</span>
+                    <span>{formatDurationSmart(route.duration) || '--'}</span>
                     {route.timestamp && !isFavorites && (
                       <>
                         <span>·</span>
