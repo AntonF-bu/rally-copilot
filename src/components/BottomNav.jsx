@@ -1,6 +1,5 @@
-// Bottom Navigation Tab Bar - Night Stage Design
+// Bottom Navigation Tab Bar - Tramo Brand Identity
 // Tabs: Home, Discover, Profile
-import { colors, fonts, transitions, layout } from '../styles/theme'
 
 const tabs = [
   {
@@ -38,6 +37,14 @@ const tabs = [
   },
 ]
 
+// Tramo Brand Colors
+const colors = {
+  bg: '#0A0A0A',
+  border: '#1A1A1A',
+  active: '#E8622C',
+  inactive: '#666666',
+}
+
 export function BottomNav({ activeTab, onTabChange }) {
   return (
     <nav
@@ -47,11 +54,8 @@ export function BottomNav({ activeTab, onTabChange }) {
         left: 0,
         right: 0,
         zIndex: 50,
-        background: colors.bgNav,
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderRadius: '20px 20px 0 0',
-        borderTop: `1px solid ${colors.borderLight}`,
+        background: colors.bg,
+        borderTop: `1px solid ${colors.border}`,
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
@@ -67,18 +71,17 @@ export function BottomNav({ activeTab, onTabChange }) {
               onClick={() => onTabChange(tab.id)}
               className="flex flex-col items-center gap-1.5 px-6 py-1"
               style={{
-                color: isActive ? colors.accent : colors.textDim,
-                transition: transitions.snappy,
+                color: isActive ? colors.active : colors.inactive,
+                transition: 'color 0.2s ease',
               }}
             >
               <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
               <span
                 style={{
-                  fontFamily: fonts.mono,
-                  fontSize: '8px',
-                  fontWeight: 500,
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontSize: '10px',
+                  fontWeight: isActive ? 500 : 400,
+                  letterSpacing: '0.02em',
                 }}
               >
                 {tab.label}

@@ -1,9 +1,8 @@
-// Auth Screen - Night Stage Design
-// Premium dark aesthetic sign-in/sign-up screen
+// Auth Screen - Tramo Brand Identity
+// Clean dark sign-in/sign-up screen with minimal accents
 
 import { useState } from 'react'
 import { signInWithGoogle, signInWithEmail, signUp } from '../../services/authService'
-import { colors, fonts, transitions } from '../../styles/theme'
 
 export function AuthScreen() {
   const [mode, setMode] = useState('signin') // 'signin' or 'signup'
@@ -65,11 +64,11 @@ export function AuthScreen() {
     setError(null)
   }
 
-  // Styles
+  // Tramo Brand Styles
   const containerStyle = {
     position: 'fixed',
     inset: 0,
-    background: '#0A0A0F',
+    background: '#0A0A0A',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -82,34 +81,54 @@ export function AuthScreen() {
   const logoContainerStyle = {
     marginBottom: '40px',
     textAlign: 'center',
+    position: 'relative',
+  }
+
+  // Subtle radial glow behind logo
+  const logoGlowStyle = {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '200px',
+    height: '200px',
+    background: 'radial-gradient(circle, rgba(232,98,44,0.08) 0%, transparent 70%)',
+    pointerEvents: 'none',
   }
 
   const logoStyle = {
     width: '64px',
     height: '64px',
     borderRadius: '16px',
-    background: `linear-gradient(135deg, ${colors.accent} 0%, #FF8F5C 100%)`,
+    background: 'linear-gradient(135deg, #E8622C 0%, #F0854E 100%)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     margin: '0 auto 16px',
-    boxShadow: `0 8px 32px ${colors.accent}40`,
+    position: 'relative',
+    zIndex: 1,
   }
 
   const titleStyle = {
-    fontFamily: fonts.primary,
+    fontFamily: "'Outfit', sans-serif",
     fontSize: '28px',
-    fontWeight: 700,
-    color: colors.textPrimary,
+    fontWeight: 600,
+    color: '#FFFFFF',
     margin: 0,
     marginBottom: '8px',
+    position: 'relative',
+    zIndex: 1,
   }
 
   const taglineStyle = {
-    fontFamily: fonts.primary,
-    fontSize: '14px',
-    color: 'rgba(255,255,255,0.5)',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    letterSpacing: '0.2em',
+    color: '#666666',
+    textTransform: 'uppercase',
     margin: 0,
+    position: 'relative',
+    zIndex: 1,
   }
 
   const formStyle = {
@@ -120,11 +139,11 @@ export function AuthScreen() {
   const googleButtonStyle = {
     width: '100%',
     padding: '14px 20px',
-    borderRadius: '12px',
+    borderRadius: '8px',
     border: 'none',
-    background: colors.accent,
-    color: '#0A0A0F',
-    fontFamily: fonts.primary,
+    background: '#E8622C',
+    color: '#0A0A0A',
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: '15px',
     fontWeight: 600,
     display: 'flex',
@@ -132,7 +151,7 @@ export function AuthScreen() {
     justifyContent: 'center',
     gap: '10px',
     cursor: 'pointer',
-    transition: transitions.smooth,
+    transition: 'background 0.2s ease',
     opacity: isLoading ? 0.7 : 1,
   }
 
@@ -141,32 +160,30 @@ export function AuthScreen() {
     alignItems: 'center',
     gap: '16px',
     margin: '24px 0',
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: '12px',
-    fontFamily: fonts.mono,
+    color: '#666666',
+    fontSize: '10px',
+    fontFamily: "'JetBrains Mono', monospace",
     textTransform: 'uppercase',
-    letterSpacing: '0.1em',
+    letterSpacing: '0.15em',
   }
 
   const dividerLineStyle = {
     flex: 1,
     height: '1px',
-    background: 'rgba(255,255,255,0.1)',
+    background: '#1A1A1A',
   }
 
   const inputStyle = {
     width: '100%',
     padding: '14px 16px',
-    borderRadius: '12px',
-    border: '1px solid rgba(255,255,255,0.06)',
-    background: 'rgba(255,255,255,0.03)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    color: colors.textPrimary,
-    fontFamily: fonts.mono,
-    fontSize: '14px',
+    borderRadius: '8px',
+    border: '1px solid #1A1A1A',
+    background: '#111111',
+    color: '#FFFFFF',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '15px',
     outline: 'none',
-    transition: transitions.smooth,
+    transition: 'border-color 0.2s ease',
     marginBottom: '12px',
     boxSizing: 'border-box',
   }
@@ -174,27 +191,27 @@ export function AuthScreen() {
   const submitButtonStyle = {
     width: '100%',
     padding: '14px 20px',
-    borderRadius: '12px',
-    border: '1px solid rgba(255,255,255,0.1)',
-    background: 'rgba(255,255,255,0.05)',
-    color: colors.textPrimary,
-    fontFamily: fonts.primary,
+    borderRadius: '8px',
+    border: '1px solid #2A2A2A',
+    background: 'transparent',
+    color: '#888888',
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: '15px',
-    fontWeight: 600,
+    fontWeight: 500,
     cursor: 'pointer',
-    transition: transitions.smooth,
+    transition: 'all 0.2s ease',
     marginTop: '8px',
     opacity: isLoading ? 0.7 : 1,
   }
 
   const errorStyle = {
     padding: '12px 16px',
-    borderRadius: '10px',
+    borderRadius: '8px',
     background: 'rgba(239,68,68,0.1)',
     border: '1px solid rgba(239,68,68,0.2)',
     color: '#EF4444',
-    fontFamily: fonts.mono,
-    fontSize: '12px',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
     marginBottom: '16px',
     textAlign: 'center',
   }
@@ -205,17 +222,17 @@ export function AuthScreen() {
   }
 
   const toggleTextStyle = {
-    fontFamily: fonts.primary,
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: '13px',
-    color: 'rgba(255,255,255,0.5)',
+    color: '#666666',
     margin: 0,
   }
 
   const toggleLinkStyle = {
     background: 'none',
     border: 'none',
-    color: colors.accent,
-    fontFamily: fonts.primary,
+    color: '#E8622C',
+    fontFamily: "'DM Sans', sans-serif",
     fontSize: '13px',
     fontWeight: 600,
     cursor: 'pointer',
@@ -227,14 +244,25 @@ export function AuthScreen() {
     <div style={containerStyle}>
       {/* Logo and branding */}
       <div style={logoContainerStyle}>
+        <div style={logoGlowStyle} />
         <div style={logoStyle}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="#0A0A0F">
-            <path d="M12 2L4 7l8 5 8-5-8-5z" />
-            <path d="M4 12l8 5 8-5" />
-            <path d="M4 17l8 5 8-5" />
+          <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+            {/* T letterform */}
+            <path
+              d="M12 10H36V16H28V38H20V16H12V10Z"
+              fill="#0A0A0A"
+            />
+            {/* Racing line */}
+            <path
+              d="M8 26C12 22 18 20 24 22C30 24 36 28 42 24"
+              stroke="#0A0A0A"
+              strokeWidth="3"
+              strokeLinecap="round"
+              fill="none"
+            />
           </svg>
         </div>
-        <h1 style={titleStyle}>Rally Co-Pilot</h1>
+        <h1 style={titleStyle}>Tramo</h1>
         <p style={taglineStyle}>Know the road before you see it</p>
       </div>
 
