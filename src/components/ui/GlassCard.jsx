@@ -1,4 +1,5 @@
-import { glass, glassHover, transitions } from '../../styles/theme'
+// GlassCard component - Tramo Brand Design
+// Solid background instead of glass effect
 
 export default function GlassCard({ children, className = '', hoverable = true, onClick, style = {} }) {
   return (
@@ -6,17 +7,19 @@ export default function GlassCard({ children, className = '', hoverable = true, 
       className={className}
       onClick={onClick}
       style={{
-        ...glass,
-        transition: transitions.smooth,
+        background: '#111111',
+        border: '1px solid #1A1A1A',
+        borderRadius: '12px',
+        transition: 'all 0.3s ease',
         cursor: onClick ? 'pointer' : 'default',
         ...style,
       }}
       onMouseEnter={hoverable ? (e) => {
-        Object.assign(e.currentTarget.style, glassHover)
+        e.currentTarget.style.borderColor = 'rgba(232,98,44,0.3)'
+        e.currentTarget.style.transform = 'translateY(-2px)'
       } : undefined}
       onMouseLeave={hoverable ? (e) => {
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)'
-        e.currentTarget.style.boxShadow = 'none'
+        e.currentTarget.style.borderColor = '#1A1A1A'
         e.currentTarget.style.transform = 'none'
       } : undefined}
     >

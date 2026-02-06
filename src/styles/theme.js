@@ -1,5 +1,7 @@
-// src/styles/theme.js — Legacy Design System (deprecated)
-// SINGLE SOURCE OF TRUTH. Every component imports from here.
+// DEPRECATED - This file is no longer used. All components use brand.css.
+// Kept temporarily for reference. Safe to delete.
+//
+// Previous: src/styles/theme.js — Legacy Design System (deprecated)
 // Night Stage v2 — Premium dark aesthetic
 
 // ================================
