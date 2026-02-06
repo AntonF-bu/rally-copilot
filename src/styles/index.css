@@ -5,6 +5,27 @@
 @tailwind utilities;
 
 /* ================================
+   iOS Safari Full-Height Fix
+   ================================ */
+html {
+  height: -webkit-fill-available;
+}
+
+body {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+/* ================================
    RALLY CO-PILOT - Premium Design System
    ================================ */
 
@@ -36,7 +57,6 @@
 }
 
 html, body, #root {
-  height: 100%;
   width: 100%;
   overflow: hidden;
 }
