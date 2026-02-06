@@ -7,8 +7,11 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
 import { colors, mapboxStyle } from '../../styles/theme'
+import { useSwipeBack } from '../../hooks/useSwipeBack'
 
 export function RouteDetailView({ route, onClose, onStartDrive }) {
+  // Enable iOS-style swipe-back gesture
+  useSwipeBack(onClose)
   const mapContainer = useRef(null)
   const map = useRef(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -271,15 +274,15 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         background: '#0a0a0f',
       }}
     >
-      {/* Map Container - fixed height at top */}
+      {/* Map Container - fixed height at top, non-interactive preview */}
       <div
         className="relative flex-shrink-0"
-        style={{ height: '50%', minHeight: '200px' }}
+        style={{ height: '45%', minHeight: '180px' }}
       >
         <div
           ref={mapContainer}
           className="absolute inset-0"
-          style={{ touchAction: 'none' }}
+          style={{ pointerEvents: 'none' }}
         />
 
         {/* Loading overlay */}
@@ -363,10 +366,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
         style={{
           backgroundColor: 'rgba(10, 10, 15, 0.98)',
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
-        <div className="p-5 pb-4">
+        <div className="p-5 pb-28">
           {/* Route Name */}
           <h2
             className="text-white mb-2"
@@ -482,79 +484,88 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
             </span>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            {/* Save Button */}
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all disabled:opacity-70"
-              style={{
-                fontFamily: "'Sora', -apple-system, sans-serif",
-                fontSize: '14px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                background: isSaved
-                  ? 'rgba(255, 107, 53, 0.2)'
-                  : 'rgba(255, 255, 255, 0.08)',
-                border: isSaved
-                  ? '1px solid rgba(255, 107, 53, 0.5)'
-                  : '1px solid rgba(255, 255, 255, 0.1)',
-                color: isSaved ? colors.accent : 'rgba(255,255,255,0.9)',
-              }}
-            >
-              {isSaving ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  <span>Saving...</span>
-                </>
-              ) : (
-                <>
-                  {/* Heart icon */}
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill={isSaved ? colors.accent : 'none'}
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                  </svg>
-                  <span>{isSaved ? 'Saved' : 'Save Route'}</span>
-                </>
-              )}
-            </button>
+        </div>
+      </div>
 
-            {/* Start Drive Button */}
-            <button
-              onClick={handleStartDrive}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl"
-              style={{
-                fontFamily: "'Sora', -apple-system, sans-serif",
-                fontSize: '14px',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
-                color: '#fff',
-                boxShadow: '0 4px 15px rgba(249, 115, 22, 0.3)',
-              }}
+      {/* FIXED bottom action buttons - always visible */}
+      <div
+        className="absolute bottom-0 left-0 right-0 z-20 px-4 pt-3"
+        style={{
+          background: 'linear-gradient(to top, #0a0a0f 70%, transparent)',
+          paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+        }}
+      >
+        <div className="flex gap-3">
+          {/* Save Button */}
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all disabled:opacity-70"
+            style={{
+              fontFamily: "'Sora', -apple-system, sans-serif",
+              fontSize: '14px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              background: isSaved
+                ? 'rgba(255, 107, 53, 0.2)'
+                : 'rgba(255, 255, 255, 0.08)',
+              border: isSaved
+                ? '1px solid rgba(255, 107, 53, 0.5)'
+                : '1px solid rgba(255, 255, 255, 0.1)',
+              color: isSaved ? colors.accent : 'rgba(255,255,255,0.9)',
+            }}
+          >
+            {isSaving ? (
+              <>
+                <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                <span>Saving...</span>
+              </>
+            ) : (
+              <>
+                {/* Heart icon */}
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill={isSaved ? colors.accent : 'none'}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                </svg>
+                <span>{isSaved ? 'Saved' : 'Save Route'}</span>
+              </>
+            )}
+          </button>
+
+          {/* Start Drive Button */}
+          <button
+            onClick={handleStartDrive}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl"
+            style={{
+              fontFamily: "'Sora', -apple-system, sans-serif",
+              fontSize: '14px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+              color: '#fff',
+              boxShadow: '0 4px 15px rgba(249, 115, 22, 0.3)',
+            }}
+          >
+            {/* Play icon */}
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="none"
             >
-              {/* Play icon */}
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                stroke="none"
-              >
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-              <span>Start Drive</span>
-            </button>
-          </div>
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            <span>Start Drive</span>
+          </button>
         </div>
       </div>
 

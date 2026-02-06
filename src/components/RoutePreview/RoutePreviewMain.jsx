@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../../store'
 import useHighwayStore from '../../services/highwayStore'
 import { useSpeech, generateCallout } from '../../hooks/useSpeech'
+import { useSwipeBack } from '../../hooks/useSwipeBack'
 import { getRoute } from '../../services/routeService'
 import { detectCurves } from '../../utils/curveDetection'
 import { getCurveColor } from '../../data/routes'
@@ -40,6 +41,9 @@ const HIGHWAY_BEND_COLOR = colors.highwayBend
  * Uses extracted hooks and components
  */
 export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
+  // Enable iOS-style swipe-back gesture
+  useSwipeBack(onBack)
+
   // ========================================
   // STORE STATE
   // ========================================

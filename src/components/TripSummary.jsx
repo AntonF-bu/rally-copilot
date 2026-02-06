@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import useStore from '../store'
+import { useSwipeBack } from '../hooks/useSwipeBack'
 import { colors } from '../styles/theme'
 
 // ================================
@@ -17,6 +18,9 @@ const ZONE_COLORS = {
 
 export default function TripSummary() {
   const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, routeZones, settings } = useStore()
+
+  // Enable iOS-style swipe-back gesture
+  useSwipeBack(closeTripSummary)
 
   const summary = getTripSummary()
   const [animatedStats, setAnimatedStats] = useState({ distance: 0, avgSpeed: 0, maxSpeed: 0 })
