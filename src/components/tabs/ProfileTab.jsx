@@ -5,6 +5,8 @@ import { useState, useMemo, useCallback } from 'react'
 import useStore from '../../store'
 import { signOut } from '../../services/authService'
 import { updateProfile } from '../../services/authService'
+import { supabase } from '../../services/supabase'
+import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
 import { colors, fonts, transitions } from '../../styles/theme'
 
 export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = [] }) {
@@ -19,6 +21,10 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
   const [editCar, setEditCar] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+
+  // Seed routes state (temporary)
+  const [seedStatus, setSeedStatus] = useState('idle') // idle, seeding, done, error
+  const [seedMessage, setSeedMessage] = useState('')
 
   // Get display values from profile
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Driver'
@@ -87,6 +93,80 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
     } catch (error) {
       console.error('🔐 Failed to sign out:', error)
       setIsSigningOut(false)
+    }
+  }
+
+  // Seed routes (temporary dev function)
+  // NOTE: If RLS blocks this, add these policies to your routes table:
+  //   CREATE POLICY "Authenticated users can insert routes" ON public.routes FOR INSERT TO authenticated WITH CHECK (true);
+  //   CREATE POLICY "Authenticated users can delete routes" ON public.routes FOR DELETE TO authenticated USING (true);
+  const handleSeedRoutes = async () => {
+    if (!user) return
+
+    setSeedStatus('seeding')
+    setSeedMessage('Deleting existing routes...')
+
+    try {
+      // Step 1: Delete all existing routes
+      const { error: deleteError } = await supabase
+        .from('routes')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000') // Delete all (neq with impossible id)
+
+      if (deleteError) {
+        console.error('🗄️ Failed to delete routes:', deleteError)
+        throw new Error(`Delete failed: ${deleteError.message}`)
+      }
+
+      console.log('🗄️ Deleted existing routes')
+      setSeedMessage('Inserting new routes...')
+
+      // Step 2: Map and insert new routes
+      const routesToInsert = DISCOVERY_ROUTES.map(route => ({
+        slug: route.id,
+        name: route.name,
+        region: route.region,
+        start_lat: route.start.lat,
+        start_lng: route.start.lng,
+        start_label: route.start.label,
+        end_lat: route.end.lat,
+        end_lng: route.end.lng,
+        end_label: route.end.label,
+        waypoints: route.waypoints || [],
+        distance_miles: route.distance,
+        duration_minutes: route.duration,
+        difficulty: route.difficulty,
+        tags: route.tags || [],
+        description: route.description || '',
+        curve_count: route.curveCount || null,
+        elevation_gain: route.elevationGain || null,
+        is_published: true,
+      }))
+
+      const { data, error: insertError } = await supabase
+        .from('routes')
+        .insert(routesToInsert)
+        .select()
+
+      if (insertError) {
+        console.error('🗄️ Failed to insert routes:', insertError)
+        throw new Error(`Insert failed: ${insertError.message}`)
+      }
+
+      console.log(`🗄️ Seeded ${data?.length || 0} routes`)
+      setSeedStatus('done')
+      setSeedMessage(`Done! ${data?.length || 0} routes seeded`)
+
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setSeedStatus('idle')
+        setSeedMessage('')
+      }, 3000)
+
+    } catch (error) {
+      console.error('🗄️ Seed failed:', error)
+      setSeedStatus('error')
+      setSeedMessage(error.message || 'Seeding failed')
     }
   }
 
@@ -828,6 +908,34 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
           <polyline points="9 18 15 12 9 6"/>
         </svg>
       </button>
+
+      {/* Seed Routes Button (temporary dev tool) */}
+      {user && (
+        <button
+          onClick={handleSeedRoutes}
+          disabled={seedStatus === 'seeding'}
+          style={{
+            width: '100%',
+            padding: '12px 16px',
+            marginBottom: '12px',
+            borderRadius: '12px',
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'transparent',
+            color: seedStatus === 'done' ? '#22c55e' : seedStatus === 'error' ? '#ef4444' : 'rgba(255,255,255,0.4)',
+            fontFamily: fonts.mono,
+            fontSize: '11px',
+            fontWeight: 500,
+            cursor: seedStatus === 'seeding' ? 'wait' : 'pointer',
+            opacity: seedStatus === 'seeding' ? 0.7 : 1,
+            textAlign: 'center',
+          }}
+        >
+          {seedStatus === 'idle' && 'Seed Routes (Dev)'}
+          {seedStatus === 'seeding' && seedMessage}
+          {seedStatus === 'done' && seedMessage}
+          {seedStatus === 'error' && seedMessage}
+        </button>
+      )}
 
       {/* Sign Out Button */}
       <button
