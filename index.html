@@ -29,43 +29,85 @@
     <!-- Mapbox GL CSS -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
 
-    <!-- Google Fonts - Sora + JetBrains Mono (Night Stage design system) -->
+    <!-- Google Fonts - Tramo Brand System -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Outfit:wght@200;300;400;600&family=Bebas+Neue&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 
     <style>
-      /* Brand CSS Variables */
+      /* Tramo Brand CSS Variables */
       :root {
-        --accent-orange: #F97316;
+        /* Primary Colors */
+        --rally-orange: #E8622C;
+        --orange-light: #F0854E;
+        --orange-dark: #C44D1A;
+
+        /* Dark Scale */
+        --dark-100: #0A0A0A;
+        --dark-200: #111111;
+        --dark-300: #1A1A1A;
+        --dark-400: #222222;
+        --dark-500: #2A2A2A;
+
+        /* Text Colors */
+        --text-white: #FFFFFF;
+        --text-white-90: rgba(255,255,255,0.9);
+        --text-white-70: rgba(255,255,255,0.7);
+        --gray-400: #888888;
+        --gray-500: #666666;
+
+        /* Font Families */
+        --font-display: 'Outfit', sans-serif;
+        --font-body: 'DM Sans', sans-serif;
+        --font-mono: 'JetBrains Mono', monospace;
+        --font-impact: 'Bebas Neue', sans-serif;
+
+        /* Legacy compatibility */
+        --accent-orange: #E8622C;
         --accent-cyan: #00D4FF;
         --accent-red: #FF3B3B;
         --accent-green: #4CAF50;
-        --font-heading: 'Sora', -apple-system, sans-serif;
-        --font-mono: 'JetBrains Mono', monospace;
-        --bg-dark: #080B12;
-        --bg-card: #141820;
+        --font-heading: 'Outfit', sans-serif;
+        --bg-dark: #0A0A0A;
+        --bg-card: #111111;
       }
 
       /* Topographic background texture */
       .topo-bg {
-        background-color: var(--bg-dark);
+        background-color: var(--dark-100);
         background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40,100 Q60,60 100,50 Q140,40 160,80 Q180,120 140,140 Q100,160 60,130 Q40,100 40,100' fill='none' stroke='rgba(255,255,255,0.04)' stroke-width='0.5'/%3E%3Cpath d='M50,100 Q65,70 100,62 Q130,55 150,85 Q165,115 135,130 Q100,145 70,125 Q50,100 50,100' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3Cpath d='M20,50 Q40,20 80,30 Q100,35 90,60 Q80,80 40,70 Q20,50 20,50' fill='none' stroke='rgba(255,255,255,0.035)' stroke-width='0.5'/%3E%3Cpath d='M130,170 Q160,150 180,170 Q190,190 160,195 Q130,190 130,170' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3Cpath d='M160,30 Q180,10 195,40 Q200,60 175,70 Q150,60 160,30' fill='none' stroke='rgba(255,255,255,0.035)' stroke-width='0.5'/%3E%3Cpath d='M5,150 Q25,130 50,145 Q60,160 40,175 Q15,170 5,150' fill='none' stroke='rgba(255,255,255,0.03)' stroke-width='0.5'/%3E%3C/svg%3E");
         background-repeat: repeat;
         background-size: 200px 200px;
       }
 
-      /* Heading font utility */
-      .font-rally {
-        font-family: var(--font-heading);
-        letter-spacing: 0.02em;
+      /* Display font utility (Outfit) */
+      .font-display {
+        font-family: var(--font-display);
       }
 
-      /* Mono font utility */
+      /* Body font utility (DM Sans) */
+      .font-body {
+        font-family: var(--font-body);
+      }
+
+      /* Mono font utility (JetBrains Mono) */
       .font-mono {
         font-family: var(--font-mono);
         letter-spacing: 0.05em;
       }
+
+      /* Impact font utility (Bebas Neue) */
+      .font-impact {
+        font-family: var(--font-impact);
+        letter-spacing: 0.02em;
+      }
+
+      /* Legacy heading font utility */
+      .font-rally {
+        font-family: var(--font-display);
+        letter-spacing: 0.02em;
+      }
+
       /* iOS Safari full-height fix */
       html, body, #root {
         height: 100%;
@@ -74,7 +116,9 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #12121A;
+        background: var(--dark-100);
+        font-family: var(--font-body);
+        color: var(--text-white);
       }
 
       /* Prevent overscroll/bounce on iOS */
