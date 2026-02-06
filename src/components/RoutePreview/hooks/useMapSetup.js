@@ -191,7 +191,7 @@ export function useMapSetup({
       } else {
         const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
         if (angle >= 70 || callout.text?.toLowerCase().includes('hairpin')) color = '#ef4444'
-        else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane')) color = '#f97316'
+        else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane')) color = '#E8622C'
         else color = '#22c55e'
       }
 

@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import useStore from '../store'
-import { useRouteAnalysis } from '../hooks/useRouteAnalysis'
 
 // ================================
 // Bottom Bar - Navigation Controls - v4
@@ -17,13 +16,11 @@ const GLASS_BORDER = '#1A1A1A'
 export default function BottomBar() {
   const {
     isRunning, mode, setMode, settings, updateSettings, toggleSettings,
-    goToMenu, goToPreview, endTrip, routeMode, gpsAccuracy,
+    goToPreview, endTrip, routeMode, gpsAccuracy,
     simulationSpeed, setSimulationSpeed, simulationPaused, toggleSimulationPaused,
     simulationProgress, setSimulationProgress, routeData
   } = useStore()
 
-  const { reroute } = useRouteAnalysis()
-  const [isRerouting, setIsRerouting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const sliderRef = useRef(null)
 
@@ -32,13 +29,6 @@ export default function BottomBar() {
 
   const handleStop = () => endTrip()
   const handleBack = () => goToPreview()
-
-  const handleReroute = async () => {
-    if (isRerouting) return
-    setIsRerouting(true)
-    try { await reroute() } catch (err) { console.error(err) }
-    finally { setIsRerouting(false) }
-  }
 
   // Draggable slider handlers
   const handleSliderInteraction = useCallback((clientX) => {
@@ -95,7 +85,6 @@ export default function BottomBar() {
     }
   }, [isDragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd])
 
-  const showReroute = routeMode === 'destination' || routeMode === 'imported'
   const isDemo = routeMode === 'demo'
 
   const speedOptions = [0.5, 1, 2, 4]
@@ -228,15 +217,6 @@ export default function BottomBar() {
           <button onClick={handleBack} className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M19 12H5m0 0l7 7m-7-7l7-7"/></svg>
           </button>
-
-          {/* Reroute Button - Only show when relevant */}
-          {showReroute && (
-            <button onClick={handleReroute} disabled={isRerouting}
-              className="w-12 h-12 rounded-xl bg-black/60 backdrop-blur-xl border border-white/10 flex items-center justify-center disabled:opacity-50">
-              {isRerouting ? <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: `${ACCENT} transparent transparent transparent` }} />
-                : <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2"><path d="M21 12a9 9 0 11-9-9"/><polyline points="21 3 21 9 15 9"/></svg>}
-            </button>
-          )}
 
           {/* Stop Button */}
           <button onClick={handleStop} className="flex-1 h-12 rounded-xl bg-red-500/80 backdrop-blur-xl flex items-center justify-center gap-2">

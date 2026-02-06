@@ -562,9 +562,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
-              background: 'linear-gradient(135deg, #F97316 0%, #EA580C 100%)',
+              background: 'linear-gradient(135deg, #E8622C 0%, #D4571F 100%)',
               color: '#fff',
-              boxShadow: '0 4px 15px rgba(249, 115, 22, 0.3)',
+              boxShadow: '0 4px 15px rgba(232, 98, 44, 0.3)',
             }}
           >
             {/* Play icon */}

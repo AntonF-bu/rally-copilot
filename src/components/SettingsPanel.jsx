@@ -10,12 +10,13 @@ import HighwayModeSettings from './HighwayModeSettings'
 // Only working settings, clean styling
 // ================================
 
-export default function SettingsPanel() {
+export default function SettingsPanel({ isFullScreen = false }) {
   const { showSettings, toggleSettings, settings, updateSettings } = useStore()
   const { speak } = useSpeech()
   const [testPlaying, setTestPlaying] = useState(false)
 
-  if (!showSettings) return null
+  // If not full-screen mode, only show when showSettings is true
+  if (!isFullScreen && !showSettings) return null
 
   const handleTestVoice = async () => {
     setTestPlaying(true)
@@ -25,6 +26,152 @@ export default function SettingsPanel() {
       : 'Left 4 tightens, 35 miles per hour'
     await speak(testPhrase, 'high')
     setTimeout(() => setTestPlaying(false), 2500)
+  }
+
+  // Full-screen mode for tab display
+  if (isFullScreen) {
+    return (
+      <div style={styles.fullScreenContainer}>
+        {/* Header */}
+        <div style={styles.fullScreenHeader}>
+          <h1 style={styles.fullScreenTitle}>Settings</h1>
+        </div>
+
+        {/* Content */}
+        <div style={styles.fullScreenContent}>
+
+          {/* Units Section */}
+          <Section title="UNITS">
+            <div style={styles.buttonGrid}>
+              <SelectionButton
+                active={settings.units === 'imperial'}
+                onClick={() => updateSettings({ units: 'imperial' })}
+                title="Imperial"
+                subtitle="MPH, feet"
+              />
+              <SelectionButton
+                active={settings.units === 'metric'}
+                onClick={() => updateSettings({ units: 'metric' })}
+                title="Metric"
+                subtitle="KM/H, meters"
+              />
+            </div>
+          </Section>
+
+          {/* Voice Section */}
+          <Section title="VOICE CALLOUTS">
+            <SettingRow label="Enable Voice" description="Announce upcoming curves">
+              <Toggle
+                enabled={settings.voiceEnabled}
+                onChange={(v) => updateSettings({ voiceEnabled: v })}
+              />
+            </SettingRow>
+
+            {settings.voiceEnabled && (
+              <>
+                <SettingRow label="Volume">
+                  <div style={styles.volumeRow}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      value={settings.volume || 1}
+                      onChange={(e) => updateSettings({ volume: parseFloat(e.target.value) })}
+                      style={{
+                        ...styles.volumeSlider,
+                        background: `linear-gradient(to right, #E8622C 0%, #E8622C ${(settings.volume || 1) * 100}%, #333333 ${(settings.volume || 1) * 100}%, #333333 100%)`
+                      }}
+                    />
+                    <span style={styles.volumeValue}>
+                      {Math.round((settings.volume || 1) * 100)}%
+                    </span>
+                  </div>
+                </SettingRow>
+
+                <SettingRow label="Test Voice">
+                  <button
+                    onClick={handleTestVoice}
+                    disabled={testPlaying}
+                    style={{
+                      ...styles.testButton,
+                      background: testPlaying ? 'rgba(232,98,44,0.15)' : '#1A1A1A',
+                      color: testPlaying ? '#E8622C' : '#FFFFFF',
+                    }}
+                  >
+                    {testPlaying ? (
+                      <>
+                        <div style={styles.spinner} />
+                        Playing...
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Play Sample
+                      </>
+                    )}
+                  </button>
+                </SettingRow>
+              </>
+            )}
+          </Section>
+
+          {/* Highway Mode Section */}
+          <HighwayModeSettings />
+
+          {/* Display Section */}
+          <Section title="DISPLAY">
+            <SettingRow label="HUD Style" description="Amount of info on screen">
+              <SegmentedControl
+                options={[
+                  { value: 'full', label: 'Full' },
+                  { value: 'minimal', label: 'Minimal' },
+                ]}
+                value={settings.hudStyle || 'full'}
+                onChange={(v) => updateSettings({ hudStyle: v })}
+              />
+            </SettingRow>
+
+            <SettingRow label="Show Speedometer" description="Display current speed">
+              <Toggle
+                enabled={settings.showSpeedometer !== false}
+                onChange={(v) => updateSettings({ showSpeedometer: v })}
+              />
+            </SettingRow>
+
+            <SettingRow label="Show Elevation" description="Display altitude profile">
+              <Toggle
+                enabled={settings.showElevation !== false}
+                onChange={(v) => updateSettings({ showElevation: v })}
+              />
+            </SettingRow>
+          </Section>
+
+          {/* Feedback Section */}
+          <Section title="FEEDBACK">
+            <SettingRow label="Haptic Feedback" description="Vibrate on curve warnings">
+              <Toggle
+                enabled={settings.hapticFeedback || false}
+                onChange={(v) => updateSettings({ hapticFeedback: v })}
+              />
+            </SettingRow>
+          </Section>
+
+          {/* Footer */}
+          <div style={styles.footer}>
+            TRAMO v1.0
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    )
   }
 
   return (
@@ -274,6 +421,27 @@ function SelectionButton({ active, onClick, title, subtitle }) {
 }
 
 const styles = {
+  // Full-screen mode styles
+  fullScreenContainer: {
+    minHeight: '100%',
+    background: 'transparent',
+  },
+  fullScreenHeader: {
+    padding: '16px',
+    paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)',
+  },
+  fullScreenTitle: {
+    fontFamily: "'Outfit', sans-serif",
+    fontSize: '28px',
+    fontWeight: 300,
+    color: '#FFFFFF',
+    margin: 0,
+  },
+  fullScreenContent: {
+    padding: '0 16px',
+  },
+
+  // Overlay mode styles
   overlay: {
     position: 'absolute',
     inset: 0,

@@ -179,7 +179,7 @@ export function getCurveColor(severity) {
   if (severity <= 2) return '#22c55e' // Green - easy
   if (severity <= 3) return '#84cc16' // Lime
   if (severity <= 4) return '#ffd500' // Yellow - medium
-  if (severity <= 5) return '#f97316' // Orange
+  if (severity <= 5) return '#E8622C' // Tramo orange
   return '#ff3366' // Red - hard
 }
 

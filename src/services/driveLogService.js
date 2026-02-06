@@ -158,6 +158,7 @@ export async function fetchRouteDriveCountBySlug(slug) {
 
 /**
  * Fetch aggregated stats for a user
+ * Filters out test entries (0 distance AND 0 duration)
  */
 export async function fetchDriverStats(userId) {
   if (!userId) {
@@ -175,16 +176,23 @@ export async function fetchDriverStats(userId) {
       return { totalMiles: 0, totalDrives: 0, uniqueRoutes: 0 }
     }
 
-    const totalMiles = data.reduce(
+    // Filter out test/empty drives (distance = 0 AND duration = 0)
+    const validDrives = data.filter(d => {
+      const distance = parseFloat(d.distance_miles) || 0
+      const duration = parseFloat(d.duration_minutes) || 0
+      return distance > 0 || duration > 0
+    })
+
+    const totalMiles = validDrives.reduce(
       (sum, d) => sum + (parseFloat(d.distance_miles) || 0),
       0
     )
-    const totalDrives = data.length
+    const totalDrives = validDrives.length
     const uniqueRoutes = new Set(
-      data.filter((d) => d.route_id).map((d) => d.route_id)
+      validDrives.filter((d) => d.route_id).map((d) => d.route_id)
     ).size
 
-    console.log(`🗄️ Driver stats: ${totalMiles.toFixed(1)} mi, ${totalDrives} drives, ${uniqueRoutes} routes`)
+    console.log(`🗄️ Driver stats: ${totalMiles.toFixed(1)} mi, ${totalDrives} drives, ${uniqueRoutes} routes (filtered from ${data.length} total)`)
 
     return {
       totalMiles: Math.round(totalMiles * 10) / 10,

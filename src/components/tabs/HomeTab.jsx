@@ -21,7 +21,6 @@ export function HomeTab({
   isLoading,
   error,
   onClearError,
-  onNavigateToSettings,
   onTabChange,
 }) {
   const [showDestination, setShowDestination] = useState(false)
@@ -103,6 +102,34 @@ export function HomeTab({
   // Open discovery route preview instead of starting drive immediately
   const handleOpenRoutePreview = (route) => {
     setSelectedDiscoveryRoute(route)
+  }
+
+  // Handle clicking a saved/favorite route - look up full route from discoveryRoutes
+  const handleSavedRouteClick = (savedRoute) => {
+    // If it has discoveryData, use it directly
+    if (savedRoute.discoveryData) {
+      setSelectedDiscoveryRoute(savedRoute.discoveryData)
+      return
+    }
+
+    // If it has discoveryId, look up from DISCOVERY_ROUTES
+    if (savedRoute.discoveryId) {
+      const fullRoute = DISCOVERY_ROUTES.find(r => r.id === savedRoute.discoveryId)
+      if (fullRoute) {
+        setSelectedDiscoveryRoute(fullRoute)
+        return
+      }
+    }
+
+    // Try to match by name
+    const matchByName = DISCOVERY_ROUTES.find(r => r.name === savedRoute.name)
+    if (matchByName) {
+      setSelectedDiscoveryRoute(matchByName)
+      return
+    }
+
+    // This is a free drive or custom route - fall back to onSelectSavedRoute
+    onSelectSavedRoute(savedRoute)
   }
 
   // Handle starting drive from the preview - use the discovery route handler
@@ -210,12 +237,7 @@ export function HomeTab({
             </div>
           </div>
           <div className="ns-topbar-right">
-            <button className="ns-icon-btn" onClick={onNavigateToSettings} aria-label="Settings">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
+            {/* Settings moved to bottom nav tab */}
           </div>
         </div>
 
@@ -484,7 +506,7 @@ export function HomeTab({
                   <div
                     key={route.id || idx}
                     className="ns-nearby-card"
-                    onClick={() => onSelectSavedRoute(route)}
+                    onClick={() => handleSavedRouteClick(route)}
                   >
                     <div className={`ns-nearby-accent ${difficulty}`} />
                     <div className="ns-nearby-icon ns-saved-icon">
@@ -557,8 +579,6 @@ export function HomeTab({
                         <span>{route.distance} mi</span>
                         <span>·</span>
                         <span>{route.duration} min</span>
-                        <span>·</span>
-                        <span>{route.curveCount || route.tags?.length || 0} curves</span>
                       </div>
                     </div>
                     <div className="ns-nearby-chevron">
@@ -623,7 +643,7 @@ export function HomeTab({
         <RouteListModal
           title="Favorites"
           routes={favoriteRoutes}
-          onSelect={onSelectSavedRoute}
+          onSelect={handleSavedRouteClick}
           onRemove={onRemoveFavorite}
           onClose={() => setShowFavoritesList(false)}
           isLoading={isLoading}

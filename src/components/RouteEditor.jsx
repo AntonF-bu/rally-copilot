@@ -18,7 +18,7 @@ const MAPBOX_STYLE = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
 
 const CUSTOM_CALLOUT_TYPES = [
   { id: 'caution', label: 'Caution', icon: '⚠️', color: '#f59e0b' },
-  { id: 'bump', label: 'Bump', icon: '⬆️', color: '#f97316' },
+  { id: 'bump', label: 'Bump', icon: '⬆️', color: '#E8622C' },
   { id: 'narrow', label: 'Narrow', icon: '↔️', color: '#ef4444' },
   { id: 'crest', label: 'Blind Crest', icon: '⛰️', color: '#8b5cf6' },
   { id: 'dip', label: 'Dip', icon: '⬇️', color: '#06b6d4' },
