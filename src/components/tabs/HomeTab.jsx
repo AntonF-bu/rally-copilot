@@ -13,6 +13,7 @@ export function HomeTab({
   favoriteRoutes,
   onStartDrive,
   onSelectSavedRoute,
+  onStartDiscoveryRoute,
   onRemoveRecent,
   onRemoveFavorite,
   onClearRecentRoutes,
@@ -99,30 +100,15 @@ export function HomeTab({
     setSelectedDiscoveryRoute(route)
   }
 
-  // Handle starting drive from the preview - convert to proper route object shape
+  // Handle starting drive from the preview - use the discovery route handler
   const handleStartDiscoveryDrive = (routeData) => {
-    // If routeData already has the full structure, use it directly
-    if (routeData.isDiscoveryRoute) {
+    // Use the dedicated discovery route handler which handles coordinates directly
+    if (onStartDiscoveryRoute) {
+      onStartDiscoveryRoute(routeData)
+    } else {
+      // Fallback to saved route handler
       onSelectSavedRoute(routeData)
-      return
     }
-
-    // Otherwise, convert discovery route format to standard format
-    const routeObject = {
-      name: routeData.name,
-      destination: routeData.end?.label || routeData.destination,
-      origin: routeData.start?.label || routeData.origin,
-      distance: (routeData.distance || 0) * (routeData.distance < 500 ? 1609.34 : 1), // Convert miles to meters if needed
-      duration: (routeData.duration || 0) * (routeData.duration < 500 ? 60 : 1), // Convert minutes to seconds if needed
-      startCoords: routeData.startCoords || [routeData.start?.lng, routeData.start?.lat],
-      endCoords: routeData.endCoords || [routeData.end?.lng, routeData.end?.lat],
-      waypoints: routeData.waypoints || [],
-      geometry: routeData.geometry,
-      isDiscoveryRoute: true,
-      discoveryId: routeData.id || routeData.discoveryId,
-      discoveryData: routeData.discoveryData || routeData,
-    }
-    onSelectSavedRoute(routeObject)
   }
 
   const formatDist = (meters) => {

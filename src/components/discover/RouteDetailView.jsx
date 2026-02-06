@@ -188,9 +188,9 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
       new mapboxgl.LngLatBounds(coordinates[0], coordinates[0])
     )
 
-    // Increased padding to ensure route is visible above the info panel
+    // Fit bounds within the map container (top half of screen)
     map.current.fitBounds(bounds, {
-      padding: { top: 100, bottom: 350, left: 60, right: 60 },
+      padding: { top: 60, bottom: 40, left: 40, right: 40 },
       duration: 500,
     })
   }, [mapLoaded, routeGeometry])
@@ -266,97 +266,104 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
 
   return (
     <div
-      className="absolute inset-0 z-50"
+      className="absolute inset-0 z-50 flex flex-col"
       style={{
         background: '#0a0a0f',
       }}
     >
-      {/* Map Container */}
-      <div ref={mapContainer} className="absolute inset-0" />
-
-      {/* Loading overlay */}
-      {loadingRoute && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
-        </div>
-      )}
-
-      {/* Back Button - high contrast pill for visibility on any map background */}
-      <button
-        onClick={onClose}
-        className="absolute z-10 flex items-center gap-1.5 rounded-full shadow-lg"
-        style={{
-          top: 'max(16px, env(safe-area-inset-top, 16px))',
-          left: '16px',
-          padding: '10px 14px',
-          background: 'rgba(0, 0, 0, 0.7)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-        }}
-      >
-        {/* ChevronLeft icon */}
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="white"
-          strokeWidth="2.5"
-        >
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-        <span className="text-white text-sm font-medium">Back</span>
-      </button>
-
-      {/* Favorite Button - floating in top right */}
-      <button
-        onClick={handleQuickToggle}
-        disabled={isSaving}
-        className="absolute z-10 flex items-center justify-center rounded-full shadow-lg transition-transform duration-150"
-        style={{
-          top: 'max(16px, env(safe-area-inset-top, 16px))',
-          right: '16px',
-          width: '44px',
-          height: '44px',
-          background: isSaved ? 'rgba(255, 107, 53, 0.25)' : 'rgba(0, 0, 0, 0.7)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          border: isSaved
-            ? '1px solid rgba(255, 107, 53, 0.5)'
-            : '1px solid rgba(255, 255, 255, 0.15)',
-          transform: heartAnimating ? 'scale(1.2)' : 'scale(1)',
-        }}
-      >
-        {isSaving ? (
-          <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
-        ) : (
-          <svg
-            width="22"
-            height="22"
-            viewBox="0 0 24 24"
-            fill={isSaved ? colors.accent : 'none'}
-            stroke={isSaved ? colors.accent : 'white'}
-            strokeWidth="2"
-            className="transition-all duration-150"
-            style={{
-              transform: heartAnimating ? 'scale(1.1)' : 'scale(1)',
-            }}
-          >
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-          </svg>
-        )}
-      </button>
-
-      {/* Bottom Info Panel */}
+      {/* Map Container - fixed height at top */}
       <div
-        className="absolute bottom-0 left-0 right-0 z-10 rounded-t-3xl topo-bg"
+        className="relative flex-shrink-0"
+        style={{ height: '50%', minHeight: '200px' }}
+      >
+        <div
+          ref={mapContainer}
+          className="absolute inset-0"
+          style={{ touchAction: 'none' }}
+        />
+
+        {/* Loading overlay */}
+        {loadingRoute && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <div className="w-8 h-8 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
+          </div>
+        )}
+
+        {/* Back Button - high contrast pill for visibility on any map background */}
+        <button
+          onClick={onClose}
+          className="absolute z-10 flex items-center gap-1.5 rounded-full shadow-lg"
+          style={{
+            top: 'max(16px, env(safe-area-inset-top, 16px))',
+            left: '16px',
+            padding: '10px 14px',
+            background: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+          }}
+        >
+          {/* ChevronLeft icon */}
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          <span className="text-white text-sm font-medium">Back</span>
+        </button>
+
+        {/* Favorite Button - floating in top right */}
+        <button
+          onClick={handleQuickToggle}
+          disabled={isSaving}
+          className="absolute z-10 flex items-center justify-center rounded-full shadow-lg transition-transform duration-150"
+          style={{
+            top: 'max(16px, env(safe-area-inset-top, 16px))',
+            right: '16px',
+            width: '44px',
+            height: '44px',
+            background: isSaved ? 'rgba(255, 107, 53, 0.25)' : 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: isSaved
+              ? '1px solid rgba(255, 107, 53, 0.5)'
+              : '1px solid rgba(255, 255, 255, 0.15)',
+            transform: heartAnimating ? 'scale(1.2)' : 'scale(1)',
+          }}
+        >
+          {isSaving ? (
+            <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: colors.accent, borderTopColor: 'transparent' }} />
+          ) : (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill={isSaved ? colors.accent : 'none'}
+              stroke={isSaved ? colors.accent : 'white'}
+              strokeWidth="2"
+              className="transition-all duration-150"
+              style={{
+                transform: heartAnimating ? 'scale(1.1)' : 'scale(1)',
+              }}
+            >
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {/* Content - scrollable, below map */}
+      <div
+        className="flex-1 overflow-y-auto"
         style={{
           backgroundColor: 'rgba(10, 10, 15, 0.98)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
           borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          paddingBottom: 'calc(80px + env(safe-area-inset-bottom, 0px))',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
         <div className="p-5 pb-4">
