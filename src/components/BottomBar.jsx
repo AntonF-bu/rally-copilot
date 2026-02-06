@@ -31,7 +31,7 @@ export default function BottomBar() {
   const modeColors = { cruise: ACCENT, fast: '#ffd500', race: '#ff3366' }
 
   const handleStop = () => endTrip()
-  const handleBack = () => goToMenu()
+  const handleBack = () => goToPreview()
 
   const handleReroute = async () => {
     if (isRerouting) return

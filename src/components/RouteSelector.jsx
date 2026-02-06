@@ -226,9 +226,33 @@ export default function RouteSelector() {
   }
 
   const handleSelectSavedRoute = async (route) => {
+    // If route has discoveryData (saved from RouteDetailPage), use it
+    if (route.discoveryData) {
+      return handleStartDiscoveryRoute({
+        ...route.discoveryData,
+        startCoords: route.startCoords,
+        endCoords: route.endCoords,
+        waypoints: route.waypoints,
+      })
+    }
+
     // If route has start/end coordinates (discovery or saved with coords), use direct routing
     if ((route.start?.lng && route.end?.lng) || (route.startCoords && route.endCoords)) {
       return handleStartDiscoveryRoute(route)
+    }
+
+    // Try to look up by discoveryId in DISCOVERY_ROUTES
+    if (route.discoveryId) {
+      const { DISCOVERY_ROUTES } = require('../data/discoveryRoutes')
+      const fullRoute = DISCOVERY_ROUTES.find(r => r.id === route.discoveryId)
+      if (fullRoute) {
+        return handleStartDiscoveryRoute({
+          ...fullRoute,
+          startCoords: route.startCoords || [fullRoute.start.lng, fullRoute.start.lat],
+          endCoords: route.endCoords || [fullRoute.end.lng, fullRoute.end.lat],
+          waypoints: route.waypoints || fullRoute.waypoints,
+        })
+      }
     }
 
     // Otherwise fall back to geocoding

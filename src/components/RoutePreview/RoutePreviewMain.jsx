@@ -497,9 +497,9 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
         </div>
       </div>
 
-      {/* Elevation mini widget */}
+      {/* Elevation mini widget - positioned below top bar */}
       {elevationData.length > 0 && (
-        <div className="absolute right-2 z-20" style={{ top: '70px' }}>
+        <div className="absolute right-2 z-20" style={{ top: 'calc(env(safe-area-inset-top, 8px) + 90px)' }}>
           <div className="bg-black/80 rounded-lg p-1.5 border border-white/10 w-24">
             <div className="text-[8px] text-white/50 mb-0.5">ELEVATION</div>
             <MiniElevation data={elevationData} color={modeColor} />

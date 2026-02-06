@@ -51,17 +51,25 @@ function FeaturedRouteCard({ route, stats, onSelect }) {
 
   // Generate static map URL
   const mapUrl = useMemo(() => {
-    if (!hasValidToken || !route.geometry?.coordinates) return null
+    if (!hasValidToken) return null
 
-    const coords = route.geometry.coordinates
-    if (coords.length < 2) return null
+    // Use geometry if available, otherwise use start/end coords
+    if (route.geometry?.coordinates?.length >= 2) {
+      const coords = route.geometry.coordinates
+      const midIdx = Math.floor(coords.length / 2)
+      const [lng, lat] = coords[midIdx]
+      return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${lng},${lat},10,0/400x200@2x?access_token=${mapboxToken}`
+    }
 
-    // Get center point
-    const midIdx = Math.floor(coords.length / 2)
-    const [lng, lat] = coords[midIdx]
+    // Fallback: use midpoint between start and end
+    if (route.start?.lat && route.end?.lat) {
+      const midLat = (route.start.lat + route.end.lat) / 2
+      const midLng = (route.start.lng + route.end.lng) / 2
+      return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${midLng},${midLat},11,0/400x200@2x?access_token=${mapboxToken}`
+    }
 
-    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${lng},${lat},10,0/400x200@2x?access_token=${mapboxToken}`
-  }, [route.geometry, hasValidToken, mapboxToken])
+    return null
+  }, [route.geometry, route.start, route.end, hasValidToken, mapboxToken])
 
   return (
     <button onClick={() => onSelect(route)} style={styles.featuredCard}>
@@ -348,7 +356,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 const styles = {
   container: {
     minHeight: '100%',
-    background: '#0A0A0A',
+    background: 'transparent',
   },
   header: {
     padding: '16px',

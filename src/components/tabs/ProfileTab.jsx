@@ -12,11 +12,36 @@ export function ProfileTab() {
   const profile = useStore((state) => state.profile)
   const user = useStore((state) => state.user)
   const setProfile = useStore((state) => state.setProfile)
+  const toggleSettings = useStore((state) => state.toggleSettings)
+  const recentRoutes = useStore((state) => state.recentRoutes)
 
   // Stats and drives from database
   const [driverStats, setDriverStats] = useState({ totalMiles: 0, totalDrives: 0, uniqueRoutes: 0 })
   const [driveLogs, setDriveLogs] = useState([])
   const [loadingStats, setLoadingStats] = useState(true)
+
+  // Compute local stats from recentRoutes as fallback
+  const localStats = useMemo(() => {
+    if (!recentRoutes?.length) {
+      return { totalMiles: 0, totalDrives: 0, uniqueRoutes: 0 }
+    }
+    const totalMiles = recentRoutes.reduce((acc, route) => {
+      return acc + (route.distance ? route.distance / 1609.34 : 0)
+    }, 0)
+    const uniqueNames = new Set(recentRoutes.map(r => r.name || r.destination).filter(Boolean))
+    return {
+      totalMiles: Math.round(totalMiles * 10) / 10,
+      totalDrives: recentRoutes.length,
+      uniqueRoutes: uniqueNames.size,
+    }
+  }, [recentRoutes])
+
+  // Use database stats if available, otherwise fall back to local stats
+  const displayStats = useMemo(() => {
+    if (driverStats.totalDrives > 0) return driverStats
+    if (localStats.totalDrives > 0) return localStats
+    return driverStats
+  }, [driverStats, localStats])
 
   // Edit state
   const [isEditing, setIsEditing] = useState(false)
@@ -24,6 +49,7 @@ export function ProfileTab() {
   const [editCar, setEditCar] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [showAllDrives, setShowAllDrives] = useState(false)
 
   // Get display values from profile
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Driver'
@@ -168,6 +194,13 @@ export function ProfileTab() {
             Edit Profile
           </button>
         </div>
+        {/* Settings gear button */}
+        <button onClick={toggleSettings} style={styles.settingsButton}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
       </div>
 
       {/* Edit Profile Modal */}
@@ -209,19 +242,19 @@ export function ProfileTab() {
       <div style={styles.statsRow}>
         <div style={styles.statCard}>
           <span style={styles.statValue}>
-            {loadingStats ? '-' : Math.round(driverStats.totalMiles)}
+            {loadingStats ? '-' : Math.round(displayStats.totalMiles)}
           </span>
           <span style={styles.statLabel}>MILES</span>
         </div>
         <div style={styles.statCard}>
           <span style={styles.statValue}>
-            {loadingStats ? '-' : driverStats.totalDrives}
+            {loadingStats ? '-' : displayStats.totalDrives}
           </span>
           <span style={styles.statLabel}>DRIVES</span>
         </div>
         <div style={styles.statCard}>
           <span style={styles.statValue}>
-            {loadingStats ? '-' : driverStats.uniqueRoutes}
+            {loadingStats ? '-' : displayStats.uniqueRoutes}
           </span>
           <span style={styles.statLabel}>ROUTES</span>
         </div>
@@ -284,31 +317,62 @@ export function ProfileTab() {
           </div>
         ) : (
           <div style={styles.driveList}>
-            {driveLogs.slice(0, 10).map((drive) => {
-              const routeName = drive.routes?.name || 'Free Drive'
+            {(() => {
+              // Filter out meaningless 0-distance, 0-duration drives
+              const validDrives = driveLogs.filter(drive =>
+                (drive.distance_miles && drive.distance_miles > 0) ||
+                (drive.duration_minutes && drive.duration_minutes > 0)
+              )
+              const drivesToShow = showAllDrives ? validDrives : validDrives.slice(0, 3)
 
               return (
-                <div key={drive.id} style={styles.driveCard}>
-                  <div style={styles.driveHeader}>
-                    <span style={styles.driveName}>{routeName}</span>
-                    <span style={styles.driveDate}>{formatDate(drive.started_at)}</span>
-                  </div>
-                  <div style={styles.driveStats}>
-                    <span style={styles.driveStat}>
-                      {drive.distance_miles?.toFixed(1) || '0'} mi
-                    </span>
-                    <span style={styles.driveStatDot} />
-                    <span style={styles.driveStat}>
-                      {drive.duration_minutes || 0}m
-                    </span>
-                    <span style={styles.driveStatDot} />
-                    <span style={styles.driveStat}>
-                      {drive.max_speed_mph?.toFixed(0) || '0'} mph max
-                    </span>
-                  </div>
-                </div>
+                <>
+                  {drivesToShow.map((drive) => {
+                    const routeName = drive.routes?.name || 'Free Drive'
+                    const hasNoData = (!drive.distance_miles || drive.distance_miles === 0) &&
+                                      (!drive.duration_minutes || drive.duration_minutes === 0)
+
+                    return (
+                      <div key={drive.id} style={styles.driveCard}>
+                        <div style={styles.driveHeader}>
+                          <span style={styles.driveName}>{routeName}</span>
+                          <span style={styles.driveDate}>{formatDate(drive.started_at)}</span>
+                        </div>
+                        <div style={styles.driveStats}>
+                          {hasNoData ? (
+                            <span style={styles.driveStat}>No data recorded</span>
+                          ) : (
+                            <>
+                              <span style={styles.driveStat}>
+                                {drive.distance_miles?.toFixed(1) || '0'} mi
+                              </span>
+                              <span style={styles.driveStatDot} />
+                              <span style={styles.driveStat}>
+                                {drive.duration_minutes || 0}m
+                              </span>
+                              <span style={styles.driveStatDot} />
+                              <span style={styles.driveStat}>
+                                {drive.max_speed_mph?.toFixed(0) || '0'} mph max
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {/* Show All / Show Less toggle */}
+                  {validDrives.length > 3 && (
+                    <button
+                      onClick={() => setShowAllDrives(!showAllDrives)}
+                      style={styles.showAllButton}
+                    >
+                      {showAllDrives ? 'Show Less' : `Show All (${validDrives.length} drives)`}
+                    </button>
+                  )}
+                </>
               )
-            })}
+            })()}
           </div>
         )}
       </div>
@@ -337,7 +401,7 @@ export function ProfileTab() {
 const styles = {
   container: {
     minHeight: '100%',
-    background: '#0A0A0A',
+    background: 'transparent',
     padding: '16px',
     paddingTop: 'calc(env(safe-area-inset-top, 20px) + 16px)',
   },
@@ -403,6 +467,18 @@ const styles = {
     color: '#666666',
     textDecoration: 'underline',
     cursor: 'pointer',
+  },
+  settingsButton: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0,
   },
 
   // Edit Card
@@ -653,6 +729,18 @@ const styles = {
     height: '2px',
     borderRadius: '50%',
     background: '#444444',
+  },
+  showAllButton: {
+    background: 'none',
+    border: 'none',
+    padding: '12px 0',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    fontWeight: 500,
+    color: '#E8622C',
+    cursor: 'pointer',
+    width: '100%',
+    textAlign: 'center',
   },
 
   // Account Section

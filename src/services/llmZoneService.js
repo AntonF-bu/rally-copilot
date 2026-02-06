@@ -115,7 +115,7 @@ export async function validateZonesWithLLM(segments, routeData, apiKey, curves =
  * Comprehensive system prompt
  */
 function getSystemPrompt() {
-  return `You are a road classification expert for a rally co-pilot app. Your job is to validate and correct zone classifications based on ROAD CHARACTER, not nearby businesses.
+  return `You are a road classification expert for Tramo, a driving enthusiast navigation app. Your job is to validate and correct zone classifications based on ROAD CHARACTER, not nearby businesses.
 
 ZONE TYPES:
 - HIGHWAY/TRANSIT: Controlled-access highways, interstates, major arterials. Characterized by long straights, gentle curves, high speed limits (50+ mph).
