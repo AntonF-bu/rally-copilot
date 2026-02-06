@@ -1,59 +1,200 @@
-// Discover Tab - Tramo Brand Identity
-// Browse and save curated routes with proper navigation flow
+// Discover Tab - Tramo Editorial Design
+// Clean, curated browsing experience
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import useStore from '../../store'
-import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
+import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
 import { fetchPublishedRoutes } from '../../services/supabaseRouteService'
 import { fetchAllRouteStats } from '../../services/ratingService'
-import { DiscoverGridCard } from '../discover/DiscoverGridCard'
 import { RouteDetailPage } from '../discover/RouteDetailPage'
 
-export function DiscoverTab({ onStartRoute, onTabChange }) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedVibes, setSelectedVibes] = useState([])
-  const [selectedRegions, setSelectedRegions] = useState([])
-  const [sortOption, setSortOption] = useState('recommended')
+// Difficulty badge component
+function DifficultyBadge({ difficulty }) {
+  const difficultyColors = {
+    easy: { bg: 'rgba(76,175,80,0.15)', text: '#6FCF73' },
+    moderate: { bg: 'rgba(255,193,7,0.15)', text: '#FFC107' },
+    challenging: { bg: 'rgba(255,107,53,0.2)', text: '#FF8B5E' },
+    expert: { bg: 'rgba(244,67,54,0.15)', text: '#FF6B6B' },
+  }
+  const colors = difficultyColors[difficulty] || difficultyColors.moderate
 
+  return (
+    <span
+      style={{
+        padding: '2px 8px',
+        borderRadius: '4px',
+        background: colors.bg,
+        color: colors.text,
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: '9px',
+        fontWeight: 500,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+      }}
+    >
+      {difficulty}
+    </span>
+  )
+}
+
+// Featured route card with map preview
+function FeaturedRouteCard({ route, stats, onSelect }) {
+  const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
+  const hasValidToken = mapboxToken && mapboxToken.length > 10
+
+  // Get first sentence of description for excerpt
+  const excerpt = useMemo(() => {
+    if (!route.description) return ''
+    const firstSentence = route.description.split('.')[0]
+    return firstSentence.length > 80 ? firstSentence.substring(0, 80) + '...' : firstSentence + '.'
+  }, [route.description])
+
+  // Generate static map URL
+  const mapUrl = useMemo(() => {
+    if (!hasValidToken || !route.geometry?.coordinates) return null
+
+    const coords = route.geometry.coordinates
+    if (coords.length < 2) return null
+
+    // Get center point
+    const midIdx = Math.floor(coords.length / 2)
+    const [lng, lat] = coords[midIdx]
+
+    return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${lng},${lat},10,0/400x200@2x?access_token=${mapboxToken}`
+  }, [route.geometry, hasValidToken, mapboxToken])
+
+  return (
+    <button onClick={() => onSelect(route)} style={styles.featuredCard}>
+      {/* Map Preview */}
+      <div style={styles.featuredMapContainer}>
+        {mapUrl ? (
+          <img src={mapUrl} alt="" style={styles.featuredMapImage} />
+        ) : (
+          <div style={styles.featuredMapPlaceholder} />
+        )}
+        {/* TRAMO PICK label */}
+        <div style={styles.tramoPick}>TRAMO PICK</div>
+      </div>
+
+      {/* Content */}
+      <div style={styles.featuredContent}>
+        <h3 style={styles.featuredName}>{route.name}</h3>
+
+        <div style={styles.featuredMeta}>
+          <span style={styles.featuredRegion}>{route.region}</span>
+          <DifficultyBadge difficulty={route.difficulty} />
+        </div>
+
+        {excerpt && <p style={styles.featuredExcerpt}>{excerpt}</p>}
+
+        <div style={styles.featuredStats}>
+          <span style={styles.statItem}>{route.distance} mi</span>
+          <span style={styles.statDot} />
+          <span style={styles.statItem}>{route.duration} min</span>
+          {stats?.driveCount > 0 && (
+            <>
+              <span style={styles.statDot} />
+              <span style={styles.statItem}>{stats.driveCount} drives</span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
+  )
+}
+
+// Collection route card (single column list item)
+function CollectionRouteCard({ route, stats, onSelect }) {
+  return (
+    <button onClick={() => onSelect(route)} style={styles.collectionCard}>
+      <div style={styles.collectionContent}>
+        <h4 style={styles.collectionName}>{route.name}</h4>
+        <span style={styles.collectionRegion}>{route.region}</span>
+
+        <div style={styles.collectionMeta}>
+          <span style={styles.collectionStat}>{route.distance} mi</span>
+          <span style={styles.metaDot} />
+          <span style={styles.collectionStat}>{route.duration} min</span>
+          <span style={styles.metaDot} />
+          <DifficultyBadge difficulty={route.difficulty} />
+
+          {/* Social proof */}
+          {(stats?.driveCount > 0 || stats?.averageRating > 0) && (
+            <>
+              <span style={styles.metaDot} />
+              <span style={styles.socialProof}>
+                {stats.driveCount > 0 && `${stats.driveCount} drives`}
+                {stats.driveCount > 0 && stats.averageRating > 0 && ' · '}
+                {stats.averageRating > 0 && (
+                  <>
+                    {stats.averageRating.toFixed(1)}
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="#E8622C"
+                      stroke="none"
+                      style={{ marginLeft: '2px', verticalAlign: 'middle' }}
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  </>
+                )}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Chevron */}
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#666666"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  )
+}
+
+export function DiscoverTab({ onStartRoute, onTabChange }) {
   // Route detail page state
   const [selectedRoute, setSelectedRoute] = useState(null)
 
   // Supabase route fetching state
-  const [routes, setRoutes] = useState(DISCOVERY_ROUTES) // Start with fallback
+  const [routes, setRoutes] = useState(DISCOVERY_ROUTES)
   const [isLoading, setIsLoading] = useState(true)
-  const [fetchError, setFetchError] = useState(null)
 
   // Route stats (drives + ratings) - keyed by route slug
   const [routeStats, setRouteStats] = useState({})
 
-  // Get favorites from store
-  const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
-
   // Store actions for starting drive
-  const initRouteFromCoordinates = useStore((state) => state.initRouteFromCoordinates)
   const setCurrentRoute = useStore((state) => state.setCurrentRoute)
   const setActiveRoute = useStore((state) => state.setActiveRoute)
 
   // Fetch routes from Supabase on mount
   const loadRoutes = useCallback(async () => {
     setIsLoading(true)
-    setFetchError(null)
 
     try {
-      console.log('🗄️ DiscoverTab: Fetching routes from Supabase...')
+      console.log('DiscoverTab: Fetching routes from Supabase...')
       const supabaseRoutes = await fetchPublishedRoutes()
 
       if (supabaseRoutes && supabaseRoutes.length > 0) {
-        console.log(`🗄️ DiscoverTab: Loaded ${supabaseRoutes.length} routes from Supabase`)
+        console.log(`DiscoverTab: Loaded ${supabaseRoutes.length} routes from Supabase`)
         setRoutes(supabaseRoutes)
       } else {
-        console.log('🗄️ DiscoverTab: No routes in Supabase, using fallback')
+        console.log('DiscoverTab: No routes in Supabase, using fallback')
         setRoutes(DISCOVERY_ROUTES)
       }
     } catch (error) {
-      console.error('🗄️ DiscoverTab: Failed to fetch routes, using fallback:', error)
-      setFetchError(error.message || 'Failed to load routes')
-      // Use fallback data so app doesn't break
+      console.error('DiscoverTab: Failed to fetch routes, using fallback:', error)
       setRoutes(DISCOVERY_ROUTES)
     } finally {
       setIsLoading(false)
@@ -71,102 +212,25 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
         const stats = await fetchAllRouteStats()
         setRouteStats(stats)
       } catch (err) {
-        console.error('🗄️ Failed to fetch route stats:', err)
+        console.error('Failed to fetch route stats:', err)
       }
     }
     loadStats()
   }, [])
 
-  const handleVibeToggle = (vibeId) => {
-    setSelectedVibes((prev) =>
-      prev.includes(vibeId)
-        ? prev.filter((v) => v !== vibeId)
-        : [...prev, vibeId]
-    )
-  }
+  // Get featured route - rotate based on day of week
+  const featuredRoute = useMemo(() => {
+    if (routes.length === 0) return null
+    const dayOfWeek = new Date().getDay()
+    const index = dayOfWeek % routes.length
+    return routes[index]
+  }, [routes])
 
-  const handleRegionToggle = (regionId) => {
-    setSelectedRegions((prev) =>
-      prev.includes(regionId)
-        ? prev.filter((r) => r !== regionId)
-        : [...prev, regionId]
-    )
-  }
-
-  // Filter and sort routes
-  const filteredRoutes = useMemo(() => {
-    // First filter
-    const filtered = routes.filter((route) => {
-      // Search filter
-      const searchLower = searchQuery.toLowerCase().trim()
-      const searchMatch =
-        !searchLower ||
-        route.name.toLowerCase().includes(searchLower) ||
-        route.description?.toLowerCase().includes(searchLower) ||
-        route.tags.some((tag) => tag.toLowerCase().includes(searchLower)) ||
-        route.start.label.toLowerCase().includes(searchLower) ||
-        route.end.label.toLowerCase().includes(searchLower)
-
-      // Vibe filter
-      const vibeMatch =
-        selectedVibes.length === 0 ||
-        selectedVibes.some((vibe) => route.tags.includes(vibe))
-
-      // Region filter
-      const regionMatch =
-        selectedRegions.length === 0 ||
-        selectedRegions.includes(route.region)
-
-      return searchMatch && vibeMatch && regionMatch
-    })
-
-    // Then sort
-    const sorted = [...filtered]
-    switch (sortOption) {
-      case 'most-driven':
-        sorted.sort((a, b) => {
-          const aCount = routeStats[a.id]?.driveCount || 0
-          const bCount = routeStats[b.id]?.driveCount || 0
-          return bCount - aCount
-        })
-        break
-      case 'highest-rated':
-        sorted.sort((a, b) => {
-          const aRating = routeStats[a.id]?.averageRating || 0
-          const bRating = routeStats[b.id]?.averageRating || 0
-          // Routes with 0 ratings go to bottom
-          if (aRating === 0 && bRating > 0) return 1
-          if (bRating === 0 && aRating > 0) return -1
-          return bRating - aRating
-        })
-        break
-      case 'shortest':
-        sorted.sort((a, b) => a.distance - b.distance)
-        break
-      case 'longest':
-        sorted.sort((a, b) => b.distance - a.distance)
-        break
-      case 'recommended':
-      default:
-        // Keep original order
-        break
-    }
-
-    return sorted
-  }, [routes, searchQuery, selectedVibes, selectedRegions, sortOption, routeStats])
-
-  // Sort options for the UI
-  const SORT_OPTIONS = [
-    { id: 'recommended', label: 'Recommended' },
-    { id: 'most-driven', label: 'Most Driven' },
-    { id: 'highest-rated', label: 'Highest Rated' },
-    { id: 'shortest', label: 'Shortest' },
-    { id: 'longest', label: 'Longest' },
-  ]
-
-  const isRouteSaved = (routeId) => {
-    return favoriteRoutes.some((fav) => fav.discoveryId === routeId || fav.id === routeId)
-  }
+  // Collection routes - all routes except the featured one
+  const collectionRoutes = useMemo(() => {
+    if (!featuredRoute) return routes
+    return routes.filter((r) => r.id !== featuredRoute.id)
+  }, [routes, featuredRoute])
 
   // Handle route card tap - open detail page
   const handleSelectRoute = (route) => {
@@ -180,31 +244,19 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
   // Handle Start Drive from detail page
   const handleStartDrive = async (routeObject) => {
-    console.log('🗄️ DiscoverTab: Starting drive with route:', routeObject.name)
+    console.log('DiscoverTab: Starting drive with route:', routeObject.name)
 
-    // If we have route geometry, initialize directly
     if (routeObject.geometry) {
-      // Set the route in store
       setCurrentRoute(routeObject)
       setActiveRoute(routeObject)
 
-      // Switch to Home tab (drive mode)
       if (onTabChange) {
         onTabChange('home')
       }
     } else if (onStartRoute) {
-      // Fallback to the original handler
       onStartRoute(routeObject)
     }
   }
-
-  const clearFilters = () => {
-    setSearchQuery('')
-    setSelectedVibes([])
-    setSelectedRegions([])
-  }
-
-  const hasActiveFilters = searchQuery || selectedVibes.length > 0 || selectedRegions.length > 0
 
   // Show RouteDetailPage when a route is selected
   if (selectedRoute) {
@@ -222,204 +274,73 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
       {/* Header */}
       <div style={styles.header}>
         <h1 style={styles.title}>Discover</h1>
-        <p style={styles.subtitle}>Browse curated routes near you</p>
+        <p style={styles.subtitle}>Curated roads worth driving</p>
       </div>
 
-      {/* Search Bar */}
-      <div style={styles.searchSection}>
-        <div style={styles.searchBar}>
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#666666"
-            strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search routes, roads, or areas..."
-            style={styles.searchInput}
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              style={styles.clearSearchButton}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filter Chips */}
-      <div style={styles.filtersSection}>
-        {/* Vibes */}
-        <div style={styles.filterGroup}>
-          <p style={styles.filterLabel}>Vibes</p>
-          <div style={styles.chipContainer}>
-            {VIBE_FILTERS.map((filter) => {
-              const isSelected = selectedVibes.includes(filter.id)
-              return (
-                <button
-                  key={filter.id}
-                  onClick={() => handleVibeToggle(filter.id)}
-                  style={{
-                    ...styles.chip,
-                    background: isSelected ? '#E8622C' : '#1A1A1A',
-                    color: isSelected ? '#FFFFFF' : '#888888',
-                  }}
-                >
-                  {filter.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Regions */}
-        <div style={styles.filterGroup}>
-          <p style={styles.filterLabel}>Region</p>
-          <div style={styles.chipContainer}>
-            {REGION_FILTERS.map((filter) => {
-              const isSelected = selectedRegions.includes(filter.id)
-              return (
-                <button
-                  key={filter.id}
-                  onClick={() => handleRegionToggle(filter.id)}
-                  style={{
-                    ...styles.chip,
-                    background: isSelected ? '#E8622C' : '#1A1A1A',
-                    color: isSelected ? '#FFFFFF' : '#888888',
-                  }}
-                >
-                  {filter.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Sort Options */}
-      <div style={styles.sortSection}>
-        <span style={styles.sortLabel}>Sort by:</span>
-        <div style={styles.sortChipContainer}>
-          {SORT_OPTIONS.map((option) => (
-            <button
-              key={option.id}
-              onClick={() => setSortOption(option.id)}
-              style={{
-                ...styles.sortChip,
-                color: sortOption === option.id ? '#FFFFFF' : '#6b7280',
-                fontWeight: sortOption === option.id ? 500 : 400,
-                background: sortOption === option.id ? '#1A1A1A' : 'transparent',
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Results count + Clear filters */}
-      <div style={styles.resultsRow}>
-        <p style={styles.resultsCount}>
-          {filteredRoutes.length} route{filteredRoutes.length !== 1 ? 's' : ''}
-          {hasActiveFilters && ' found'}
-        </p>
-        {hasActiveFilters && (
-          <button onClick={clearFilters} style={styles.clearFiltersButton}>
-            Clear all
-          </button>
-        )}
-      </div>
-
-      {/* Route Grid */}
-      <div style={styles.gridContainer}>
-        {/* Loading State */}
-        {isLoading ? (
-          <div style={styles.grid}>
-            {/* Skeleton cards */}
-            {[1, 2, 3, 4, 5, 6].map((i) => (
+      {/* Loading State */}
+      {isLoading ? (
+        <div style={styles.loadingContainer}>
+          <div style={styles.skeletonFeatured} />
+          <div style={styles.skeletonSection}>
+            <div style={styles.skeletonLabel} />
+            {[1, 2, 3].map((i) => (
               <div key={i} style={styles.skeletonCard} />
             ))}
-            <style>{`
-              @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.5; }
-              }
-            `}</style>
           </div>
-        ) : fetchError ? (
-          /* Error State with Retry */
-          <div style={styles.emptyState}>
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="rgba(255,100,100,0.5)"
-              strokeWidth="1.5"
-              style={{ marginBottom: '12px' }}
-            >
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 8v4M12 16h.01" />
-            </svg>
-            <p style={styles.emptyTitle}>Couldn't load routes from server</p>
-            <p style={styles.emptySubtitle}>Showing cached routes</p>
-            <button onClick={loadRoutes} style={styles.retryButton}>
-              Retry
-            </button>
-          </div>
-        ) : filteredRoutes.length > 0 ? (
-          /* Route Cards */
-          <div style={styles.grid}>
-            {filteredRoutes.map((route) => (
-              <DiscoverGridCard
-                key={route.id}
-                route={route}
-                isSaved={isRouteSaved(route.id)}
+          <style>{`
+            @keyframes pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.5; }
+            }
+          `}</style>
+        </div>
+      ) : (
+        <>
+          {/* Featured Route */}
+          {featuredRoute && (
+            <div style={styles.featuredSection}>
+              <FeaturedRouteCard
+                route={featuredRoute}
+                stats={routeStats[featuredRoute.id]}
                 onSelect={handleSelectRoute}
-                stats={routeStats[route.id]}
               />
-            ))}
-          </div>
-        ) : (
-          /* Empty State */
-          <div style={styles.emptyState}>
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#333333"
-              strokeWidth="1.5"
-              style={{ marginBottom: '12px' }}
-            >
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-            <p style={styles.emptyTitle}>
-              {routes.length === 0
-                ? 'Routes coming soon to this area'
-                : 'No routes match your search'}
+            </div>
+          )}
+
+          {/* The Collection */}
+          <div style={styles.section}>
+            <p style={styles.sectionOverline}>THE COLLECTION</p>
+            <p style={styles.sectionSubtitle}>
+              {routes.length} hand-picked New England roads
             </p>
-            {hasActiveFilters && (
-              <button onClick={clearFilters} style={styles.clearFiltersButton}>
-                Clear filters
-              </button>
-            )}
+
+            <div style={styles.collectionList}>
+              {collectionRoutes.map((route) => (
+                <CollectionRouteCard
+                  key={route.id}
+                  route={route}
+                  stats={routeStats[route.id]}
+                  onSelect={handleSelectRoute}
+                />
+              ))}
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Community Roads - Placeholder */}
+          <div style={styles.section}>
+            <p style={styles.sectionOverline}>COMMUNITY ROADS</p>
+            <div style={styles.comingSoonCard}>
+              <h4 style={styles.comingSoonTitle}>Coming Soon</h4>
+              <p style={styles.comingSoonText}>
+                Drive a road you love? Soon you'll be able to share it with the Tramo community.
+              </p>
+            </div>
+          </div>
+
+          {/* Bottom safe area padding */}
+          <div style={{ height: '100px' }} />
+        </>
+      )}
     </div>
   )
 }
@@ -427,11 +348,10 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 const styles = {
   container: {
     minHeight: '100%',
-    position: 'relative',
     background: '#0A0A0A',
   },
   header: {
-    padding: '16px 16px 16px',
+    padding: '16px',
     paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)',
   },
   title: {
@@ -445,168 +365,243 @@ const styles = {
   subtitle: {
     fontFamily: "'DM Sans', sans-serif",
     fontSize: '13px',
-    color: '#666666',
+    color: '#888888',
     margin: 0,
   },
-  searchSection: {
-    padding: '0 16px 12px',
+
+  // Loading
+  loadingContainer: {
+    padding: '0 16px',
   },
-  searchBar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    padding: '12px 14px',
+  skeletonFeatured: {
+    height: '280px',
+    borderRadius: '16px',
     background: '#111111',
-    borderRadius: '12px',
     border: '1px solid #1A1A1A',
+    marginBottom: '24px',
+    animation: 'pulse 1.5s ease-in-out infinite',
   },
-  searchInput: {
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    outline: 'none',
-    fontFamily: "'DM Sans', sans-serif",
-    fontSize: '14px',
-    color: '#FFFFFF',
+  skeletonSection: {
+    marginBottom: '24px',
   },
-  clearSearchButton: {
-    background: 'none',
-    border: 'none',
-    padding: '4px',
+  skeletonLabel: {
+    width: '120px',
+    height: '12px',
+    borderRadius: '4px',
+    background: '#1A1A1A',
+    marginBottom: '16px',
+    animation: 'pulse 1.5s ease-in-out infinite',
+  },
+  skeletonCard: {
+    height: '72px',
+    borderRadius: '12px',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    marginBottom: '8px',
+    animation: 'pulse 1.5s ease-in-out infinite',
+  },
+
+  // Featured Route
+  featuredSection: {
+    padding: '0 16px 24px',
+  },
+  featuredCard: {
+    width: '100%',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '16px',
+    overflow: 'hidden',
     cursor: 'pointer',
-    color: '#666666',
+    textAlign: 'left',
+    transition: 'border-color 0.2s ease',
   },
-  filtersSection: {
-    padding: '0 16px 16px',
+  featuredMapContainer: {
+    position: 'relative',
+    width: '100%',
+    height: '200px',
+    background: '#0A0A0A',
   },
-  filterGroup: {
-    marginBottom: '12px',
+  featuredMapImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
   },
-  filterLabel: {
+  featuredMapPlaceholder: {
+    width: '100%',
+    height: '100%',
+    background: 'linear-gradient(135deg, #111111 0%, #1A1A1A 100%)',
+  },
+  tramoPick: {
+    position: 'absolute',
+    top: '12px',
+    left: '12px',
+    padding: '4px 8px',
+    background: 'rgba(10, 10, 10, 0.85)',
+    borderRadius: '4px',
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: '9px',
     fontWeight: 500,
-    textTransform: 'uppercase',
-    letterSpacing: '0.1em',
-    color: '#666666',
-    marginBottom: '8px',
+    letterSpacing: '0.15em',
+    color: '#E8622C',
+  },
+  featuredContent: {
+    padding: '16px',
+  },
+  featuredName: {
+    fontFamily: "'Outfit', sans-serif",
+    fontSize: '22px',
+    fontWeight: 300,
+    color: '#FFFFFF',
     margin: 0,
     marginBottom: '8px',
   },
-  chipContainer: {
+  featuredMeta: {
     display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
+    alignItems: 'center',
+    gap: '8px',
+    marginBottom: '10px',
   },
-  chip: {
-    padding: '6px 12px',
-    borderRadius: '20px',
-    border: 'none',
+  featuredRegion: {
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: '10px',
     fontWeight: 500,
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-  },
-  sortSection: {
-    padding: '0 16px 12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  sortLabel: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '10px',
     color: '#666666',
-    flexShrink: 0,
   },
-  sortChipContainer: {
-    display: 'flex',
-    gap: '4px',
-    overflowX: 'auto',
-    WebkitOverflowScrolling: 'touch',
-    scrollbarWidth: 'none',
-    msOverflowStyle: 'none',
-  },
-  sortChip: {
-    padding: '4px 10px',
-    borderRadius: '12px',
-    border: 'none',
+  featuredExcerpt: {
     fontFamily: "'DM Sans', sans-serif",
-    fontSize: '11px',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  },
-  resultsRow: {
-    padding: '0 16px 12px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  resultsCount: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '10px',
-    color: '#666666',
-    margin: 0,
-  },
-  clearFiltersButton: {
-    background: 'none',
-    border: 'none',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '10px',
-    fontWeight: 500,
-    color: '#E8622C',
-    cursor: 'pointer',
-  },
-  gridContainer: {
-    padding: '0 16px 100px',
-  },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-  },
-  skeletonCard: {
-    aspectRatio: '4/3',
-    borderRadius: '12px',
-    background: '#111111',
-    border: '1px solid #1A1A1A',
-    animation: 'pulse 1.5s ease-in-out infinite',
-  },
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '48px 0',
-    textAlign: 'center',
-  },
-  emptyTitle: {
-    fontFamily: "'DM Sans', sans-serif",
-    fontSize: '14px',
+    fontSize: '13px',
     color: '#888888',
     margin: 0,
+    marginBottom: '12px',
+    lineHeight: 1.5,
   },
-  emptySubtitle: {
+  featuredStats: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+  },
+  statItem: {
     fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '10px',
+    fontSize: '11px',
+    color: '#888888',
+  },
+  statDot: {
+    width: '3px',
+    height: '3px',
+    borderRadius: '50%',
+    background: '#444444',
+  },
+
+  // Section
+  section: {
+    padding: '0 16px 24px',
+  },
+  sectionOverline: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 500,
+    letterSpacing: '0.15em',
     color: '#666666',
+    margin: 0,
+    marginBottom: '4px',
+  },
+  sectionSubtitle: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    color: '#888888',
     margin: 0,
     marginBottom: '16px',
   },
-  retryButton: {
-    padding: '8px 16px',
-    borderRadius: '8px',
-    border: 'none',
-    background: '#E8622C',
-    color: '#FFFFFF',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '11px',
-    fontWeight: 600,
+
+  // Collection List
+  collectionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  collectionCard: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    padding: '16px',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '12px',
     cursor: 'pointer',
+    textAlign: 'left',
+    transition: 'border-color 0.2s ease',
+  },
+  collectionContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  collectionName: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '15px',
+    fontWeight: 500,
+    color: '#FFFFFF',
+    margin: 0,
+    marginBottom: '2px',
+  },
+  collectionRegion: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: '#666666',
+    display: 'block',
+    marginBottom: '8px',
+  },
+  collectionMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    flexWrap: 'wrap',
+  },
+  collectionStat: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+  },
+  metaDot: {
+    width: '2px',
+    height: '2px',
+    borderRadius: '50%',
+    background: '#444444',
+  },
+  socialProof: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    display: 'flex',
+    alignItems: 'center',
+  },
+
+  // Coming Soon
+  comingSoonCard: {
+    padding: '24px',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '12px',
+    textAlign: 'center',
+  },
+  comingSoonTitle: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '16px',
+    fontWeight: 500,
+    color: '#FFFFFF',
+    margin: 0,
+    marginBottom: '8px',
+  },
+  comingSoonText: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    color: '#888888',
+    margin: 0,
+    lineHeight: 1.5,
   },
 }

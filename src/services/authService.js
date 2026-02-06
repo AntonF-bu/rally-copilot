@@ -181,16 +181,16 @@ export async function getProfile(userId) {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single()
+      .maybeSingle()
 
     if (error) {
-      // Profile might not exist yet (PGRST116 = row not found)
-      if (error.code === 'PGRST116') {
-        console.log('🔐 No profile found for user')
-        return null
-      }
       console.error('🔐 Get profile error:', error.message)
       throw error
+    }
+
+    if (!data) {
+      console.log('🔐 No profile found for user')
+      return null
     }
 
     console.log('🔐 Profile fetched:', data?.display_name || data?.username)

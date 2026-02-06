@@ -45,7 +45,7 @@ import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
 
 // ================================
-// Rally Co-Pilot App - v22
+// Tramo App - v22
 // NEW: Unified curated callout system - matches Preview exactly
 // ================================
 
@@ -535,7 +535,7 @@ export default function App() {
             height: '48px',
             borderRadius: '50%',
             border: '3px solid rgba(249,115,22,0.2)',
-            borderTopColor: '#F97316',
+            borderTopColor: '#E8622C',
             animation: 'spin 1s linear infinite',
           }} />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
