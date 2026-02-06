@@ -151,12 +151,14 @@ const useStore = create(
           curveCount: route.curves?.length || 0,
           createdAt: Date.now(),
           // Preserve discovery route data for proper lookup
-          discoveryId: route.discoveryId,
+          slug: route.id || route.slug, // Preserve original route id/slug for lookup
+          discoveryId: route.discoveryId || route.id, // Use route.id as fallback discoveryId
           discoveryData: route.discoveryData,
-          isDiscoveryRoute: route.isDiscoveryRoute,
-          startCoords: route.startCoords,
-          endCoords: route.endCoords,
+          isDiscoveryRoute: route.isDiscoveryRoute || Boolean(route.region), // Discovery routes have region
+          startCoords: route.startCoords || route.start,
+          endCoords: route.endCoords || route.end,
           geometry: route.geometry,
+          difficulty: route.difficulty,
         }
         set({ favoriteRoutes: [...favoriteRoutes, favorite] })
       },

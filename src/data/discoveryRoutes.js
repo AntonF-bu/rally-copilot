@@ -55,22 +55,6 @@ export const DISCOVERY_ROUTES = [
     claimedBy: null,
   },
   {
-    id: 'ocean-drive-newport-loop',
-    name: 'Ocean Drive Newport Loop',
-    region: 'rhode-island',
-    start: { lat: 41.4798, lng: -71.3103, label: 'Memorial Blvd' },
-    end: { lat: 41.4798, lng: -71.3103, label: 'Memorial Blvd' },
-    waypoints: [
-      { lat: 41.4625, lng: -71.2985 },  // Ruggles Ave & Ocean Ave area
-      { lat: 41.4470, lng: -71.3135 },  // Brenton Point State Park
-      { lat: 41.4560, lng: -71.3290 },  // Ocean Ave western side near Castle Hill
-    ],
-    geometry: null, distance: 10, duration: 30, difficulty: 'easy',
-    tags: ['coastal', 'scenic', 'chill'],
-    description: "Newport's Ten Mile Drive loops past Gilded Age mansions, rocky Atlantic coastline, and Brenton Point State Park where the bay meets the open ocean. It's not about speed here, it's about the vibe: top down, salt air, waves crashing against the rocks while you cruise past some of the most expensive real estate in New England. Perfect sunset drive.",
-    claimedBy: null,
-  },
-  {
     id: 'route-169-quiet-corner',
     name: 'Route 169 Quiet Corner',
     region: 'connecticut',

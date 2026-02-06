@@ -112,23 +112,42 @@ export function HomeTab({
       return
     }
 
-    // If it has discoveryId, look up from DISCOVERY_ROUTES
-    if (savedRoute.discoveryId) {
-      const fullRoute = DISCOVERY_ROUTES.find(r => r.id === savedRoute.discoveryId)
-      if (fullRoute) {
-        setSelectedDiscoveryRoute(fullRoute)
-        return
-      }
+    // Try to find the route by multiple methods
+    let fullRoute = null
+
+    // 1. Try matching by slug (the route's original id)
+    if (savedRoute.slug) {
+      fullRoute = DISCOVERY_ROUTES.find(r => r.id === savedRoute.slug)
     }
 
-    // Try to match by name
-    const matchByName = DISCOVERY_ROUTES.find(r => r.name === savedRoute.name)
-    if (matchByName) {
-      setSelectedDiscoveryRoute(matchByName)
+    // 2. Try matching by discoveryId
+    if (!fullRoute && savedRoute.discoveryId) {
+      fullRoute = DISCOVERY_ROUTES.find(r => r.id === savedRoute.discoveryId)
+    }
+
+    // 3. Try matching by name
+    if (!fullRoute && savedRoute.name) {
+      fullRoute = DISCOVERY_ROUTES.find(r => r.name === savedRoute.name)
+    }
+
+    if (fullRoute) {
+      setSelectedDiscoveryRoute(fullRoute)
       return
     }
 
-    // This is a free drive or custom route - fall back to onSelectSavedRoute
+    // This is a free drive or custom route - open RouteDetailPage with saved data
+    // Create a minimal route object that RouteDetailPage can display
+    if (savedRoute.isDiscoveryRoute || savedRoute.startCoords) {
+      setSelectedDiscoveryRoute({
+        ...savedRoute,
+        id: savedRoute.slug || savedRoute.discoveryId || savedRoute.name,
+        start: savedRoute.startCoords || savedRoute.start,
+        end: savedRoute.endCoords || savedRoute.end,
+      })
+      return
+    }
+
+    // True fallback for non-discovery routes
     onSelectSavedRoute(savedRoute)
   }
 
@@ -501,7 +520,13 @@ export function HomeTab({
             </div>
             <div className="ns-saved-list">
               {favoriteRoutes.slice(0, 3).map((route, idx) => {
-                const difficulty = getDifficulty(route)
+                // Look up full route data from discovery routes for accurate display
+                const fullRoute = DISCOVERY_ROUTES.find(r =>
+                  r.id === route.slug || r.id === route.discoveryId || r.name === route.name
+                ) || route
+                const difficulty = getDifficulty(fullRoute)
+                const displayDistance = fullRoute.distance || route.distance
+                const displayDuration = fullRoute.duration || route.duration
                 return (
                   <div
                     key={route.id || idx}
@@ -515,16 +540,16 @@ export function HomeTab({
                       </svg>
                     </div>
                     <div className="ns-nearby-info">
-                      <div className="ns-nearby-name">{route.name || route.destination || 'Saved Route'}</div>
+                      <div className="ns-nearby-name">{fullRoute.name || route.destination || 'Saved Route'}</div>
                       <div className="ns-nearby-endpoints">
-                        <span>{route.origin || route.start?.label || 'Start'}</span>
+                        <span>{route.origin || fullRoute.start?.label || 'Start'}</span>
                         <span>→</span>
-                        <span>{route.destination || route.end?.label || 'End'}</span>
+                        <span>{route.destination || fullRoute.end?.label || 'End'}</span>
                       </div>
                       <div className="ns-nearby-meta">
-                        <span>{formatDist(route.distance)}</span>
+                        <span>{typeof displayDistance === 'number' && displayDistance < 500 ? `${displayDistance} mi` : formatDist(displayDistance)}</span>
                         <span>·</span>
-                        <span>{route.curveCount || 0} curves</span>
+                        <span>{displayDuration || '--'} min</span>
                       </div>
                     </div>
                     <div className="ns-nearby-chevron">
@@ -807,9 +832,9 @@ function RouteListModal({
                     {route.name || route.destination || 'Unknown'}
                   </div>
                   <div className="ns-list-meta">
-                    <span>{formatDist(route.distance)}</span>
+                    <span>{typeof route.distance === 'number' && route.distance < 500 ? `${route.distance} mi` : formatDist(route.distance)}</span>
                     <span>·</span>
-                    <span>{route.curveCount || 0} curves</span>
+                    <span>{route.duration || '--'} min</span>
                     {route.timestamp && !isFavorites && (
                       <>
                         <span>·</span>

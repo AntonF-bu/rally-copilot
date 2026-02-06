@@ -69,16 +69,40 @@ export default function TripSummary() {
 
   // Auto-save drive to database on mount
   useEffect(() => {
-    if (saveAttemptedRef.current || !summary || !tripStats?.startTime || !tripStats?.endTime) {
+    // Debug logging for drive save troubleshooting
+    console.log('🗄️ TripSummary save check:', {
+      saveAttempted: saveAttemptedRef.current,
+      hasSummary: !!summary,
+      hasStartTime: !!tripStats?.startTime,
+      hasEndTime: !!tripStats?.endTime,
+      userId: user?.id,
+      startTime: tripStats?.startTime,
+      endTime: tripStats?.endTime,
+      distance: tripStats?.distance,
+    })
+
+    if (saveAttemptedRef.current) {
+      console.log('🗄️ Drive save skipped: already attempted')
+      return
+    }
+
+    if (!summary) {
+      console.log('🗄️ Drive save skipped: no summary')
+      return
+    }
+
+    if (!tripStats?.startTime || !tripStats?.endTime) {
+      console.log('🗄️ Drive save skipped: missing start/end time')
       return
     }
 
     if (!user?.id) {
-      console.log('Drive not saved: user not authenticated')
+      console.log('🗄️ Drive save skipped: user not authenticated')
       return
     }
 
     saveAttemptedRef.current = true
+    console.log('🗄️ Attempting to save drive...')
 
     const saveDrive = async () => {
       try {
@@ -106,7 +130,7 @@ export default function TripSummary() {
           zoneBreakdown = breakdown
         }
 
-        await saveDriveLog({
+        const driveData = {
           userId: user.id,
           routeSlug: routeData?.id || routeData?.discoveryId || null,
           startedAt: tripStats.startTime,
@@ -117,12 +141,17 @@ export default function TripSummary() {
           maxSpeedMph: tripStats.maxSpeed || 0,
           curvesCompleted: tripStats.curvesCompleted || 0,
           zoneBreakdown,
-        })
+        }
 
+        console.log('🗄️ Saving drive with data:', driveData)
+
+        const result = await saveDriveLog(driveData)
+
+        console.log('🗄️ Drive saved successfully:', result)
         setDriveSaved(true)
         setTimeout(() => setDriveSaved(false), 2000)
       } catch (error) {
-        console.error('Failed to auto-save drive:', error)
+        console.error('🗄️ Failed to save drive:', error)
       }
     }
 
