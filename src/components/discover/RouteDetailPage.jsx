@@ -86,21 +86,94 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
       center: [centerLng, centerLat],
       zoom: 10,
       attributionControl: false,
-      interactive: false, // Static preview
+      // Enable map interaction (zoom, pan, rotate)
+      scrollZoom: true,
+      dragPan: true,
+      touchZoomRotate: true,
     })
 
     map.current.on('load', () => {
       setMapLoaded(true)
 
-      // Add start marker (green)
-      new mapboxgl.Marker({ color: '#22c55e' })
-        .setLngLat([route.start.lng, route.start.lat])
-        .addTo(map.current)
+      // Add start marker source
+      map.current.addSource('start-marker', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [route.start.lng, route.start.lat],
+          },
+        },
+      })
 
-      // Add end marker (red)
-      new mapboxgl.Marker({ color: '#ef4444' })
-        .setLngLat([route.end.lng, route.end.lat])
-        .addTo(map.current)
+      // Add end marker source
+      map.current.addSource('end-marker', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [route.end.lng, route.end.lat],
+          },
+        },
+      })
+
+      // Start marker - outer glow
+      map.current.addLayer({
+        id: 'start-marker-glow',
+        type: 'circle',
+        source: 'start-marker',
+        paint: {
+          'circle-radius': 14,
+          'circle-color': '#22c55e',
+          'circle-opacity': 0.3,
+          'circle-blur': 0.5,
+          'circle-emissive-strength': 1.0,
+        },
+      })
+
+      // Start marker - main circle
+      map.current.addLayer({
+        id: 'start-marker-main',
+        type: 'circle',
+        source: 'start-marker',
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#22c55e',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-emissive-strength': 1.0,
+        },
+      })
+
+      // End marker - outer glow
+      map.current.addLayer({
+        id: 'end-marker-glow',
+        type: 'circle',
+        source: 'end-marker',
+        paint: {
+          'circle-radius': 14,
+          'circle-color': '#ef4444',
+          'circle-opacity': 0.3,
+          'circle-blur': 0.5,
+          'circle-emissive-strength': 1.0,
+        },
+      })
+
+      // End marker - main circle
+      map.current.addLayer({
+        id: 'end-marker-main',
+        type: 'circle',
+        source: 'end-marker',
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#ef4444',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-emissive-strength': 1.0,
+        },
+      })
     })
 
     return () => {
@@ -147,9 +220,10 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
       },
       paint: {
         'line-color': '#E8622C',
-        'line-width': 10,
+        'line-width': 12,
+        'line-blur': 5,
         'line-opacity': 0.4,
-        'line-blur': 4,
+        'line-emissive-strength': 1.0,
       },
     })
 
@@ -165,7 +239,8 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
       paint: {
         'line-color': '#E8622C',
         'line-width': 4,
-        'line-opacity': 1,
+        'line-opacity': 1.0,
+        'line-emissive-strength': 1.0,
       },
     })
 
