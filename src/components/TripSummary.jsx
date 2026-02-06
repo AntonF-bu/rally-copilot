@@ -3,23 +3,21 @@ import useStore from '../store'
 import { useSwipeBack } from '../hooks/useSwipeBack'
 import { saveDriveLog } from '../services/driveLogService'
 import { submitRating, fetchUserRatingForRoute } from '../services/ratingService'
-import { colors } from '../styles/theme'
 
 // ================================
-// Trip Summary - Premium Redesign
-// Strava-inspired with deeper insights
-// Auto-saves drive to database on mount
+// Trip Summary - Tramo Brand Design
+// Post-drive payoff screen
 // ================================
 
 // Zone colors for trip summary visualization
 const ZONE_COLORS = {
-  urban: { primary: '#f59e0b', bg: '#f59e0b20' },
-  transit: { primary: '#3b82f6', bg: '#3b82f620' },
-  technical: { primary: '#22c55e', bg: '#22c55e20' },
+  urban: { primary: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  transit: { primary: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  technical: { primary: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
 }
 
 export default function TripSummary() {
-  const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, routeZones, settings, user, tripStats } = useStore()
+  const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats } = useStore()
 
   // Enable iOS-style swipe-back gesture
   useSwipeBack(closeTripSummary)
@@ -41,27 +39,23 @@ export default function TripSummary() {
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [showRatingSection, setShowRatingSection] = useState(true)
 
-  // Mode colors - cyan for cruise is acceptable for mode visualization
-  const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
-  const modeColor = modeColors[mode] || modeColors.cruise
-
   // Animate stats on mount
   useEffect(() => {
     if (!summary) return
     const duration = 1200
     const start = Date.now()
-    
+
     const animate = () => {
       const elapsed = Date.now() - start
       const progress = Math.min(elapsed / duration, 1)
       const eased = 1 - Math.pow(1 - progress, 3)
-      
+
       setAnimatedStats({
         distance: summary.distance * eased,
         avgSpeed: summary.avgSpeed * eased,
         maxSpeed: summary.maxSpeed * eased,
       })
-      
+
       if (progress < 1) requestAnimationFrame(animate)
     }
     requestAnimationFrame(animate)
@@ -79,9 +73,8 @@ export default function TripSummary() {
       return
     }
 
-    // Only save if user is authenticated
     if (!user?.id) {
-      console.log('🗄️ Drive not saved: user not authenticated')
+      console.log('Drive not saved: user not authenticated')
       return
     }
 
@@ -89,12 +82,10 @@ export default function TripSummary() {
 
     const saveDrive = async () => {
       try {
-        // Calculate stats
         const durationMs = tripStats.endTime - tripStats.startTime
         const durationMinutes = durationMs / 60000
-        const distanceMiles = tripStats.distance * 0.000621371 // meters to miles
+        const distanceMiles = tripStats.distance * 0.000621371
 
-        // Calculate avg speed from samples or from distance/duration
         let avgSpeedMph = 0
         if (tripStats.speedSamples && tripStats.speedSamples.length > 0) {
           avgSpeedMph = tripStats.speedSamples.reduce((a, b) => a + b, 0) / tripStats.speedSamples.length
@@ -102,7 +93,6 @@ export default function TripSummary() {
           avgSpeedMph = distanceMiles / (durationMinutes / 60)
         }
 
-        // Build zone breakdown summary
         let zoneBreakdown = null
         if (routeZones && routeZones.length > 0) {
           const breakdown = { urban: 0, transit: 0, technical: 0 }
@@ -130,11 +120,9 @@ export default function TripSummary() {
         })
 
         setDriveSaved(true)
-        // Hide the saved message after 2 seconds
         setTimeout(() => setDriveSaved(false), 2000)
       } catch (error) {
-        // Don't show error to user, just log it
-        console.error('🗄️ Failed to auto-save drive:', error)
+        console.error('Failed to auto-save drive:', error)
       }
     }
 
@@ -155,16 +143,13 @@ export default function TripSummary() {
           if (existing.review) setReviewText(existing.review)
         }
       } catch (err) {
-        console.error('🗄️ Failed to fetch existing rating:', err)
+        console.error('Failed to fetch existing rating:', err)
       }
     }
     fetchExisting()
   }, [user, routeData])
 
-  // Get route slug for rating - check both id and discoveryId
   const routeSlug = routeData?.id || routeData?.discoveryId
-
-  // Check if this is a route we can rate (has a name and slug)
   const canRateRoute = Boolean(routeData?.name && routeSlug)
 
   // Handle rating submission
@@ -175,55 +160,43 @@ export default function TripSummary() {
     try {
       await submitRating(user.id, routeSlug, selectedRating, reviewText || null)
       setRatingSubmitted(true)
-      // Collapse after brief delay
       setTimeout(() => setShowRatingSection(false), 1500)
     } catch (err) {
-      console.error('🗄️ Failed to submit rating:', err)
+      console.error('Failed to submit rating:', err)
     } finally {
       setIsSubmittingRating(false)
     }
   }
 
-  // Debug logging for rating section
-  console.log('🗄️ Rating section check:', {
-    routeDataId: routeData?.id,
-    discoveryId: routeData?.discoveryId,
-    routeSlug,
-    userId: user?.id,
-    canRateRoute,
-    showRatingSection,
-    routeDataName: routeData?.name
-  })
-
   // Generate SVG path string for route
   const routePath = useMemo(() => {
     const coords = routeData?.coordinates
     if (!coords || coords.length < 2) return null
-    
+
     let minLng = Infinity, maxLng = -Infinity
     let minLat = Infinity, maxLat = -Infinity
-    
+
     coords.forEach(([lng, lat]) => {
       minLng = Math.min(minLng, lng)
       maxLng = Math.max(maxLng, lng)
       minLat = Math.min(minLat, lat)
       maxLat = Math.max(maxLat, lat)
     })
-    
+
     const padding = 0.15
     const width = maxLng - minLng || 0.01
     const height = maxLat - minLat || 0.01
-    
+
     const viewWidth = 280
     const viewHeight = 140
     const scale = Math.min(
       (viewWidth * (1 - padding * 2)) / width,
       (viewHeight * (1 - padding * 2)) / height
     )
-    
+
     const offsetX = (viewWidth - width * scale) / 2
     const offsetY = (viewHeight - height * scale) / 2
-    
+
     const sampleRate = Math.max(1, Math.floor(coords.length / 120))
     const points = coords
       .filter((_, i) => i % sampleRate === 0 || i === coords.length - 1)
@@ -231,11 +204,11 @@ export default function TripSummary() {
         offsetX + (lng - minLng) * scale,
         viewHeight - (offsetY + (lat - minLat) * scale)
       ])
-    
+
     if (points.length < 2) return null
-    
+
     const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
-    
+
     return { d: pathD, start: points[0], end: points[points.length - 1], viewWidth, viewHeight }
   }, [routeData])
 
@@ -243,9 +216,9 @@ export default function TripSummary() {
   const curveInsights = useMemo(() => {
     const curves = routeData?.curves || []
     if (curves.length === 0) return null
-    
+
     const angles = curves.map(c => Math.abs(c.angle || 0))
-    
+
     return {
       total: curves.length,
       completed: summary?.curvesCompleted || 0,
@@ -260,10 +233,10 @@ export default function TripSummary() {
   // Zone breakdown
   const zoneInsights = useMemo(() => {
     if (!routeZones || routeZones.length === 0) return null
-    
+
     const breakdown = { urban: 0, transit: 0, technical: 0 }
     let totalMiles = 0
-    
+
     routeZones.forEach(zone => {
       const miles = (zone.endMile || 0) - (zone.startMile || 0)
       const char = zone.character || 'technical'
@@ -272,7 +245,7 @@ export default function TripSummary() {
       }
       totalMiles += miles
     })
-    
+
     return {
       ...breakdown,
       total: totalMiles,
@@ -284,11 +257,11 @@ export default function TripSummary() {
   // Performance insights
   const performanceInsights = useMemo(() => {
     if (!summary || !routeData) return null
-    
+
     const estimatedDuration = routeData.duration
     const actualDuration = summary.duration / 1000
     const timeDiff = estimatedDuration ? actualDuration - estimatedDuration : 0
-    
+
     return {
       estimatedMins: estimatedDuration ? Math.round(estimatedDuration / 60) : null,
       actualMins: Math.round(actualDuration / 60),
@@ -301,13 +274,13 @@ export default function TripSummary() {
   const routeNames = useMemo(() => {
     const origin = routeData?.origin || routeData?.name?.split(' to ')?.[0] || 'Start'
     const destination = routeData?.destination || routeData?.name?.split(' to ')?.[1] || 'Finish'
-    
+
     const cleanName = (name) => {
       if (!name) return ''
       const parts = name.split(',')
       return parts[0].trim()
     }
-    
+
     return {
       from: cleanName(origin),
       to: cleanName(destination)
@@ -317,34 +290,32 @@ export default function TripSummary() {
   // Share functionality using html2canvas
   const handleShare = async () => {
     setIsSharing(true)
-    
+
     try {
-      // Dynamically import html2canvas
       const html2canvas = (await import('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/+esm')).default
-      
+
       if (shareCardRef.current) {
         const canvas = await html2canvas(shareCardRef.current, {
-          backgroundColor: '#0a0a0f',
+          backgroundColor: '#0A0A0A',
           scale: 2,
           logging: false,
           useCORS: true,
         })
-        
+
         canvas.toBlob(async (blob) => {
           if (!blob) {
             setIsSharing(false)
             return
           }
-          
-          const file = new File([blob], `rally-copilot-${Date.now()}.png`, { type: 'image/png' })
-          
-          // Try native share first (mobile)
+
+          const file = new File([blob], `tramo-drive-${Date.now()}.png`, { type: 'image/png' })
+
           if (navigator.share && navigator.canShare?.({ files: [file] })) {
             try {
               await navigator.share({
                 files: [file],
-                title: 'Rally Co-Pilot Drive',
-                text: `${routeNames.from} → ${routeNames.to}`
+                title: 'Tramo Drive',
+                text: `${routeNames.from} to ${routeNames.to}`
               })
               setShareSuccess(true)
             } catch (err) {
@@ -357,28 +328,25 @@ export default function TripSummary() {
             downloadImage(blob)
             setShareSuccess(true)
           }
-          
+
           setIsSharing(false)
           setTimeout(() => setShareSuccess(false), 2000)
         }, 'image/png')
       }
     } catch (err) {
       console.error('Share failed:', err)
-      // Fallback to simple canvas if html2canvas fails
       fallbackShare()
     }
   }
-  
+
   const fallbackShare = async () => {
-    // Simple fallback that just downloads basic info
-    const text = `🏁 Rally Co-Pilot\n${routeNames.from} → ${routeNames.to}\n📏 ${summary.distance.toFixed(1)} ${summary.distanceUnit}\n⏱ ${summary.durationFormatted}\n🏎 Top: ${Math.round(summary.maxSpeed)} ${summary.speedUnit}`
-    
+    const text = `Tramo Drive\n${routeNames.from} to ${routeNames.to}\n${summary.distance.toFixed(1)} ${summary.distanceUnit} - ${summary.durationFormatted} - Top ${Math.round(summary.maxSpeed)} ${summary.speedUnit}\ndrivetramo.com`
+
     if (navigator.share) {
       try {
         await navigator.share({ text })
         setShareSuccess(true)
       } catch (err) {
-        // Copy to clipboard as last resort
         navigator.clipboard?.writeText(text)
         setShareSuccess(true)
       }
@@ -386,16 +354,16 @@ export default function TripSummary() {
       navigator.clipboard?.writeText(text)
       setShareSuccess(true)
     }
-    
+
     setIsSharing(false)
     setTimeout(() => setShareSuccess(false), 2000)
   }
-  
+
   const downloadImage = (blob) => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `rally-copilot-${Date.now()}.png`
+    a.download = `tramo-drive-${Date.now()}.png`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -404,8 +372,8 @@ export default function TripSummary() {
 
   if (!summary) {
     return (
-      <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
-        <p className="text-white/30 text-sm">No trip data</p>
+      <div style={styles.container}>
+        <p style={{ color: '#666666', fontSize: '14px' }}>No trip data</p>
       </div>
     )
   }
@@ -415,34 +383,26 @@ export default function TripSummary() {
     : 100
 
   return (
-    <div className="absolute inset-0 bg-[#0a0a0f] flex flex-col overflow-hidden">
-      
-      {/* Ambient background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div 
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-20 blur-[100px]"
-          style={{ background: `radial-gradient(circle, ${modeColor} 0%, transparent 70%)` }}
-        />
-        <div 
-          className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full opacity-10 blur-[80px]"
-          style={{ background: `radial-gradient(circle, #22c55e 0%, transparent 70%)` }}
-        />
-      </div>
+    <div style={styles.container}>
+      {/* Scrollable content */}
+      <div style={styles.scrollContainer}>
 
-      {/* Header with route visualization */}
-      <div className="relative flex-shrink-0">
-        <div className="relative h-44 overflow-hidden">
-          <svg 
-            viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`} 
-            className="absolute inset-0 w-full h-full"
+        {/* Header Bar */}
+        <div style={styles.headerBar}>
+          <span style={styles.driveComplete}>DRIVE COMPLETE</span>
+          <span style={styles.headerDate}>
+            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
+        </div>
+
+        {/* Route Map */}
+        <div style={styles.mapSection}>
+          <svg
+            viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`}
+            style={styles.routeSvg}
             preserveAspectRatio="xMidYMid meet"
           >
             <defs>
-              <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#22c55e" />
-                <stop offset="50%" stopColor={modeColor} />
-                <stop offset="100%" stopColor={modeColor} />
-              </linearGradient>
               <filter id="glow">
                 <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
                 <feMerge>
@@ -451,134 +411,102 @@ export default function TripSummary() {
                 </feMerge>
               </filter>
             </defs>
-            
+
             {routePath ? (
               <>
-                <path d={routePath.d} fill="none" stroke={modeColor} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" filter="url(#glow)"/>
-                <path d={routePath.d} fill="none" stroke="url(#routeGradient)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="animate-draw"/>
-                <circle cx={routePath.start[0]} cy={routePath.start[1]} r="8" fill="#0a0a0f" stroke="#22c55e" strokeWidth="3"/>
-                <circle cx={routePath.end[0]} cy={routePath.end[1]} r="8" fill="#0a0a0f" stroke={modeColor} strokeWidth="3"/>
+                <path d={routePath.d} fill="none" stroke="#E8622C" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" opacity="0.3" filter="url(#glow)"/>
+                <path d={routePath.d} fill="none" stroke="#E8622C" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx={routePath.start[0]} cy={routePath.start[1]} r="8" fill="#0A0A0A" stroke="#22c55e" strokeWidth="3"/>
+                <circle cx={routePath.end[0]} cy={routePath.end[1]} r="8" fill="#0A0A0A" stroke="#E8622C" strokeWidth="3"/>
                 <g transform={`translate(${routePath.end[0] - 6}, ${routePath.end[1] - 6})`}>
-                  <path d="M4 8l3 3 5-6" fill="none" stroke={modeColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M4 8l3 3 5-6" fill="none" stroke="#E8622C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </g>
               </>
             ) : (
-              <text x="140" y="70" textAnchor="middle" fill="rgba(255,255,255,0.2)" fontSize="14">Route Complete</text>
+              <text x="140" y="70" textAnchor="middle" fill="#444444" fontSize="14" fontFamily="'DM Sans', sans-serif">Route Complete</text>
             )}
           </svg>
-          
-          {/* Completion badge */}
-          <div className="absolute top-4 right-4 safe-top">
-            <div className="px-3 py-1.5 rounded-full backdrop-blur-xl border flex items-center gap-2" style={{ background: `${modeColor}15`, borderColor: `${modeColor}30` }}>
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: modeColor, boxShadow: `0 0 8px ${modeColor}` }}/>
-              <span className="text-[11px] font-semibold tracking-wider" style={{ color: modeColor }}>COMPLETE</span>
-            </div>
-          </div>
-          
-          {/* Time badge */}
-          <div className="absolute top-4 left-4 safe-top">
-            <div className="text-white/40 text-[10px]">
-              {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-            </div>
-          </div>
-        </div>
-        
-        {/* Route Names */}
-        <div className="px-4 pb-3 -mt-2">
-          <div className="flex items-center justify-center gap-2 text-center">
-            <span className="text-white/60 text-sm font-medium truncate max-w-[140px]">{routeNames.from}</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2" className="flex-shrink-0">
-              <path d="M5 12h14m-7-7l7 7-7 7"/>
-            </svg>
-            <span className="text-white text-sm font-medium truncate max-w-[140px]">{routeNames.to}</span>
-          </div>
-        </div>
-      </div>
 
-      {/* Stats Content - Scrollable */}
-      <div className="flex-1 overflow-auto px-4 pb-6">
-        
-        {/* Hero Stats */}
-        <div className="grid grid-cols-2 gap-3 mb-4 relative z-10">
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10">
-            <div className="text-white/40 text-[10px] tracking-widest mb-1">DISTANCE</div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-4xl font-bold text-white tabular-nums">{animatedStats.distance.toFixed(1)}</span>
-              <span className="text-white/40 text-sm">{summary.distanceUnit}</span>
-            </div>
-          </div>
-          
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10">
-            <div className="text-white/40 text-[10px] tracking-widest mb-1">DURATION</div>
-            <div className="text-4xl font-bold text-white tabular-nums">{summary.durationFormatted}</div>
-            {performanceInsights?.estimatedMins && performanceInsights.timeDiffMins !== 0 && (
-              <div className={`text-[10px] mt-1 ${performanceInsights.faster ? 'text-green-400' : 'text-orange-400'}`}>
-                {performanceInsights.faster ? '▼' : '▲'} {Math.abs(performanceInsights.timeDiffMins)}m vs estimate
-              </div>
-            )}
-          </div>
+          {/* Route name */}
+          <p style={styles.routeName}>{routeNames.from} to {routeNames.to}</p>
         </div>
 
-        {/* Speed Stats */}
-        <div className={`grid grid-cols-2 gap-3 mb-4 transition-all duration-500 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-white/40 text-[10px] tracking-widest">AVG SPEED</span>
-              <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: `${modeColor}20` }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={modeColor} strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-                </svg>
-              </div>
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold" style={{ color: modeColor }}>{Math.round(animatedStats.avgSpeed)}</span>
-              <span className="text-white/40 text-xs">{summary.speedUnit}</span>
+        {/* Main Stats Grid */}
+        <div style={styles.statsGrid}>
+          <div style={styles.statCard}>
+            <span style={styles.statLabel}>DISTANCE</span>
+            <div style={styles.statValueRow}>
+              <span style={styles.statNumber}>{animatedStats.distance.toFixed(1)}</span>
+              <span style={styles.statUnit}>{summary.distanceUnit}</span>
             </div>
           </div>
-          
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-white/40 text-[10px] tracking-widest">TOP SPEED</span>
-              <div className="w-6 h-6 rounded-full flex items-center justify-center bg-orange-500/20">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                </svg>
-              </div>
+
+          <div style={styles.statCard}>
+            <span style={styles.statLabel}>DURATION</span>
+            <span style={styles.statNumber}>{summary.durationFormatted}</span>
+          </div>
+
+          <div style={styles.statCard}>
+            <span style={styles.statLabel}>AVG SPEED</span>
+            <div style={styles.statValueRow}>
+              <span style={styles.statNumber}>{Math.round(animatedStats.avgSpeed)}</span>
+              <span style={styles.statUnit}>{summary.speedUnit}</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-orange-400">{Math.round(animatedStats.maxSpeed)}</span>
-              <span className="text-white/40 text-xs">{summary.speedUnit}</span>
+          </div>
+
+          <div style={styles.statCard}>
+            <span style={styles.statLabel}>TOP SPEED</span>
+            <div style={styles.statValueRow}>
+              <span style={styles.statNumber}>{Math.round(animatedStats.maxSpeed)}</span>
+              <span style={styles.statUnit}>{summary.speedUnit}</span>
             </div>
           </div>
         </div>
 
-        {/* Zone Breakdown */}
+        {/* Performance comparison */}
+        {performanceInsights?.estimatedMins && performanceInsights.timeDiffMins !== 0 && (
+          <div style={styles.performanceSection}>
+            <p style={{
+              ...styles.performanceText,
+              color: performanceInsights.faster ? '#22c55e' : '#E8622C'
+            }}>
+              {Math.abs(performanceInsights.timeDiffMins)} min {performanceInsights.faster ? 'faster' : 'slower'} than estimate
+            </p>
+          </div>
+        )}
+
+        {/* Road Breakdown */}
         {zoneInsights && zoneInsights.total > 0 && (
-          <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-100 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-white/40 text-[10px] tracking-widest">ROAD BREAKDOWN</span>
-              <span className="text-white/30 text-[10px]">{zoneInsights.segments} segments</span>
+          <div style={{
+            ...styles.section,
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.1s'
+          }}>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionOverline}>ROAD BREAKDOWN</span>
+              <span style={styles.sectionMeta}>{zoneInsights.segments} segments</span>
             </div>
-            
-            <div className="flex h-3 rounded-full overflow-hidden mb-3">
-              {zoneInsights.urban > 0 && <div className="h-full" style={{ width: `${(zoneInsights.urban / zoneInsights.total) * 100}%`, background: ZONE_COLORS.urban.primary }}/>}
-              {zoneInsights.transit > 0 && <div className="h-full" style={{ width: `${(zoneInsights.transit / zoneInsights.total) * 100}%`, background: ZONE_COLORS.transit.primary }}/>}
-              {zoneInsights.technical > 0 && <div className="h-full" style={{ width: `${(zoneInsights.technical / zoneInsights.total) * 100}%`, background: ZONE_COLORS.technical.primary }}/>}
+
+            <div style={styles.zoneBar}>
+              {zoneInsights.urban > 0 && <div style={{ height: '100%', width: `${(zoneInsights.urban / zoneInsights.total) * 100}%`, background: ZONE_COLORS.urban.primary }}/>}
+              {zoneInsights.transit > 0 && <div style={{ height: '100%', width: `${(zoneInsights.transit / zoneInsights.total) * 100}%`, background: ZONE_COLORS.transit.primary }}/>}
+              {zoneInsights.technical > 0 && <div style={{ height: '100%', width: `${(zoneInsights.technical / zoneInsights.total) * 100}%`, background: ZONE_COLORS.technical.primary }}/>}
             </div>
-            
-            <div className="grid grid-cols-3 gap-2">
+
+            <div style={styles.zoneLabels}>
               {Object.entries(ZONE_COLORS).map(([zone, colors]) => {
                 const miles = zoneInsights[zone] || 0
                 if (miles === 0) return null
                 const percent = Math.round((miles / zoneInsights.total) * 100)
                 return (
-                  <div key={zone} className="text-center">
-                    <div className="flex items-center justify-center gap-1 mb-1">
-                      <div className="w-2 h-2 rounded-full" style={{ background: colors.primary }} />
-                      <span className="text-[10px] text-white/50 uppercase">{zone}</span>
+                  <div key={zone} style={styles.zoneLabel}>
+                    <div style={styles.zoneDot}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: colors.primary }} />
+                      <span style={styles.zoneName}>{zone}</span>
                     </div>
-                    <div className="text-sm font-semibold text-white">{miles.toFixed(1)} mi</div>
-                    <div className="text-[10px] text-white/30">{percent}%</div>
+                    <span style={styles.zoneMiles}>{miles.toFixed(1)} mi</span>
+                    <span style={styles.zonePercent}>{percent}%</span>
                   </div>
                 )
               })}
@@ -588,70 +516,85 @@ export default function TripSummary() {
 
         {/* Curves Tackled */}
         {curveInsights && curveInsights.total > 0 && (
-          <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-200 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-white/40 text-[10px] tracking-widest">CURVES TACKLED</span>
-              <span className="text-white font-semibold">{curveInsights.completed}<span className="text-white/30">/{curveInsights.total}</span></span>
+          <div style={{
+            ...styles.section,
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.2s'
+          }}>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionOverline}>CURVES TACKLED</span>
+              <span style={styles.curveCount}>
+                {curveInsights.completed}<span style={{ color: '#444444' }}>/{curveInsights.total}</span>
+              </span>
             </div>
 
-            <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-4">
-              <div className="h-full rounded-full" style={{ width: `${completionPercent}%`, background: `linear-gradient(90deg, #22c55e, ${modeColor})` }}/>
+            <div style={styles.progressBar}>
+              <div style={{
+                height: '100%',
+                borderRadius: '4px',
+                width: `${completionPercent}%`,
+                background: 'linear-gradient(90deg, #22c55e, #E8622C)'
+              }}/>
             </div>
 
-            <div className="grid grid-cols-4 gap-2">
-              <div className="text-center p-2 rounded-xl bg-green-500/10">
-                <div className="text-xl font-bold text-green-400">{curveInsights.easy}</div>
-                <div className="text-[9px] text-green-400/60 tracking-wider">EASY</div>
+            <div style={styles.curveGrid}>
+              <div style={{ ...styles.curveCard, background: 'rgba(34,197,94,0.1)' }}>
+                <span style={{ ...styles.curveNumber, color: '#22c55e' }}>{curveInsights.easy}</span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(34,197,94,0.6)' }}>EASY</span>
               </div>
-              <div className="text-center p-2 rounded-xl bg-yellow-500/10">
-                <div className="text-xl font-bold text-yellow-400">{curveInsights.medium}</div>
-                <div className="text-[9px] text-yellow-400/60 tracking-wider">MEDIUM</div>
+              <div style={{ ...styles.curveCard, background: 'rgba(234,179,8,0.1)' }}>
+                <span style={{ ...styles.curveNumber, color: '#eab308' }}>{curveInsights.medium}</span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(234,179,8,0.6)' }}>MEDIUM</span>
               </div>
-              <div className="text-center p-2 rounded-xl bg-red-500/10">
-                <div className="text-xl font-bold text-red-400">{curveInsights.hard}</div>
-                <div className="text-[9px] text-red-400/60 tracking-wider">HARD</div>
+              <div style={{ ...styles.curveCard, background: 'rgba(239,68,68,0.1)' }}>
+                <span style={{ ...styles.curveNumber, color: '#ef4444' }}>{curveInsights.hard}</span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(239,68,68,0.6)' }}>HARD</span>
               </div>
-              <div className="text-center p-2 rounded-xl bg-purple-500/10">
-                <div className="text-xl font-bold text-purple-400">{curveInsights.chicanes}</div>
-                <div className="text-[9px] text-purple-400/60 tracking-wider">S-CURVES</div>
+              <div style={{ ...styles.curveCard, background: 'rgba(168,85,247,0.1)' }}>
+                <span style={{ ...styles.curveNumber, color: '#a855f7' }}>{curveInsights.chicanes}</span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(168,85,247,0.6)' }}>S-CURVES</span>
               </div>
             </div>
 
             {curveInsights.sharpest > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
-                <span className="text-white/40 text-[10px]">Sharpest turn</span>
-                <span className="text-orange-400 font-bold">{curveInsights.sharpest}°</span>
+              <div style={styles.sharpestRow}>
+                <span style={styles.sharpestLabel}>Sharpest turn</span>
+                <span style={styles.sharpestValue}>{curveInsights.sharpest}°</span>
               </div>
             )}
           </div>
         )}
 
-        {/* Rating Section - for routes that can be rated */}
+        {/* Rating Section */}
         {canRateRoute && user?.id && showRatingSection && (
-          <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-250 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+          <div style={{
+            ...styles.section,
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.25s'
+          }}>
             {ratingSubmitted ? (
-              <div className="flex items-center justify-center gap-2 py-2">
+              <div style={styles.ratingSuccess}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
                   <path d="M20 6L9 17l-5-5"/>
                 </svg>
-                <span className="text-green-400 text-sm font-medium">Rating saved</span>
+                <span style={{ color: '#22c55e', fontSize: '14px', fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>Rating saved</span>
               </div>
             ) : (
               <>
-                <div className="text-white/40 text-[10px] tracking-widest mb-3">
+                <span style={styles.sectionOverline}>
                   {existingRating ? 'UPDATE YOUR RATING' : 'RATE THIS ROUTE'}
-                </div>
+                </span>
 
-                {/* Star Rating */}
-                <div className="flex items-center justify-center gap-2 mb-3">
+                <div style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
                       key={star}
                       onClick={() => setSelectedRating(star)}
-                      className="transition-transform active:scale-90"
                       style={{
+                        ...styles.starButton,
                         transform: selectedRating >= star ? 'scale(1.1)' : 'scale(1)',
-                        transition: 'transform 0.15s ease'
                       }}
                     >
                       <svg
@@ -659,7 +602,7 @@ export default function TripSummary() {
                         height="32"
                         viewBox="0 0 24 24"
                         fill={selectedRating >= star ? '#E8622C' : 'none'}
-                        stroke={selectedRating >= star ? '#E8622C' : '#6b7280'}
+                        stroke={selectedRating >= star ? '#E8622C' : '#666666'}
                         strokeWidth="1.5"
                       >
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -668,26 +611,23 @@ export default function TripSummary() {
                   ))}
                 </div>
 
-                {/* Review input (shows after rating selected) */}
                 {selectedRating > 0 && (
-                  <div className="space-y-3 animate-fade-in">
+                  <div style={styles.reviewSection}>
                     <textarea
                       value={reviewText}
                       onChange={(e) => setReviewText(e.target.value.slice(0, 200))}
                       placeholder="Any thoughts? (optional)"
                       maxLength={200}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-sm resize-none focus:outline-none focus:border-white/20"
-                      style={{ minHeight: '60px' }}
+                      style={styles.reviewInput}
                     />
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/30 text-[10px]">{reviewText.length}/200</span>
+                    <div style={styles.reviewFooter}>
+                      <span style={styles.charCount}>{reviewText.length}/200</span>
                       <button
                         onClick={handleSubmitRating}
                         disabled={isSubmittingRating}
-                        className="px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
                         style={{
-                          background: '#E8622C',
-                          color: 'white'
+                          ...styles.submitButton,
+                          opacity: isSubmittingRating ? 0.5 : 1,
                         }}
                       >
                         {isSubmittingRating ? 'Saving...' : existingRating ? 'Update' : 'Submit'}
@@ -700,157 +640,547 @@ export default function TripSummary() {
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className={`space-y-2 transition-all duration-500 delay-300 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-          <button 
-            onClick={handleShare}
-            disabled={isSharing}
-            className="w-full py-3.5 rounded-xl font-semibold text-sm tracking-wide flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-            style={{ 
-              background: shareSuccess ? '#22c55e20' : `linear-gradient(135deg, ${modeColor}20, ${modeColor}10)`,
-              border: `1px solid ${shareSuccess ? '#22c55e50' : modeColor + '30'}`,
-              color: shareSuccess ? '#22c55e' : modeColor
-            }}
-          >
-            {isSharing ? (
-              <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"/>Creating...</>
-            ) : shareSuccess ? (
-              <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>Saved!</>
-            ) : (
-              <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>Share Drive</>
-            )}
-          </button>
-          
-          <button 
-            onClick={() => { closeTripSummary(); goToMenu() }}
-            className="w-full py-3.5 rounded-xl bg-white/10 text-white font-semibold text-sm tracking-wide hover:bg-white/15 transition-all border border-white/10"
-          >
-            Done
-          </button>
-        </div>
+        {/* Spacer for fixed buttons */}
+        <div style={{ height: '140px' }} />
       </div>
 
-      {/* Hidden Share Card - This gets rendered to PNG */}
-      <div className="fixed -left-[9999px] top-0">
-        <div 
+      {/* Fixed Action Buttons */}
+      <div style={styles.actionButtons}>
+        <button
+          onClick={handleShare}
+          disabled={isSharing}
+          style={{
+            ...styles.shareButton,
+            opacity: isSharing ? 0.5 : 1,
+            background: shareSuccess ? 'rgba(34,197,94,0.2)' : '#E8622C',
+            color: shareSuccess ? '#22c55e' : '#FFFFFF',
+          }}
+        >
+          {isSharing ? (
+            <>
+              <div style={styles.spinner}/>
+              Creating...
+            </>
+          ) : shareSuccess ? (
+            <>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+              Saved!
+            </>
+          ) : (
+            <>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                <polyline points="16 6 12 2 8 6"/>
+                <line x1="12" y1="2" x2="12" y2="15"/>
+              </svg>
+              Share Drive
+            </>
+          )}
+        </button>
+
+        <button
+          onClick={() => { closeTripSummary(); goToMenu() }}
+          style={styles.doneButton}
+        >
+          Done
+        </button>
+      </div>
+
+      {/* Hidden Share Card */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <div
           ref={shareCardRef}
-          className="w-[400px] p-6"
-          style={{ background: 'linear-gradient(180deg, #0a0a0f 0%, #12121a 100%)' }}
+          style={styles.shareCard}
         >
           {/* Route visualization */}
-          <div className="relative h-[160px] mb-4">
-            <div 
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full"
-              style={{ background: `radial-gradient(circle, ${modeColor}30 0%, transparent 70%)` }}
-            />
-            <svg viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          <div style={{ position: 'relative', height: '160px', marginBottom: '16px' }}>
+            <svg viewBox={`0 0 ${routePath?.viewWidth || 280} ${routePath?.viewHeight || 140}`} style={{ width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid meet">
               {routePath && (
                 <>
-                  <path d={routePath.d} fill="none" stroke={modeColor} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
-                  <circle cx={routePath.start[0]} cy={routePath.start[1]} r="6" fill="#0a0a0f" stroke="#22c55e" strokeWidth="2"/>
-                  <circle cx={routePath.end[0]} cy={routePath.end[1]} r="6" fill="#0a0a0f" stroke={modeColor} strokeWidth="2"/>
+                  <path d={routePath.d} fill="none" stroke="#E8622C" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
+                  <circle cx={routePath.start[0]} cy={routePath.start[1]} r="6" fill="#0A0A0A" stroke="#22c55e" strokeWidth="2"/>
+                  <circle cx={routePath.end[0]} cy={routePath.end[1]} r="6" fill="#0A0A0A" stroke="#E8622C" strokeWidth="2"/>
                 </>
               )}
             </svg>
           </div>
-          
+
           {/* Route name */}
-          <div className="text-center mb-1">
-            <span className="text-white text-lg font-bold">{routeNames.from} → {routeNames.to}</span>
+          <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+            <span style={{ color: '#FFFFFF', fontSize: '18px', fontFamily: "'DM Sans', sans-serif", fontWeight: 600 }}>
+              {routeNames.from} to {routeNames.to}
+            </span>
           </div>
-          
+
           {/* Date */}
-          <div className="text-center mb-6">
-            <span className="text-white/40 text-xs">
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <span style={{ color: '#666666', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace" }}>
               {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
             </span>
           </div>
-          
+
           {/* Stats grid */}
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="bg-white/5 rounded-xl p-4">
-              <div className="text-white/40 text-[10px] tracking-widest mb-1">DISTANCE</div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold text-white">{summary.distance.toFixed(1)}</span>
-                <span className="text-white/40 text-sm">{summary.distanceUnit}</span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <div style={styles.shareStatCard}>
+              <div style={styles.shareStatLabel}>DISTANCE</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={styles.shareStatNumber}>{summary.distance.toFixed(1)}</span>
+                <span style={styles.shareStatUnit}>{summary.distanceUnit}</span>
               </div>
             </div>
-            <div className="bg-white/5 rounded-xl p-4">
-              <div className="text-white/40 text-[10px] tracking-widest mb-1">DURATION</div>
-              <span className="text-3xl font-bold text-white">{summary.durationFormatted}</span>
+            <div style={styles.shareStatCard}>
+              <div style={styles.shareStatLabel}>DURATION</div>
+              <span style={styles.shareStatNumber}>{summary.durationFormatted}</span>
             </div>
           </div>
-          
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="bg-white/5 rounded-xl p-4">
-              <div className="text-white/40 text-[10px] tracking-widest mb-1">AVG SPEED</div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold" style={{ color: modeColor }}>{Math.round(summary.avgSpeed)}</span>
-                <span className="text-white/40 text-sm">{summary.speedUnit}</span>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+            <div style={styles.shareStatCard}>
+              <div style={styles.shareStatLabel}>AVG SPEED</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ ...styles.shareStatNumber, color: '#E8622C' }}>{Math.round(summary.avgSpeed)}</span>
+                <span style={styles.shareStatUnit}>{summary.speedUnit}</span>
               </div>
             </div>
-            <div className="bg-white/5 rounded-xl p-4">
-              <div className="text-white/40 text-[10px] tracking-widest mb-1">TOP SPEED</div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold text-orange-400">{Math.round(summary.maxSpeed)}</span>
-                <span className="text-white/40 text-sm">{summary.speedUnit}</span>
+            <div style={styles.shareStatCard}>
+              <div style={styles.shareStatLabel}>TOP SPEED</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                <span style={{ ...styles.shareStatNumber, color: '#E8622C' }}>{Math.round(summary.maxSpeed)}</span>
+                <span style={styles.shareStatUnit}>{summary.speedUnit}</span>
               </div>
             </div>
           </div>
-          
+
           {/* Curves summary */}
           {curveInsights && curveInsights.total > 0 && (
-            <div className="text-center mb-6">
-              <span className="text-white/50 text-xs">
-                {curveInsights.total} curves • {curveInsights.easy} easy • {curveInsights.medium} medium • {curveInsights.hard} hard
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <span style={{ color: '#666666', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace" }}>
+                {curveInsights.total} curves - {curveInsights.easy} easy - {curveInsights.medium} medium - {curveInsights.hard} hard
               </span>
             </div>
           )}
-          
+
           {/* Branding */}
-          <div className="text-center pt-4 border-t border-white/10">
-            <div className="font-bold text-sm tracking-wider mb-1" style={{ color: modeColor }}>TRAMO</div>
-            <div className="text-white/30 text-[10px] tracking-widest">{mode.toUpperCase()} MODE</div>
+          <div style={{ textAlign: 'center', paddingTop: '16px', borderTop: '1px solid #1A1A1A' }}>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: '16px', letterSpacing: '0.1em', color: '#E8622C', marginBottom: '4px' }}>TRAMO</div>
+            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', letterSpacing: '0.1em', color: '#444444' }}>drivetramo.com</div>
           </div>
         </div>
       </div>
 
       {/* Drive Saved Toast */}
       {driveSaved && (
-        <div
-          className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-green-500/20 border border-green-500/30 flex items-center gap-2 animate-fade-in-out"
-          style={{ zIndex: 100 }}
-        >
+        <div style={styles.toast}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
             <path d="M20 6L9 17l-5-5"/>
           </svg>
-          <span className="text-green-400 text-xs font-medium">Drive saved</span>
+          <span style={{ color: '#22c55e', fontSize: '12px', fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>Drive saved</span>
         </div>
       )}
 
       <style>{`
-        .safe-top { padding-top: env(safe-area-inset-top, 12px); }
-        .tabular-nums { font-variant-numeric: tabular-nums; }
-
-        @keyframes draw {
-          from { stroke-dashoffset: 1000; }
-          to { stroke-dashoffset: 0; }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
-        .animate-draw {
-          stroke-dasharray: 1000;
-          animation: draw 2s ease-out forwards;
-        }
-
         @keyframes fadeInOut {
           0% { opacity: 0; transform: translate(-50%, 10px); }
           15% { opacity: 1; transform: translate(-50%, 0); }
           85% { opacity: 1; transform: translate(-50%, 0); }
           100% { opacity: 0; transform: translate(-50%, -10px); }
         }
-        .animate-fade-in-out {
-          animation: fadeInOut 2s ease-in-out forwards;
-        }
       `}</style>
     </div>
   )
+}
+
+const styles = {
+  container: {
+    position: 'absolute',
+    inset: 0,
+    background: '#0A0A0A',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  scrollContainer: {
+    flex: 1,
+    overflow: 'auto',
+    padding: '0 16px',
+    paddingTop: 'calc(env(safe-area-inset-top, 20px) + 16px)',
+  },
+
+  // Header
+  headerBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '24px',
+  },
+  driveComplete: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    fontWeight: 500,
+    letterSpacing: '0.2em',
+    color: '#E8622C',
+  },
+  headerDate: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    color: '#666666',
+  },
+
+  // Map section
+  mapSection: {
+    marginBottom: '24px',
+  },
+  routeSvg: {
+    width: '100%',
+    height: '140px',
+  },
+  routeName: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '16px',
+    fontWeight: 500,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    margin: 0,
+    marginTop: '12px',
+  },
+
+  // Stats grid
+  statsGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '12px',
+    marginBottom: '16px',
+  },
+  statCard: {
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '12px',
+    padding: '16px',
+  },
+  statLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    fontWeight: 500,
+    letterSpacing: '0.1em',
+    color: '#666666',
+    display: 'block',
+    marginBottom: '8px',
+  },
+  statValueRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: '4px',
+  },
+  statNumber: {
+    fontFamily: "'Bebas Neue', sans-serif",
+    fontSize: '40px',
+    color: '#FFFFFF',
+    lineHeight: 1,
+  },
+  statUnit: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+  },
+
+  // Performance
+  performanceSection: {
+    marginBottom: '16px',
+    textAlign: 'center',
+  },
+  performanceText: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 500,
+    margin: 0,
+  },
+
+  // Section
+  section: {
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '12px',
+    padding: '16px',
+    marginBottom: '16px',
+  },
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '12px',
+  },
+  sectionOverline: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 500,
+    letterSpacing: '0.15em',
+    color: '#666666',
+  },
+  sectionMeta: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#444444',
+  },
+
+  // Zone breakdown
+  zoneBar: {
+    display: 'flex',
+    height: '12px',
+    borderRadius: '6px',
+    overflow: 'hidden',
+    marginBottom: '16px',
+  },
+  zoneLabels: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  zoneLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  zoneDot: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    minWidth: '80px',
+  },
+  zoneName: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    color: '#888888',
+    textTransform: 'uppercase',
+  },
+  zoneMiles: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    color: '#FFFFFF',
+    fontWeight: 500,
+    flex: 1,
+  },
+  zonePercent: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#444444',
+  },
+
+  // Curves
+  curveCount: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 600,
+    color: '#FFFFFF',
+  },
+  progressBar: {
+    height: '8px',
+    background: '#1A1A1A',
+    borderRadius: '4px',
+    overflow: 'hidden',
+    marginBottom: '16px',
+  },
+  curveGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '8px',
+  },
+  curveCard: {
+    textAlign: 'center',
+    padding: '12px 8px',
+    borderRadius: '8px',
+  },
+  curveNumber: {
+    fontFamily: "'Bebas Neue', sans-serif",
+    fontSize: '24px',
+    display: 'block',
+    lineHeight: 1,
+    marginBottom: '4px',
+  },
+  curveLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '8px',
+    fontWeight: 500,
+    letterSpacing: '0.1em',
+  },
+  sharpestRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '12px',
+    paddingTop: '12px',
+    borderTop: '1px solid #1A1A1A',
+  },
+  sharpestLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+  },
+  sharpestValue: {
+    fontFamily: "'Bebas Neue', sans-serif",
+    fontSize: '18px',
+    color: '#E8622C',
+  },
+
+  // Rating
+  ratingSuccess: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    padding: '8px 0',
+  },
+  starsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    marginTop: '12px',
+  },
+  starButton: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    transition: 'transform 0.15s ease',
+  },
+  reviewSection: {
+    marginTop: '16px',
+  },
+  reviewInput: {
+    width: '100%',
+    background: '#0A0A0A',
+    border: '1px solid #1A1A1A',
+    borderRadius: '8px',
+    padding: '12px',
+    color: '#FFFFFF',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    resize: 'none',
+    minHeight: '60px',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  reviewFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '12px',
+  },
+  charCount: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#444444',
+  },
+  submitButton: {
+    padding: '8px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    background: '#E8622C',
+    color: '#FFFFFF',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+
+  // Action buttons
+  actionButtons: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: '16px',
+    paddingBottom: 'calc(env(safe-area-inset-bottom, 16px) + 16px)',
+    background: 'linear-gradient(to top, #0A0A0A 60%, transparent)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  shareButton: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '12px',
+    border: 'none',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    transition: 'all 0.2s ease',
+  },
+  doneButton: {
+    width: '100%',
+    padding: '14px',
+    borderRadius: '12px',
+    border: '1px solid #1A1A1A',
+    background: 'transparent',
+    color: '#888888',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+  },
+  spinner: {
+    width: '16px',
+    height: '16px',
+    border: '2px solid currentColor',
+    borderTopColor: 'transparent',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite',
+  },
+
+  // Toast
+  toast: {
+    position: 'fixed',
+    bottom: '180px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '8px 16px',
+    borderRadius: '20px',
+    background: 'rgba(34,197,94,0.2)',
+    border: '1px solid rgba(34,197,94,0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    zIndex: 100,
+    animation: 'fadeInOut 2s ease-in-out forwards',
+  },
+
+  // Share card
+  shareCard: {
+    width: '400px',
+    padding: '24px',
+    background: '#0A0A0A',
+  },
+  shareStatCard: {
+    background: '#111111',
+    borderRadius: '12px',
+    padding: '16px',
+  },
+  shareStatLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    letterSpacing: '0.1em',
+    color: '#666666',
+    marginBottom: '4px',
+  },
+  shareStatNumber: {
+    fontFamily: "'Bebas Neue', sans-serif",
+    fontSize: '32px',
+    color: '#FFFFFF',
+    lineHeight: 1,
+  },
+  shareStatUnit: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '12px',
+    color: '#666666',
+  },
 }
