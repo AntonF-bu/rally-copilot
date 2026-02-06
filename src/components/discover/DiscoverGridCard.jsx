@@ -40,7 +40,7 @@ function encodeValue(value) {
   return encoded
 }
 
-export function DiscoverGridCard({ route, isSaved, onSelect }) {
+export function DiscoverGridCard({ route, isSaved, onSelect, stats }) {
   const [routePath, setRoutePath] = useState(null)
   const [imageError, setImageError] = useState(false)
 
@@ -174,6 +174,28 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
         <p style={styles.routeMeta}>
           {route.start.label} to {route.end.label} - {route.distance}mi - {route.duration}m
         </p>
+
+        {/* Social proof footer */}
+        <div style={styles.statsFooter}>
+          <span style={styles.statText}>
+            {stats?.driveCount || 0} drives
+          </span>
+          {stats?.averageRating > 0 && (
+            <span style={styles.ratingText}>
+              {stats.averageRating.toFixed(1)}
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="#E8622C"
+                stroke="none"
+                style={{ marginLeft: '2px', verticalAlign: 'middle' }}
+              >
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            </span>
+          )}
+        </div>
       </div>
     </button>
   )
@@ -281,5 +303,25 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  statsFooter: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: '6px',
+    paddingTop: '6px',
+    borderTop: '1px solid #1A1A1A',
+  },
+  statText: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+  },
+  ratingText: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#9ca3af',
+    display: 'flex',
+    alignItems: 'center',
   },
 }

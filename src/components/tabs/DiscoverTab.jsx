@@ -5,6 +5,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
 import { fetchPublishedRoutes } from '../../services/supabaseRouteService'
+import { fetchAllRouteStats } from '../../services/ratingService'
 import { DiscoverGridCard } from '../discover/DiscoverGridCard'
 import { RouteDetailPage } from '../discover/RouteDetailPage'
 
@@ -12,6 +13,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
+  const [sortOption, setSortOption] = useState('recommended')
 
   // Route detail page state
   const [selectedRoute, setSelectedRoute] = useState(null)
@@ -20,6 +22,9 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [routes, setRoutes] = useState(DISCOVERY_ROUTES) // Start with fallback
   const [isLoading, setIsLoading] = useState(true)
   const [fetchError, setFetchError] = useState(null)
+
+  // Route stats (drives + ratings) - keyed by route slug
+  const [routeStats, setRouteStats] = useState({})
 
   // Get favorites from store
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
@@ -59,6 +64,19 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
     loadRoutes()
   }, [loadRoutes])
 
+  // Fetch route stats (drives + ratings) once on mount
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const stats = await fetchAllRouteStats()
+        setRouteStats(stats)
+      } catch (err) {
+        console.error('🗄️ Failed to fetch route stats:', err)
+      }
+    }
+    loadStats()
+  }, [])
+
   const handleVibeToggle = (vibeId) => {
     setSelectedVibes((prev) =>
       prev.includes(vibeId)
@@ -75,9 +93,10 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
     )
   }
 
-  // Filter routes based on search, vibes, and regions
+  // Filter and sort routes
   const filteredRoutes = useMemo(() => {
-    return routes.filter((route) => {
+    // First filter
+    const filtered = routes.filter((route) => {
       // Search filter
       const searchLower = searchQuery.toLowerCase().trim()
       const searchMatch =
@@ -100,7 +119,50 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
       return searchMatch && vibeMatch && regionMatch
     })
-  }, [routes, searchQuery, selectedVibes, selectedRegions])
+
+    // Then sort
+    const sorted = [...filtered]
+    switch (sortOption) {
+      case 'most-driven':
+        sorted.sort((a, b) => {
+          const aCount = routeStats[a.id]?.driveCount || 0
+          const bCount = routeStats[b.id]?.driveCount || 0
+          return bCount - aCount
+        })
+        break
+      case 'highest-rated':
+        sorted.sort((a, b) => {
+          const aRating = routeStats[a.id]?.averageRating || 0
+          const bRating = routeStats[b.id]?.averageRating || 0
+          // Routes with 0 ratings go to bottom
+          if (aRating === 0 && bRating > 0) return 1
+          if (bRating === 0 && aRating > 0) return -1
+          return bRating - aRating
+        })
+        break
+      case 'shortest':
+        sorted.sort((a, b) => a.distance - b.distance)
+        break
+      case 'longest':
+        sorted.sort((a, b) => b.distance - a.distance)
+        break
+      case 'recommended':
+      default:
+        // Keep original order
+        break
+    }
+
+    return sorted
+  }, [routes, searchQuery, selectedVibes, selectedRegions, sortOption, routeStats])
+
+  // Sort options for the UI
+  const SORT_OPTIONS = [
+    { id: 'recommended', label: 'Recommended' },
+    { id: 'most-driven', label: 'Most Driven' },
+    { id: 'highest-rated', label: 'Highest Rated' },
+    { id: 'shortest', label: 'Shortest' },
+    { id: 'longest', label: 'Longest' },
+  ]
 
   const isRouteSaved = (routeId) => {
     return favoriteRoutes.some((fav) => fav.discoveryId === routeId || fav.id === routeId)
@@ -246,6 +308,27 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
         </div>
       </div>
 
+      {/* Sort Options */}
+      <div style={styles.sortSection}>
+        <span style={styles.sortLabel}>Sort by:</span>
+        <div style={styles.sortChipContainer}>
+          {SORT_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              onClick={() => setSortOption(option.id)}
+              style={{
+                ...styles.sortChip,
+                color: sortOption === option.id ? '#FFFFFF' : '#6b7280',
+                fontWeight: sortOption === option.id ? 500 : 400,
+                background: sortOption === option.id ? '#1A1A1A' : 'transparent',
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Results count + Clear filters */}
       <div style={styles.resultsRow}>
         <p style={styles.resultsCount}>
@@ -305,6 +388,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
                 route={route}
                 isSaved={isRouteSaved(route.id)}
                 onSelect={handleSelectRoute}
+                stats={routeStats[route.id]}
               />
             ))}
           </div>
@@ -425,6 +509,37 @@ const styles = {
     letterSpacing: '0.05em',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
+  },
+  sortSection: {
+    padding: '0 16px 12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  sortLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    flexShrink: 0,
+  },
+  sortChipContainer: {
+    display: 'flex',
+    gap: '4px',
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+  },
+  sortChip: {
+    padding: '4px 10px',
+    borderRadius: '12px',
+    border: 'none',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '11px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
   resultsRow: {
     padding: '0 16px 12px',

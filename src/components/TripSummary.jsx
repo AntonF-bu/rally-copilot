@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import useStore from '../store'
 import { useSwipeBack } from '../hooks/useSwipeBack'
 import { saveDriveLog } from '../services/driveLogService'
+import { submitRating, fetchUserRatingForRoute } from '../services/ratingService'
 import { colors } from '../styles/theme'
 
 // ================================
@@ -31,6 +32,14 @@ export default function TripSummary() {
   const [driveSaved, setDriveSaved] = useState(false)
   const shareCardRef = useRef(null)
   const saveAttemptedRef = useRef(false)
+
+  // Rating state
+  const [selectedRating, setSelectedRating] = useState(0)
+  const [existingRating, setExistingRating] = useState(null)
+  const [reviewText, setReviewText] = useState('')
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false)
+  const [ratingSubmitted, setRatingSubmitted] = useState(false)
+  const [showRatingSection, setShowRatingSection] = useState(true)
 
   // Mode colors - cyan for cruise is acceptable for mode visualization
   const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
@@ -131,6 +140,47 @@ export default function TripSummary() {
 
     saveDrive()
   }, [user, tripStats, routeData, routeZones, summary])
+
+  // Fetch existing rating for this route
+  useEffect(() => {
+    const routeSlug = routeData?.id || routeData?.discoveryId
+    if (!user?.id || !routeSlug) return
+
+    const fetchExisting = async () => {
+      try {
+        const existing = await fetchUserRatingForRoute(user.id, routeSlug)
+        if (existing) {
+          setExistingRating(existing)
+          setSelectedRating(existing.rating)
+          if (existing.review) setReviewText(existing.review)
+        }
+      } catch (err) {
+        console.error('🗄️ Failed to fetch existing rating:', err)
+      }
+    }
+    fetchExisting()
+  }, [user, routeData])
+
+  // Handle rating submission
+  const handleSubmitRating = async () => {
+    const routeSlug = routeData?.id || routeData?.discoveryId
+    if (!user?.id || !routeSlug || !selectedRating) return
+
+    setIsSubmittingRating(true)
+    try {
+      await submitRating(user.id, routeSlug, selectedRating, reviewText || null)
+      setRatingSubmitted(true)
+      // Collapse after brief delay
+      setTimeout(() => setShowRatingSection(false), 1500)
+    } catch (err) {
+      console.error('🗄️ Failed to submit rating:', err)
+    } finally {
+      setIsSubmittingRating(false)
+    }
+  }
+
+  // Check if this is a curated route (has a discoveryRoutes slug)
+  const isCuratedRoute = Boolean(routeData?.id || routeData?.discoveryId)
 
   // Generate SVG path string for route
   const routePath = useMemo(() => {
@@ -530,11 +580,11 @@ export default function TripSummary() {
               <span className="text-white/40 text-[10px] tracking-widest">CURVES TACKLED</span>
               <span className="text-white font-semibold">{curveInsights.completed}<span className="text-white/30">/{curveInsights.total}</span></span>
             </div>
-            
+
             <div className="h-2 bg-white/10 rounded-full overflow-hidden mb-4">
               <div className="h-full rounded-full" style={{ width: `${completionPercent}%`, background: `linear-gradient(90deg, #22c55e, ${modeColor})` }}/>
             </div>
-            
+
             <div className="grid grid-cols-4 gap-2">
               <div className="text-center p-2 rounded-xl bg-green-500/10">
                 <div className="text-xl font-bold text-green-400">{curveInsights.easy}</div>
@@ -553,12 +603,86 @@ export default function TripSummary() {
                 <div className="text-[9px] text-purple-400/60 tracking-wider">S-CURVES</div>
               </div>
             </div>
-            
+
             {curveInsights.sharpest > 0 && (
               <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between">
                 <span className="text-white/40 text-[10px]">Sharpest turn</span>
                 <span className="text-orange-400 font-bold">{curveInsights.sharpest}°</span>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Rating Section - only for curated routes */}
+        {isCuratedRoute && user?.id && showRatingSection && (
+          <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-250 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+            {ratingSubmitted ? (
+              <div className="flex items-center justify-center gap-2 py-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+                  <path d="M20 6L9 17l-5-5"/>
+                </svg>
+                <span className="text-green-400 text-sm font-medium">Rating saved</span>
+              </div>
+            ) : (
+              <>
+                <div className="text-white/40 text-[10px] tracking-widest mb-3">
+                  {existingRating ? 'UPDATE YOUR RATING' : 'RATE THIS ROUTE'}
+                </div>
+
+                {/* Star Rating */}
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setSelectedRating(star)}
+                      className="transition-transform active:scale-90"
+                      style={{
+                        transform: selectedRating >= star ? 'scale(1.1)' : 'scale(1)',
+                        transition: 'transform 0.15s ease'
+                      }}
+                    >
+                      <svg
+                        width="32"
+                        height="32"
+                        viewBox="0 0 24 24"
+                        fill={selectedRating >= star ? '#E8622C' : 'none'}
+                        stroke={selectedRating >= star ? '#E8622C' : '#6b7280'}
+                        strokeWidth="1.5"
+                      >
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Review input (shows after rating selected) */}
+                {selectedRating > 0 && (
+                  <div className="space-y-3 animate-fade-in">
+                    <textarea
+                      value={reviewText}
+                      onChange={(e) => setReviewText(e.target.value.slice(0, 200))}
+                      placeholder="Any thoughts? (optional)"
+                      maxLength={200}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-white text-sm resize-none focus:outline-none focus:border-white/20"
+                      style={{ minHeight: '60px' }}
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/30 text-[10px]">{reviewText.length}/200</span>
+                      <button
+                        onClick={handleSubmitRating}
+                        disabled={isSubmittingRating}
+                        className="px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+                        style={{
+                          background: '#E8622C',
+                          color: 'white'
+                        }}
+                      >
+                        {isSubmittingRating ? 'Saving...' : existingRating ? 'Update' : 'Submit'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
