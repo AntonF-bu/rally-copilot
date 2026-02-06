@@ -4,14 +4,17 @@ import useStore from '../store'
 import { useSwipeBack } from '../hooks/useSwipeBack'
 import { getCurveColor } from '../data/routes'
 import { analyzeRouteCharacter, ROUTE_CHARACTER, CHARACTER_COLORS, CHARACTER_BEHAVIORS } from '../services/zoneService'
-import { mapboxStyle } from '../styles/theme'
 
 // ================================
 // Route Editor - Mission Customization
 // Edit curves, character zones, add custom callouts
+// Tramo Brand Design
 // ================================
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
+
+// Mapbox style
+const MAPBOX_STYLE = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
 
 const CUSTOM_CALLOUT_TYPES = [
   { id: 'caution', label: 'Caution', icon: '⚠️', color: '#f59e0b' },
@@ -87,7 +90,7 @@ export default function RouteEditor({ onBack, onSave }) {
     
     mapRef.current = new mapboxgl.Map({
       container: mapContainer,
-      style: mapboxStyle,
+      style: MAPBOX_STYLE,
       center: routeData.coordinates[Math.floor(routeData.coordinates.length / 2)],
       zoom: 11,
       pitch: 0

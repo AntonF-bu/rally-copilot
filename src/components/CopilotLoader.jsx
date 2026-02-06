@@ -1,11 +1,20 @@
 import { useState, useEffect } from 'react'
-import { colors, fonts, transitions } from '../styles/theme'
 
 // ================================
 // Copilot Loader - "Waking up your co-pilot"
 // Shows while pre-caching voice callouts
-// Refactored to use theme system
+// Tramo Brand Design
 // ================================
+
+// Tramo brand colors
+const ACCENT = '#E8622C'
+const ACCENT_SOFT = '#FB923C'
+const ACCENT_GLOW = 'rgba(232,98,44,0.15)'
+const BG_DEEP = '#0A0A0A'
+const TEXT_PRIMARY = '#FFFFFF'
+const TEXT_SECONDARY = '#888888'
+const TEXT_MUTED = '#666666'
+const GLASS_BORDER = '#1A1A1A'
 
 const LOADING_MESSAGES = [
   "Waking up your co-pilot...",
@@ -48,13 +57,13 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
   return (
     <div
       className="absolute inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: colors.bgDeep }}
+      style={{ background: BG_DEEP }}
     >
       {/* Background glow - using accent orange */}
       <div
         className="absolute w-96 h-96 rounded-full opacity-20 blur-3xl"
         style={{
-          background: `radial-gradient(circle, ${colors.accent} 0%, transparent 70%)`,
+          background: `radial-gradient(circle, ${ACCENT} 0%, transparent 70%)`,
           animation: 'pulse 2s ease-in-out infinite'
         }}
       />
@@ -65,7 +74,7 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
         <div
           className="w-32 h-32 rounded-full"
           style={{
-            border: `4px solid ${colors.accentGlow}`,
+            border: `4px solid ${ACCENT_GLOW}`,
             animation: isComplete ? 'none' : 'spin 3s linear infinite'
           }}
         />
@@ -77,11 +86,11 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
             cy="64"
             r="60"
             fill="none"
-            stroke={colors.accent}
+            stroke={ACCENT}
             strokeWidth="4"
             strokeLinecap="round"
             strokeDasharray={`${progress * 3.77} 377`}
-            style={{ transition: transitions.smooth }}
+            style={{ transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)' }}
           />
         </svg>
 
@@ -90,19 +99,19 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center"
             style={{
-              background: isComplete ? colors.accent : colors.accentGlow,
+              background: isComplete ? ACCENT : ACCENT_GLOW,
               transform: isComplete ? 'scale(1.1)' : 'scale(1)',
               transition: 'all 0.5s ease',
             }}
           >
             {isComplete ? (
               // Checkmark
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={colors.bgDeep} strokeWidth="3">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={BG_DEEP} strokeWidth="3">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             ) : (
               // Microphone/speaker icon
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2">
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                 <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                 <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
@@ -118,17 +127,17 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
           style={{
             fontSize: '20px',
             fontWeight: 600,
-            color: colors.textPrimary,
+            color: TEXT_PRIMARY,
             marginBottom: '8px',
-            fontFamily: fonts.body,
+            fontFamily: "'DM Sans', sans-serif",
           }}
         >
           {isComplete ? "Co-pilot ready!" : LOADING_MESSAGES[messageIndex]}
-          {!isComplete && <span style={{ color: colors.accent }}>{dots}</span>}
+          {!isComplete && <span style={{ color: ACCENT }}>{dots}</span>}
         </h2>
 
         {!isComplete && (
-          <p style={{ color: colors.textSecondary, fontSize: '14px' }}>
+          <p style={{ color: TEXT_SECONDARY, fontSize: '14px' }}>
             {progress < 100 ? `${Math.round(progress)}% complete` : 'Finalizing...'}
           </p>
         )}
@@ -138,14 +147,14 @@ export default function CopilotLoader({ progress = 0, isComplete = false, onComp
       {!isComplete && (
         <div
           className="w-64 h-1 rounded-full mt-6 overflow-hidden"
-          style={{ background: colors.glassBorder }}
+          style={{ background: GLASS_BORDER }}
         >
           <div
             className="h-full rounded-full"
             style={{
               width: `${progress}%`,
-              background: `linear-gradient(to right, ${colors.accent}, ${colors.accentSoft})`,
-              transition: transitions.smooth,
+              background: `linear-gradient(to right, ${ACCENT}, ${ACCENT_SOFT})`,
+              transition: 'all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
             }}
           />
         </div>
@@ -192,10 +201,10 @@ function VoiceStyleBadge({ label, active, color }) {
       className="px-3 py-1 rounded-full text-xs font-medium"
       style={{
         background: active ? `${color}20` : 'transparent',
-        color: active ? color : colors.textMuted,
-        border: `1px solid ${active ? color : colors.glassBorder}`,
+        color: active ? color : TEXT_MUTED,
+        border: `1px solid ${active ? color : GLASS_BORDER}`,
         opacity: active ? 1 : 0.3,
-        fontFamily: fonts.heading,
+        fontFamily: "'DM Sans', sans-serif",
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         transition: 'all 0.5s ease',

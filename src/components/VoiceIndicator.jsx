@@ -1,9 +1,8 @@
 import useStore from '../store'
-import { colors as themeColors } from '../styles/theme'
 
 // ================================
 // Voice Indicator - Shows when speaking
-// Refactored to use theme system
+// Tramo Brand Design
 // ================================
 
 export default function VoiceIndicator() {
@@ -11,9 +10,9 @@ export default function VoiceIndicator() {
 
   if (!isSpeaking) return null
 
-  // Mode colors - cyan for cruise is acceptable for mode visualization
+  // Mode colors - Tramo orange for cruise
   const modeColors = {
-    cruise: themeColors.cyan,
+    cruise: '#E8622C',
     fast: '#ffd500',
     race: '#ff3366'
   }
@@ -25,8 +24,12 @@ export default function VoiceIndicator() {
       style={{ bottom: '180px' }}
     >
       <div
-        className="bg-black/90 backdrop-blur-xl px-5 py-3 rounded-full flex items-center gap-3 border border-white/10"
-        style={{ boxShadow: `0 4px 20px ${color}30` }}
+        className="px-5 py-3 rounded-full flex items-center gap-3"
+        style={{
+          background: '#111111',
+          border: '1px solid #1A1A1A',
+          boxShadow: `0 4px 20px ${color}30`
+        }}
       >
         {/* Audio waves */}
         <div className="flex gap-1 items-center h-5">
@@ -45,7 +48,12 @@ export default function VoiceIndicator() {
         </div>
 
         {/* Text */}
-        <span className="text-sm font-medium text-white">
+        <span style={{
+          fontFamily: "'DM Sans', sans-serif",
+          fontSize: '14px',
+          fontWeight: 500,
+          color: '#FFFFFF'
+        }}>
           {lastSpokenText}
         </span>
       </div>
