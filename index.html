@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
     
     <!-- PWA Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -66,23 +66,29 @@
         font-family: var(--font-mono);
         letter-spacing: 0.05em;
       }
+      /* iOS Safari full-height fix */
+      html, body, #root {
+        height: 100%;
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #12121A;
+      }
+
       /* Prevent overscroll/bounce on iOS */
       html, body {
         position: fixed;
-        overflow: hidden;
         width: 100%;
-        height: 100%;
         overscroll-behavior: none;
         -webkit-overflow-scrolling: touch;
       }
-      
+
       /* Safe area handling for notched phones */
       #root {
-        padding-top: env(safe-area-inset-top);
-        padding-bottom: env(safe-area-inset-bottom);
         padding-left: env(safe-area-inset-left);
         padding-right: env(safe-area-inset-right);
-        height: 100%;
         width: 100%;
       }
       

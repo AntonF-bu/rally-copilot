@@ -497,11 +497,12 @@ export default function App() {
   const mobileContainerStyle = {
     maxWidth: '420px',
     margin: '0 auto',
-    height: '100dvh',
+    height: '100%',
+    minHeight: '100vh',
     minHeight: '-webkit-fill-available',
     position: 'relative',
     overflow: 'hidden',
-    background: '#080B12',
+    background: '#12121A',
     boxShadow: '0 0 80px rgba(0,0,0,0.5)',
   }
 
