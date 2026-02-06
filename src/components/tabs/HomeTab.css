@@ -90,8 +90,8 @@
   position: relative;
   z-index: 1;
   padding: 0 16px;
-  padding-top: max(12px, env(safe-area-inset-top));
-  padding-bottom: 100px;
+  padding-top: env(safe-area-inset-top, 8px);
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 20px));
 }
 
 /* ================================ */
@@ -101,8 +101,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
-  margin-bottom: 8px;
+  padding: 8px 0;
+  margin-bottom: 4px;
 }
 
 .ns-topbar-left {
@@ -189,15 +189,15 @@
 /* GREETING */
 /* ================================ */
 .ns-greeting {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .ns-greeting-text {
   font-family: var(--ns-font-primary);
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 300;
   color: var(--ns-text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .ns-greeting-text strong {
@@ -207,9 +207,9 @@
 .ns-weather {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--ns-font-primary);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ns-text-muted);
 }
 
@@ -223,23 +223,23 @@
 .ns-voice-ready {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 8px 12px;
   background: rgba(255, 107, 53, 0.06);
   border: 1px solid rgba(255, 107, 53, 0.12);
-  border-radius: 10px;
-  margin-bottom: 16px;
+  border-radius: 8px;
+  margin-bottom: 10px;
 }
 
 .ns-voice-bars {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 16px;
+  gap: 2px;
+  height: 12px;
 }
 
 .ns-voice-bar {
-  width: 3px;
+  width: 2px;
   background: var(--ns-accent);
   border-radius: 2px;
   animation: ns-vbar 0.8s ease-in-out infinite;
@@ -253,9 +253,9 @@
 
 .ns-voice-text {
   font-family: var(--ns-font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: var(--ns-accent);
   text-transform: uppercase;
 }
@@ -267,9 +267,9 @@
   position: relative;
   background: var(--ns-bg-card);
   border: 1px solid var(--ns-border-accent);
-  border-radius: 16px;
-  padding: 20px;
-  margin-bottom: 24px;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
   overflow: hidden;
   box-shadow:
     0 0 40px rgba(255, 107, 53, 0.05),
@@ -281,38 +281,38 @@
 .ns-hero::after {
   content: '';
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-color: rgba(255, 107, 53, 0.3);
   border-style: solid;
 }
 
 .ns-hero::before {
-  top: 8px;
-  left: 8px;
+  top: 6px;
+  left: 6px;
   border-width: 2px 0 0 2px;
 }
 
 .ns-hero::after {
-  bottom: 8px;
-  right: 8px;
+  bottom: 6px;
+  right: 6px;
   border-width: 0 2px 2px 0;
 }
 
 .ns-hero-badges {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .ns-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 4px;
+  padding: 4px 10px;
   border-radius: 20px;
   font-family: var(--ns-font-mono);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -350,8 +350,8 @@
 /* Route visualization */
 .ns-route-viz {
   position: relative;
-  height: 140px;
-  margin: 16px 0;
+  height: 100px;
+  margin: 10px 0;
 }
 
 .ns-route-svg {
@@ -413,23 +413,23 @@
 
 /* Route info */
 .ns-route-info {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .ns-route-name {
   font-family: var(--ns-font-primary);
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ns-text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .ns-route-endpoints {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--ns-font-primary);
-  font-size: 14px;
+  font-size: 12px;
   color: var(--ns-text-secondary);
 }
 
@@ -443,20 +443,20 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--ns-border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .ns-stat {
   background: rgba(16, 20, 30, 0.6);
-  padding: 12px 8px;
+  padding: 8px 6px;
   text-align: center;
 }
 
 .ns-stat-value {
   font-family: var(--ns-font-primary);
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ns-text-primary);
   line-height: 1.2;
@@ -468,7 +468,7 @@
 
 .ns-stat-label {
   font-family: var(--ns-font-mono);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 500;
   letter-spacing: 0.1em;
   color: var(--ns-text-muted);
@@ -480,16 +480,16 @@
 .ns-cta {
   position: relative;
   width: 100%;
-  padding: 16px 24px;
+  padding: 12px 20px;
   background: linear-gradient(135deg, var(--ns-accent) 0%, #E85A2A 100%);
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   font-family: var(--ns-font-primary);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: white;
   cursor: pointer;
@@ -534,51 +534,52 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 32px 24px;
+  padding: 20px 16px;
 }
 
 .ns-hero-simple-content {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .ns-hero-simple-title {
   font-family: var(--ns-font-primary);
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--ns-text-primary);
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 
 .ns-hero-simple-subtitle {
   font-family: var(--ns-font-primary);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ns-text-secondary);
   margin: 0;
-  max-width: 280px;
+  max-width: 260px;
+  line-height: 1.4;
 }
 
 .ns-cta-large {
-  padding: 18px 32px;
-  font-size: 16px;
+  padding: 12px 24px;
+  font-size: 14px;
 }
 
 /* ================================ */
 /* YOUR DRIVING SECTION */
 /* ================================ */
 .ns-section {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .ns-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .ns-section-title {
   font-family: var(--ns-font-primary);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ns-text-primary);
 }
@@ -607,20 +608,20 @@
 .ns-lifetime-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  gap: 8px;
 }
 
 .ns-lifetime-stat {
   background: var(--ns-bg-card);
   border: 1px solid var(--ns-border);
-  border-radius: 12px;
-  padding: 16px 12px;
+  border-radius: 10px;
+  padding: 12px 8px;
   text-align: center;
 }
 
 .ns-lifetime-value {
   font-family: var(--ns-font-primary);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 700;
   line-height: 1.1;
 }
@@ -652,9 +653,9 @@
 /* ================================ */
 .ns-recent-scroll {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   margin: 0 -16px;
   padding-left: 16px;
   padding-right: 16px;
@@ -668,10 +669,10 @@
 
 .ns-recent-card {
   flex-shrink: 0;
-  width: 180px;
+  width: 160px;
   background: var(--ns-bg-card);
   border: 1px solid var(--ns-border);
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -692,8 +693,8 @@
 .ns-recent-accent.expert { background: #f44336; }
 
 .ns-recent-viz {
-  height: 80px;
-  padding: 12px;
+  height: 50px;
+  padding: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -712,7 +713,7 @@
 }
 
 .ns-recent-content {
-  padding: 12px;
+  padding: 10px;
   padding-top: 0;
 }
 
@@ -765,17 +766,17 @@
 .ns-nearby-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .ns-nearby-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background: var(--ns-bg-card);
   border: 1px solid var(--ns-border);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 10px;
+  padding: 10px 12px;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
@@ -801,10 +802,10 @@
 .ns-nearby-accent.expert { background: #f44336; }
 
 .ns-nearby-icon {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -812,8 +813,8 @@
 }
 
 .ns-nearby-icon svg {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
 }
 
 .ns-nearby-info {
@@ -823,28 +824,28 @@
 
 .ns-nearby-name {
   font-family: var(--ns-font-primary);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ns-text-primary);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .ns-nearby-endpoints {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-family: var(--ns-font-primary);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ns-text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .ns-nearby-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--ns-font-mono);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ns-text-secondary);
 }
 
@@ -859,7 +860,7 @@
 .ns-saved-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .ns-saved-icon {
@@ -1205,10 +1206,10 @@
 
 @keyframes ns-vbar {
   0%, 100% {
-    height: 4px;
+    height: 3px;
   }
   50% {
-    height: 14px;
+    height: 10px;
   }
 }
 
