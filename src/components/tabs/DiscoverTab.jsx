@@ -5,14 +5,12 @@ import { useState, useMemo } from 'react'
 import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
 import { DiscoverGridCard } from '../discover/DiscoverGridCard'
-import { RouteDetailView } from '../discover/RouteDetailView'
 import { colors, fonts, transitions } from '../../styles/theme'
 
 export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
-  const [selectedRoute, setSelectedRoute] = useState(null)
 
   // Get favorites from store
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
@@ -65,7 +63,9 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
   }
 
   const handleSelectRoute = (route) => {
-    setSelectedRoute(route)
+    if (onStartRoute) {
+      onStartRoute(route)
+    }
   }
 
   const clearFilters = () => {
@@ -348,14 +348,6 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
         )}
       </div>
 
-      {/* Route Detail View */}
-      {selectedRoute && (
-        <RouteDetailView
-          route={selectedRoute}
-          onClose={() => setSelectedRoute(null)}
-          onStartDrive={onStartRoute}
-        />
-      )}
     </div>
   )
 }
