@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import useStore from '../../store'
 import { geocodeAddress } from '../../services/routeService'
 import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
-import { RouteDetailView } from '../discover/RouteDetailView'
+import { RouteDetailPage } from '../discover/RouteDetailPage'
 import './HomeTab.css'
 
 export function HomeTab({
@@ -622,11 +622,11 @@ export function HomeTab({
         />
       )}
 
-      {/* Discovery Route Preview */}
+      {/* Discovery Route Preview - uses same RouteDetailPage as DiscoverTab */}
       {selectedDiscoveryRoute && (
-        <RouteDetailView
+        <RouteDetailPage
           route={selectedDiscoveryRoute}
-          onClose={() => setSelectedDiscoveryRoute(null)}
+          onBack={() => setSelectedDiscoveryRoute(null)}
           onStartDrive={handleStartDiscoveryDrive}
         />
       )}
