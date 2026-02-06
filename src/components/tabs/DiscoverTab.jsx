@@ -1,9 +1,10 @@
 // Discover Tab - Night Stage Design
 // Browse and save curated routes with premium dark aesthetic
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
+import { fetchPublishedRoutes } from '../../services/supabaseRouteService'
 import { DiscoverGridCard } from '../discover/DiscoverGridCard'
 import { colors, fonts, transitions } from '../../styles/theme'
 
@@ -12,8 +13,43 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
 
+  // Supabase route fetching state
+  const [routes, setRoutes] = useState(DISCOVERY_ROUTES) // Start with fallback
+  const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(null)
+
   // Get favorites from store
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
+
+  // Fetch routes from Supabase on mount
+  const loadRoutes = useCallback(async () => {
+    setIsLoading(true)
+    setFetchError(null)
+
+    try {
+      console.log('🗄️ DiscoverTab: Fetching routes from Supabase...')
+      const supabaseRoutes = await fetchPublishedRoutes()
+
+      if (supabaseRoutes && supabaseRoutes.length > 0) {
+        console.log(`🗄️ DiscoverTab: Loaded ${supabaseRoutes.length} routes from Supabase`)
+        setRoutes(supabaseRoutes)
+      } else {
+        console.log('🗄️ DiscoverTab: No routes in Supabase, using fallback')
+        setRoutes(DISCOVERY_ROUTES)
+      }
+    } catch (error) {
+      console.error('🗄️ DiscoverTab: Failed to fetch routes, using fallback:', error)
+      setFetchError(error.message || 'Failed to load routes')
+      // Use fallback data so app doesn't break
+      setRoutes(DISCOVERY_ROUTES)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadRoutes()
+  }, [loadRoutes])
 
   const handleVibeToggle = (vibeId) => {
     setSelectedVibes((prev) =>
@@ -33,7 +69,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
   // Filter routes based on search, vibes, and regions
   const filteredRoutes = useMemo(() => {
-    return DISCOVERY_ROUTES.filter((route) => {
+    return routes.filter((route) => {
       // Search filter
       const searchLower = searchQuery.toLowerCase().trim()
       const searchMatch =
@@ -56,7 +92,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
       return searchMatch && vibeMatch && regionMatch
     })
-  }, [searchQuery, selectedVibes, selectedRegions])
+  }, [routes, searchQuery, selectedVibes, selectedRegions])
 
   const isRouteSaved = (routeId) => {
     return favoriteRoutes.some((fav) => fav.discoveryId === routeId || fav.id === routeId)
@@ -281,7 +317,92 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
       {/* Route Grid */}
       <div style={{ padding: '0 16px 100px' }}>
-        {filteredRoutes.length > 0 ? (
+        {/* Loading State */}
+        {isLoading ? (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '12px',
+          }}>
+            {/* Skeleton cards */}
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                style={{
+                  aspectRatio: '4/3',
+                  borderRadius: '12px',
+                  background: 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                }}
+              />
+            ))}
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+              }
+            `}</style>
+          </div>
+        ) : fetchError ? (
+          /* Error State with Retry */
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '48px 0',
+            textAlign: 'center',
+          }}>
+            <svg
+              width="40"
+              height="40"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="rgba(255,100,100,0.5)"
+              strokeWidth="1.5"
+              style={{ marginBottom: '12px' }}
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4M12 16h.01" />
+            </svg>
+            <p style={{
+              fontFamily: fonts.primary,
+              fontSize: '14px',
+              color: 'rgba(255,255,255,0.5)',
+              margin: 0,
+              marginBottom: '4px',
+            }}>
+              Couldn't load routes from server
+            </p>
+            <p style={{
+              fontFamily: fonts.mono,
+              fontSize: '10px',
+              color: 'rgba(255,255,255,0.3)',
+              margin: 0,
+              marginBottom: '16px',
+            }}>
+              Showing cached routes
+            </p>
+            <button
+              onClick={loadRoutes}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: colors.accent,
+                color: '#111114',
+                fontFamily: fonts.mono,
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : filteredRoutes.length > 0 ? (
+          /* Route Cards */
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(2, 1fr)',
@@ -297,6 +418,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
             ))}
           </div>
         ) : (
+          /* Empty State */
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -323,7 +445,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
               color: 'rgba(255,255,255,0.5)',
               margin: 0,
             }}>
-              {DISCOVERY_ROUTES.length === 0
+              {routes.length === 0
                 ? 'Routes coming soon to this area'
                 : 'No routes match your search'}
             </p>
