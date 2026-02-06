@@ -161,9 +161,14 @@ export default function TripSummary() {
     fetchExisting()
   }, [user, routeData])
 
+  // Get route slug for rating - check both id and discoveryId
+  const routeSlug = routeData?.id || routeData?.discoveryId
+
+  // Check if this is a route we can rate (has a name and slug)
+  const canRateRoute = Boolean(routeData?.name && routeSlug)
+
   // Handle rating submission
   const handleSubmitRating = async () => {
-    const routeSlug = routeData?.id || routeData?.discoveryId
     if (!user?.id || !routeSlug || !selectedRating) return
 
     setIsSubmittingRating(true)
@@ -179,8 +184,16 @@ export default function TripSummary() {
     }
   }
 
-  // Check if this is a curated route (has a discoveryRoutes slug)
-  const isCuratedRoute = Boolean(routeData?.id || routeData?.discoveryId)
+  // Debug logging for rating section
+  console.log('🗄️ Rating section check:', {
+    routeDataId: routeData?.id,
+    discoveryId: routeData?.discoveryId,
+    routeSlug,
+    userId: user?.id,
+    canRateRoute,
+    showRatingSection,
+    routeDataName: routeData?.name
+  })
 
   // Generate SVG path string for route
   const routePath = useMemo(() => {
@@ -613,8 +626,8 @@ export default function TripSummary() {
           </div>
         )}
 
-        {/* Rating Section - only for curated routes */}
-        {isCuratedRoute && user?.id && showRatingSection && (
+        {/* Rating Section - for routes that can be rated */}
+        {canRateRoute && user?.id && showRatingSection && (
           <div className={`bg-white/5 backdrop-blur-xl rounded-2xl p-4 border border-white/10 mb-4 transition-all duration-500 delay-250 ${showDetails ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
             {ratingSubmitted ? (
               <div className="flex items-center justify-center gap-2 py-2">
