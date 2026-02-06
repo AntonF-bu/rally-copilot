@@ -67,42 +67,18 @@ export default function TripSummary() {
     return () => clearTimeout(timer)
   }, [])
 
-  // Auto-save drive to database on mount
+  // Auto-save drive to database on mount (runs exactly once)
   useEffect(() => {
-    // Debug logging for drive save troubleshooting
-    console.log('🗄️ TripSummary save check:', {
-      saveAttempted: saveAttemptedRef.current,
-      hasSummary: !!summary,
-      hasStartTime: !!tripStats?.startTime,
-      hasEndTime: !!tripStats?.endTime,
-      userId: user?.id,
-      startTime: tripStats?.startTime,
-      endTime: tripStats?.endTime,
-      distance: tripStats?.distance,
-    })
+    // Already saved this drive session - skip
+    if (saveAttemptedRef.current) return
 
-    if (saveAttemptedRef.current) {
-      console.log('🗄️ Drive save skipped: already attempted')
+    // Validate required data before attempting save
+    if (!summary || !tripStats?.startTime || !tripStats?.endTime || !user?.id) {
       return
     }
 
-    if (!summary) {
-      console.log('🗄️ Drive save skipped: no summary')
-      return
-    }
-
-    if (!tripStats?.startTime || !tripStats?.endTime) {
-      console.log('🗄️ Drive save skipped: missing start/end time')
-      return
-    }
-
-    if (!user?.id) {
-      console.log('🗄️ Drive save skipped: user not authenticated')
-      return
-    }
-
+    // Mark as attempted FIRST to prevent any re-runs
     saveAttemptedRef.current = true
-    console.log('🗄️ Attempting to save drive...')
 
     const saveDrive = async () => {
       try {
@@ -143,11 +119,8 @@ export default function TripSummary() {
           zoneBreakdown,
         }
 
-        console.log('🗄️ Saving drive with data:', driveData)
-
         const result = await saveDriveLog(driveData)
-
-        console.log('🗄️ Drive saved successfully:', result)
+        console.log('🗄️ Drive saved successfully:', result?.id || 'ok')
         setDriveSaved(true)
         setTimeout(() => setDriveSaved(false), 2000)
       } catch (error) {
