@@ -4,6 +4,15 @@ import { persist } from 'zustand/middleware'
 const useStore = create(
   persist(
     (set, get) => ({
+      // ========== Auth State (NOT persisted - comes from Supabase session) ==========
+      user: null,
+      profile: null,
+      isAuthenticated: false,
+      setUser: (user) => set({ user }),
+      setProfile: (profile) => set({ profile }),
+      setIsAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+      clearAuth: () => set({ user: null, profile: null, isAuthenticated: false }),
+
       // Theme state - persisted at top level (affects entire app)
       theme: 'dark',
       setTheme: (theme) => set({ theme }),

@@ -1,17 +1,37 @@
 // Profile Tab - Night Stage Design
 // Logbook stats, badges, settings with premium dark aesthetic
 
-import { useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
+import useStore from '../../store'
+import { signOut } from '../../services/authService'
+import { updateProfile } from '../../services/authService'
 import { colors, fonts, transitions } from '../../styles/theme'
 
 export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = [] }) {
+  // Get profile and user from store
+  const profile = useStore((state) => state.profile)
+  const user = useStore((state) => state.user)
+  const setProfile = useStore((state) => state.setProfile)
+
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false)
+  const [editDisplayName, setEditDisplayName] = useState('')
+  const [editCar, setEditCar] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isSigningOut, setIsSigningOut] = useState(false)
+
+  // Get display values from profile
+  const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Driver'
+  const car = profile?.car || ''
+  const avatarInitial = displayName.charAt(0).toUpperCase()
+
   // Use provided stats or show zeros honestly
   const stats = logbookStats || {
     rank: 'Rookie',
-    totalMiles: 0,
+    totalMiles: profile?.total_miles || 0,
     nextRank: 'Road Scout',
     nextRankMiles: 100,
-    routeCount: 0,
+    routeCount: profile?.total_drives || 0,
     totalCurves: 0,
     weekMiles: 0,
     weekChange: null,
@@ -20,6 +40,55 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
   const hasData = stats.routeCount > 0
   const progressPercent = stats.nextRankMiles > 0 ? (stats.totalMiles / stats.nextRankMiles) * 100 : 0
   const milesRemaining = Math.max(0, stats.nextRankMiles - stats.totalMiles)
+
+  // Start editing
+  const handleStartEdit = () => {
+    setEditDisplayName(displayName)
+    setEditCar(car)
+    setIsEditing(true)
+  }
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+    setEditDisplayName('')
+    setEditCar('')
+  }
+
+  // Save profile changes
+  const handleSaveProfile = async () => {
+    if (!user?.id) return
+
+    setIsSaving(true)
+    try {
+      const updates = {
+        display_name: editDisplayName.trim() || displayName,
+        car: editCar.trim(),
+      }
+
+      const updatedProfile = await updateProfile(user.id, updates)
+      if (updatedProfile) {
+        setProfile(updatedProfile)
+      }
+      setIsEditing(false)
+    } catch (error) {
+      console.error('🔐 Failed to update profile:', error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Sign out
+  const handleSignOut = async () => {
+    setIsSigningOut(true)
+    try {
+      await signOut()
+      // Auth state change will handle the rest
+    } catch (error) {
+      console.error('🔐 Failed to sign out:', error)
+      setIsSigningOut(false)
+    }
+  }
 
   // Compute earned badges based on actual achievements
   const earnedBadges = useMemo(() => {
@@ -159,6 +228,20 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
     padding: '16px',
   }
 
+  // Input style
+  const inputStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.03)',
+    color: colors.textPrimary,
+    fontFamily: fonts.mono,
+    fontSize: '14px',
+    outline: 'none',
+    boxSizing: 'border-box',
+  }
+
   return (
     <div style={{ padding: '16px 16px 100px', paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)' }}>
       {/* Profile Header */}
@@ -185,10 +268,10 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
             fontWeight: 600,
             color: colors.accent,
           }}>
-            A
+            {avatarInitial}
           </span>
         </div>
-        <div>
+        <div style={{ flex: 1 }}>
           <h2 style={{
             fontFamily: fonts.primary,
             fontSize: '22px',
@@ -196,8 +279,18 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
             color: colors.textPrimary,
             margin: 0,
           }}>
-            Anton
+            {displayName}
           </h2>
+          {car && (
+            <p style={{
+              fontFamily: fonts.mono,
+              fontSize: '11px',
+              color: 'rgba(255,255,255,0.5)',
+              margin: '4px 0 0',
+            }}>
+              {car}
+            </p>
+          )}
           <p style={{
             fontFamily: fonts.mono,
             fontSize: '10px',
@@ -210,7 +303,131 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
             {stats.rank}
           </p>
         </div>
+        {!isEditing && (
+          <button
+            onClick={handleStartEdit}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'rgba(255,255,255,0.03)',
+              color: 'rgba(255,255,255,0.6)',
+              fontFamily: fonts.mono,
+              fontSize: '11px',
+              cursor: 'pointer',
+            }}
+          >
+            Edit
+          </button>
+        )}
       </div>
+
+      {/* Edit Profile Section */}
+      {isEditing && (
+        <div style={{ ...glassCard, marginBottom: '16px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '16px',
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={colors.accent} strokeWidth="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            <span style={{
+              fontFamily: fonts.primary,
+              fontSize: '14px',
+              fontWeight: 500,
+              color: colors.textPrimary,
+            }}>
+              Edit Profile
+            </span>
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{
+              fontFamily: fonts.mono,
+              fontSize: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'rgba(255,255,255,0.4)',
+              display: 'block',
+              marginBottom: '6px',
+            }}>
+              Display Name
+            </label>
+            <input
+              type="text"
+              value={editDisplayName}
+              onChange={(e) => setEditDisplayName(e.target.value)}
+              placeholder="Your name"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{
+              fontFamily: fonts.mono,
+              fontSize: '10px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              color: 'rgba(255,255,255,0.4)',
+              display: 'block',
+              marginBottom: '6px',
+            }}>
+              Car
+            </label>
+            <input
+              type="text"
+              value={editCar}
+              onChange={(e) => setEditCar(e.target.value)}
+              placeholder="e.g. Miata ND2"
+              style={inputStyle}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={handleCancelEdit}
+              disabled={isSaving}
+              style={{
+                flex: 1,
+                padding: '12px',
+                borderRadius: '10px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'transparent',
+                color: 'rgba(255,255,255,0.6)',
+                fontFamily: fonts.primary,
+                fontSize: '14px',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveProfile}
+              disabled={isSaving}
+              style={{
+                flex: 1,
+                padding: '12px',
+                borderRadius: '10px',
+                border: 'none',
+                background: colors.accent,
+                color: '#0A0A0F',
+                fontFamily: fonts.primary,
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                opacity: isSaving ? 0.7 : 1,
+              }}
+            >
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Logbook Card */}
       <div style={{ ...glassCard, marginBottom: '16px' }}>
@@ -577,6 +794,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
           justifyContent: 'space-between',
           cursor: 'pointer',
           transition: transitions.smooth,
+          marginBottom: '12px',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -609,6 +827,45 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
         >
           <polyline points="9 18 15 12 9 6"/>
         </svg>
+      </button>
+
+      {/* Sign Out Button */}
+      <button
+        onClick={handleSignOut}
+        disabled={isSigningOut}
+        style={{
+          ...glassCard,
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '10px',
+          cursor: 'pointer',
+          transition: transitions.smooth,
+          border: '1px solid rgba(239,68,68,0.2)',
+          opacity: isSigningOut ? 0.7 : 1,
+        }}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#EF4444"
+          strokeWidth="2"
+        >
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span style={{
+          fontFamily: fonts.primary,
+          fontSize: '14px',
+          fontWeight: 500,
+          color: '#EF4444',
+        }}>
+          {isSigningOut ? 'Signing out...' : 'Sign Out'}
+        </span>
       </button>
     </div>
   )

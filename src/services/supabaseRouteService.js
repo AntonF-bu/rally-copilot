@@ -5,12 +5,13 @@ import { supabase } from './supabase'
 
 /**
  * Maps a flat DB route record to the nested format the app expects
- * DB: { start_lat, start_lng, start_label, end_lat, end_lng, end_label, ... }
- * App: { start: { lat, lng, label }, end: { lat, lng, label }, ... }
+ * DB: { start_lat, start_lng, start_label, end_lat, end_lng, end_label, slug, distance_miles, duration_minutes, ... }
+ * App: { id, start: { lat, lng, label }, end: { lat, lng, label }, distance, duration, ... }
  */
 function mapDbRouteToAppRoute(dbRoute) {
   return {
-    id: dbRoute.id,
+    // Use slug as the app's id (for consistency with DISCOVERY_ROUTES)
+    id: dbRoute.slug || dbRoute.id,
     name: dbRoute.name,
     region: dbRoute.region,
     start: {
@@ -25,12 +26,14 @@ function mapDbRouteToAppRoute(dbRoute) {
     },
     waypoints: dbRoute.waypoints || [],
     geometry: dbRoute.geometry || null,
-    distance: dbRoute.distance,
-    duration: dbRoute.duration,
+    // Map back to app field names
+    distance: dbRoute.distance_miles,
+    duration: dbRoute.duration_minutes,
     difficulty: dbRoute.difficulty,
     tags: dbRoute.tags || [],
     description: dbRoute.description,
-    // Include any additional fields that might come from DB
+    // Include DB metadata
+    dbId: dbRoute.id, // Keep the actual UUID for DB operations
     created_at: dbRoute.created_at,
     updated_at: dbRoute.updated_at,
     is_published: dbRoute.is_published,
@@ -39,12 +42,12 @@ function mapDbRouteToAppRoute(dbRoute) {
 
 /**
  * Maps app route format to flat DB schema for insertion
- * App: { start: { lat, lng, label }, end: { lat, lng, label }, ... }
- * DB: { start_lat, start_lng, start_label, end_lat, end_lng, end_label, ... }
+ * App: { start: { lat, lng, label }, end: { lat, lng, label }, distance, duration, ... }
+ * DB: { start_lat, start_lng, start_label, end_lat, end_lng, end_label, distance_miles, duration_minutes, ... }
  */
 function mapAppRouteToDbRoute(appRoute) {
   return {
-    id: appRoute.id,
+    slug: appRoute.id,
     name: appRoute.name,
     region: appRoute.region,
     start_lat: appRoute.start.lat,
@@ -55,8 +58,8 @@ function mapAppRouteToDbRoute(appRoute) {
     end_label: appRoute.end.label,
     waypoints: appRoute.waypoints || [],
     geometry: appRoute.geometry || null,
-    distance: appRoute.distance,
-    duration: appRoute.duration,
+    distance_miles: appRoute.distance,
+    duration_minutes: appRoute.duration,
     difficulty: appRoute.difficulty,
     tags: appRoute.tags || [],
     description: appRoute.description,
@@ -94,17 +97,29 @@ export async function fetchPublishedRoutes() {
 }
 
 /**
- * Fetches a single route by ID
+ * Fetches a single route by slug or ID
  */
 export async function fetchRouteById(id) {
   console.log(`🗄️ Fetching route by ID: ${id}`)
 
   try {
-    const { data, error } = await supabase
+    // Try to fetch by slug first (app-friendly id)
+    let { data, error } = await supabase
       .from('routes')
       .select('*')
-      .eq('id', id)
+      .eq('slug', id)
       .single()
+
+    // If not found by slug, try by UUID
+    if (error && error.code === 'PGRST116') {
+      const result = await supabase
+        .from('routes')
+        .select('*')
+        .eq('id', id)
+        .single()
+      data = result.data
+      error = result.error
+    }
 
     if (error) {
       console.error('🗄️ Supabase fetch error:', error.message)
@@ -165,7 +180,7 @@ export async function seedRoutesFromDiscovery(discoveryRoutes) {
     // Upsert to handle both insert and update cases
     const { data, error } = await supabase
       .from('routes')
-      .upsert(dbRoutes, { onConflict: 'id' })
+      .upsert(dbRoutes, { onConflict: 'slug' })
       .select()
 
     if (error) {
