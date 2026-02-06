@@ -3,7 +3,7 @@
 /**
  * Seed Routes Script
  *
- * Seeds the 10 curated discovery routes into Supabase.
+ * Seeds the 10 curated New England routes into Supabase.
  * First DELETES all existing rows, then inserts fresh data.
  * Run with: node src/scripts/seedRoutes.js
  *
@@ -14,11 +14,17 @@ import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
 import { DISCOVERY_ROUTES } from '../data/discoveryRoutes.js'
 
-// Get credentials from environment or use fallback
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://zptvbgbkccubrclruzsl.supabase.co'
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ucI8kKuOmzxy9lDtJsYF0g_Xhift7Qu'
+// Get credentials from environment
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY
 
-console.log('🗄️ Rally Co-Pilot Route Seeder')
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('🗄️ ERROR: Missing Supabase credentials in .env file')
+  console.error('🗄️ Required: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
+  process.exit(1)
+}
+
+console.log('🗄️ Tramo Route Seeder')
 console.log('================================')
 console.log(`🗄️ Supabase URL: ${SUPABASE_URL}`)
 console.log(`🗄️ Routes to seed: ${DISCOVERY_ROUTES.length}`)
@@ -48,13 +54,16 @@ function mapAppRouteToDbRoute(appRoute) {
     end_label: appRoute.end.label,
     // Store waypoints as JSONB
     waypoints: appRoute.waypoints || [],
-    // Route metadata - note field name changes
+    // Route metadata
     distance_miles: appRoute.distance,
     duration_minutes: appRoute.duration,
     difficulty: appRoute.difficulty,
     // Tags as postgres text array
     tags: appRoute.tags || [],
     description: appRoute.description,
+    // Additional route data
+    curve_count: appRoute.curveCount || null,
+    elevation_gain: appRoute.elevationGain || null,
     // Publishing flag
     is_published: true,
   }
@@ -84,43 +93,46 @@ async function deleteAllRoutes() {
 
 async function seedRoutes() {
   console.log('🗄️ Inserting new routes...')
+  console.log('')
 
-  try {
-    // Map all routes to DB format
-    const dbRoutes = DISCOVERY_ROUTES.map(mapAppRouteToDbRoute)
+  const results = { success: [], failed: [] }
 
-    console.log('🗄️ Routes to insert:')
-    dbRoutes.forEach((route, i) => {
-      console.log(`   ${i + 1}. ${route.name} (${route.region}) - ${route.distance_miles} mi`)
-    })
-    console.log('')
+  for (const route of DISCOVERY_ROUTES) {
+    const dbRoute = mapAppRouteToDbRoute(route)
 
-    // Insert all routes
-    const { data, error } = await supabase
-      .from('routes')
-      .insert(dbRoutes)
-      .select()
+    try {
+      const { data, error } = await supabase
+        .from('routes')
+        .insert(dbRoute)
+        .select()
+        .single()
 
-    if (error) {
-      console.error('🗄️ Insert error:', error.message)
-      console.error('🗄️ Error details:', error)
-      throw error
+      if (error) {
+        console.error(`🗄️ ❌ FAILED: ${route.name}`)
+        console.error(`   Error: ${error.message}`)
+        results.failed.push({ name: route.name, error: error.message })
+      } else {
+        console.log(`🗄️ ✓ SUCCESS: ${route.name} (${route.region})`)
+        results.success.push({ name: route.name, id: data.id })
+      }
+    } catch (error) {
+      console.error(`🗄️ ❌ FAILED: ${route.name}`)
+      console.error(`   Error: ${error.message}`)
+      results.failed.push({ name: route.name, error: error.message })
     }
-
-    console.log('')
-    console.log('🗄️ Successfully seeded routes!')
-    console.log(`🗄️ Total routes inserted: ${data?.length || 0}`)
-    console.log('')
-    console.log('🗄️ Inserted routes:')
-    data?.forEach((route, i) => {
-      console.log(`   ${i + 1}. ${route.name} - ${route.slug}`)
-    })
-
-    return data
-  } catch (error) {
-    console.error('🗄️ Failed to seed routes:', error.message)
-    throw error
   }
+
+  console.log('')
+  console.log('🗄️ ================================')
+  console.log(`🗄️ Results: ${results.success.length} succeeded, ${results.failed.length} failed`)
+
+  if (results.failed.length > 0) {
+    console.log('')
+    console.log('🗄️ Failed routes:')
+    results.failed.forEach(f => console.log(`   - ${f.name}: ${f.error}`))
+  }
+
+  return results
 }
 
 // Verify connection first
@@ -159,10 +171,15 @@ async function main() {
   await deleteAllRoutes()
 
   // Seed fresh routes
-  await seedRoutes()
+  const results = await seedRoutes()
 
   console.log('')
-  console.log('🗄️ Done!')
+  if (results.failed.length === 0) {
+    console.log('🗄️ Done! All routes seeded successfully.')
+  } else {
+    console.log('🗄️ Done with errors. Check failed routes above.')
+    process.exit(1)
+  }
 }
 
 main().catch(err => {

@@ -32,6 +32,9 @@ function mapDbRouteToAppRoute(dbRoute) {
     difficulty: dbRoute.difficulty,
     tags: dbRoute.tags || [],
     description: dbRoute.description,
+    // Additional route data
+    curveCount: dbRoute.curve_count || null,
+    elevationGain: dbRoute.elevation_gain || null,
     // Include DB metadata
     dbId: dbRoute.id, // Keep the actual UUID for DB operations
     created_at: dbRoute.created_at,

@@ -3,13 +3,14 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import useStore from '../store'
-import { getSession, onAuthStateChange, getProfile } from '../services/authService'
+import { getSession, onAuthStateChange, getProfile, createProfile } from '../services/authService'
 
 /**
  * Hook that manages authentication state
  * - Checks for existing session on mount
  * - Subscribes to auth state changes
  * - Fetches and updates user profile
+ * - Auto-creates profile if one doesn't exist
  */
 export function useAuth() {
   const [isLoading, setIsLoading] = useState(true)
@@ -22,20 +23,63 @@ export function useAuth() {
   const setIsAuthenticated = useStore((state) => state.setIsAuthenticated)
   const clearAuth = useStore((state) => state.clearAuth)
 
-  // Fetch profile for a user
-  const fetchProfile = useCallback(async (userId) => {
+  // Fetch profile for a user, auto-create if doesn't exist
+  const fetchProfile = useCallback(async (userId, userEmail, userMetadata = {}) => {
     try {
       const profileData = await getProfile(userId)
+
       if (profileData) {
-        console.log('🔐 useAuth: Profile loaded:', profileData.display_name || profileData.username)
+        console.log('🔐 useAuth: Profile loaded:', profileData.display_name || profileData.email)
         setProfile(profileData)
-      } else {
-        console.log('🔐 useAuth: No profile found, user may need to complete setup')
+        return profileData
+      }
+
+      // No profile found - auto-create one
+      console.log('🔐 useAuth: No profile found, creating one...')
+
+      // Extract display name from user metadata or email
+      const displayName = userMetadata?.full_name ||
+                          userMetadata?.name ||
+                          userMetadata?.display_name ||
+                          (userEmail ? userEmail.split('@')[0] : 'Driver')
+
+      // Extract avatar from metadata (Google, etc.)
+      const avatarUrl = userMetadata?.avatar_url ||
+                        userMetadata?.picture ||
+                        null
+
+      try {
+        const newProfile = await createProfile(userId, {
+          email: userEmail,
+          display_name: displayName,
+          avatar_url: avatarUrl,
+        })
+
+        console.log('🔐 useAuth: Profile auto-created:', newProfile.display_name)
+        setProfile(newProfile)
+        return newProfile
+      } catch (createError) {
+        // Profile creation might fail if there's a race condition
+        // (e.g., database trigger already created it)
+        console.warn('🔐 useAuth: Profile creation failed, retrying fetch:', createError.message)
+
+        // Try fetching again in case it was created by a trigger
+        const retryProfile = await getProfile(userId)
+        if (retryProfile) {
+          console.log('🔐 useAuth: Profile found on retry:', retryProfile.display_name)
+          setProfile(retryProfile)
+          return retryProfile
+        }
+
+        // If still no profile, set to null
+        console.error('🔐 useAuth: Could not create or fetch profile')
         setProfile(null)
+        return null
       }
     } catch (error) {
       console.error('🔐 useAuth: Failed to fetch profile:', error)
       setProfile(null)
+      return null
     }
   }, [setProfile])
 
@@ -46,7 +90,11 @@ export function useAuth() {
     if (session?.user) {
       setUser(session.user)
       setIsAuthenticated(true)
-      await fetchProfile(session.user.id)
+      await fetchProfile(
+        session.user.id,
+        session.user.email,
+        session.user.user_metadata
+      )
     } else {
       clearAuth()
     }
@@ -70,7 +118,11 @@ export function useAuth() {
           console.log('🔐 useAuth: Existing session found:', session.user.email)
           setUser(session.user)
           setIsAuthenticated(true)
-          await fetchProfile(session.user.id)
+          await fetchProfile(
+            session.user.id,
+            session.user.email,
+            session.user.user_metadata
+          )
         } else {
           console.log('🔐 useAuth: No existing session')
           clearAuth()
@@ -99,7 +151,7 @@ export function useAuth() {
   // Refresh profile data
   const refreshProfile = useCallback(async () => {
     if (user?.id) {
-      await fetchProfile(user.id)
+      await fetchProfile(user.id, user.email, user.user_metadata)
     }
   }, [user, fetchProfile])
 
