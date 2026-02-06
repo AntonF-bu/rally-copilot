@@ -180,6 +180,17 @@ export function HomeTab({
     return { d, start: points[0], end: points[points.length - 1] }
   }
 
+  // Show RouteDetailPage when a discovery route is selected (full screen replacement)
+  if (selectedDiscoveryRoute) {
+    return (
+      <RouteDetailPage
+        route={selectedDiscoveryRoute}
+        onBack={() => setSelectedDiscoveryRoute(null)}
+        onStartDrive={handleStartDiscoveryDrive}
+      />
+    )
+  }
+
   return (
     <div className="ns-container">
       {/* Atmospheric backgrounds now in RouteSelector app shell */}
@@ -619,15 +630,6 @@ export function HomeTab({
           formatDist={formatDist}
           accentColor="#E8622C"
           isFavorites
-        />
-      )}
-
-      {/* Discovery Route Preview - uses same RouteDetailPage as DiscoverTab */}
-      {selectedDiscoveryRoute && (
-        <RouteDetailPage
-          route={selectedDiscoveryRoute}
-          onBack={() => setSelectedDiscoveryRoute(null)}
-          onStartDrive={handleStartDiscoveryDrive}
         />
       )}
     </div>
