@@ -3,7 +3,8 @@
 /**
  * Seed Routes Script
  *
- * Seeds the 10 existing discovery routes from discoveryRoutes.js into Supabase.
+ * Seeds the 10 curated discovery routes into Supabase.
+ * First DELETES all existing rows, then inserts fresh data.
  * Run with: node src/scripts/seedRoutes.js
  *
  * Make sure .env file exists with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
@@ -28,67 +29,97 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 /**
  * Maps app route format to flat DB schema for insertion
+ * App format: { start: { lat, lng, label }, end: { lat, lng, label }, ... }
+ * DB format: { start_lat, start_lng, start_label, end_lat, end_lng, end_label, ... }
  */
 function mapAppRouteToDbRoute(appRoute) {
   return {
-    id: appRoute.id,
+    // Use route.id as slug identifier (not primary key - let Supabase generate UUID)
+    slug: appRoute.id,
     name: appRoute.name,
     region: appRoute.region,
+    // Flatten start coordinates
     start_lat: appRoute.start.lat,
     start_lng: appRoute.start.lng,
     start_label: appRoute.start.label,
+    // Flatten end coordinates
     end_lat: appRoute.end.lat,
     end_lng: appRoute.end.lng,
     end_label: appRoute.end.label,
+    // Store waypoints as JSONB
     waypoints: appRoute.waypoints || [],
-    geometry: appRoute.geometry || null,
-    distance: appRoute.distance,
-    duration: appRoute.duration,
+    // Route metadata - note field name changes
+    distance_miles: appRoute.distance,
+    duration_minutes: appRoute.duration,
     difficulty: appRoute.difficulty,
+    // Tags as postgres text array
     tags: appRoute.tags || [],
     description: appRoute.description,
+    // Publishing flag
     is_published: true,
   }
 }
 
+async function deleteAllRoutes() {
+  console.log('🗄️ Deleting all existing routes...')
+
+  try {
+    const { error } = await supabase
+      .from('routes')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000') // Delete all rows
+
+    if (error) {
+      console.error('🗄️ Delete error:', error.message)
+      throw error
+    }
+
+    console.log('🗄️ All existing routes deleted')
+    return true
+  } catch (error) {
+    console.error('🗄️ Failed to delete routes:', error.message)
+    throw error
+  }
+}
+
 async function seedRoutes() {
-  console.log('🗄️ Starting route seed...')
+  console.log('🗄️ Inserting new routes...')
 
   try {
     // Map all routes to DB format
     const dbRoutes = DISCOVERY_ROUTES.map(mapAppRouteToDbRoute)
 
-    console.log('🗄️ Mapped routes to DB format:')
+    console.log('🗄️ Routes to insert:')
     dbRoutes.forEach((route, i) => {
-      console.log(`   ${i + 1}. ${route.name} (${route.region})`)
+      console.log(`   ${i + 1}. ${route.name} (${route.region}) - ${route.distance_miles} mi`)
     })
     console.log('')
 
-    // Upsert to handle both insert and update cases
-    console.log('🗄️ Upserting routes to Supabase...')
+    // Insert all routes
     const { data, error } = await supabase
       .from('routes')
-      .upsert(dbRoutes, { onConflict: 'id' })
+      .insert(dbRoutes)
       .select()
 
     if (error) {
-      console.error('🗄️ Supabase error:', error.message)
+      console.error('🗄️ Insert error:', error.message)
       console.error('🗄️ Error details:', error)
-      process.exit(1)
+      throw error
     }
 
     console.log('')
     console.log('🗄️ Successfully seeded routes!')
-    console.log(`🗄️ Total routes in response: ${data?.length || 0}`)
+    console.log(`🗄️ Total routes inserted: ${data?.length || 0}`)
     console.log('')
-    console.log('🗄️ Seeded routes:')
+    console.log('🗄️ Inserted routes:')
     data?.forEach((route, i) => {
-      console.log(`   ${i + 1}. ${route.name} - ${route.id}`)
+      console.log(`   ${i + 1}. ${route.name} - ${route.slug}`)
     })
 
+    return data
   } catch (error) {
     console.error('🗄️ Failed to seed routes:', error.message)
-    process.exit(1)
+    throw error
   }
 }
 
@@ -124,10 +155,17 @@ async function main() {
     process.exit(1)
   }
 
+  // Delete existing routes first
+  await deleteAllRoutes()
+
+  // Seed fresh routes
   await seedRoutes()
 
   console.log('')
   console.log('🗄️ Done!')
 }
 
-main()
+main().catch(err => {
+  console.error('🗄️ Fatal error:', err)
+  process.exit(1)
+})

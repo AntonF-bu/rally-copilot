@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useLayoutEffect } from 'react'
 import useStore from './store'
+import { useAuth } from './hooks/useAuth'
+import AuthScreen from './components/auth/AuthScreen'
 
 // Theme application hook - runs before render to prevent flash
 function useThemeSync() {
@@ -56,6 +58,9 @@ const CHARACTER_TO_MODE = {
 export default function App() {
   // Apply theme to document root
   useThemeSync()
+
+  // Auth state
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth()
 
   const { speak, initAudio } = useSpeech()
 
@@ -509,6 +514,45 @@ export default function App() {
   }
 
   // Render
+
+  // Auth loading state
+  if (isAuthLoading) {
+    return (
+      <div style={{
+        ...mobileContainerStyle,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '16px',
+        }}>
+          <div style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            border: '3px solid rgba(249,115,22,0.2)',
+            borderTopColor: '#F97316',
+            animation: 'spin 1s linear infinite',
+          }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    )
+  }
+
+  // Show auth screen if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div style={mobileContainerStyle}>
+        <AuthScreen />
+      </div>
+    )
+  }
+
   if (showRouteSelector) {
     return (
       <div style={mobileContainerStyle}>

@@ -175,6 +175,11 @@ export const VIBE_FILTERS = [
   { id: 'backroads', label: 'Backroads' },
   { id: 'night', label: 'Night' },
   { id: 'twisty', label: 'Twisty' },
+  { id: 'coastal', label: 'Coastal' },
+  { id: 'mountain', label: 'Mountain' },
+  { id: 'forest', label: 'Forest' },
+  { id: 'reservoir', label: 'Reservoir' },
+  { id: 'covered-bridges', label: 'Covered Bridges' },
 ]
 
 export const REGION_FILTERS = [
@@ -182,4 +187,10 @@ export const REGION_FILTERS = [
   { id: 'north-shore', label: 'North Shore' },
   { id: 'south-shore', label: 'South Shore' },
   { id: 'western-ma', label: 'Western MA' },
+  { id: 'cape-cod', label: 'Cape Cod' },
+  { id: 'vermont', label: 'Vermont' },
+  { id: 'new-hampshire', label: 'New Hampshire' },
+  { id: 'maine', label: 'Maine' },
+  { id: 'connecticut', label: 'Connecticut' },
+  { id: 'rhode-island', label: 'Rhode Island' },
 ]

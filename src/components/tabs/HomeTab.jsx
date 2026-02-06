@@ -2,6 +2,7 @@
 // Premium dark aesthetic with atmospheric backgrounds and animated route visualization
 
 import { useState, useEffect, useMemo } from 'react'
+import useStore from '../../store'
 import { geocodeAddress } from '../../services/routeService'
 import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
 import { RouteDetailView } from '../discover/RouteDetailView'
@@ -27,6 +28,10 @@ export function HomeTab({
   const [showRecentList, setShowRecentList] = useState(false)
   const [showFavoritesList, setShowFavoritesList] = useState(false)
   const [selectedDiscoveryRoute, setSelectedDiscoveryRoute] = useState(null)
+
+  // Get profile from store for personalized greeting
+  const profile = useStore((state) => state.profile)
+  const displayName = profile?.display_name || 'driver'
 
   // Search state
   const [destination, setDestination] = useState('')
@@ -184,7 +189,7 @@ export function HomeTab({
         {/* Top Bar */}
         <div className="ns-topbar ns-d1">
           <div className="ns-topbar-left">
-            <div className="ns-avatar">A</div>
+            <div className="ns-avatar">{displayName.charAt(0).toUpperCase()}</div>
             <div className="ns-brand">
               <span className="ns-brand-name">Rally Co-Pilot</span>
               <div className="ns-location">
@@ -206,7 +211,7 @@ export function HomeTab({
         {/* Greeting */}
         <div className="ns-greeting ns-d2">
           <h1 className="ns-greeting-text">
-            {greeting}, <strong>Anton</strong>
+            Hey, <strong>{displayName}</strong>
           </h1>
           <div className="ns-weather">
             <svg className="ns-weather-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
