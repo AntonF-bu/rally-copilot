@@ -1,17 +1,20 @@
-// Discover Tab - Night Stage Design
-// Browse and save curated routes with premium dark aesthetic
+// Discover Tab - Tramo Brand Identity
+// Browse and save curated routes with proper navigation flow
 
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import useStore from '../../store'
 import { DISCOVERY_ROUTES, VIBE_FILTERS, REGION_FILTERS } from '../../data/discoveryRoutes'
 import { fetchPublishedRoutes } from '../../services/supabaseRouteService'
 import { DiscoverGridCard } from '../discover/DiscoverGridCard'
-import { colors, fonts, transitions } from '../../styles/theme'
+import { RouteDetailPage } from '../discover/RouteDetailPage'
 
 export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
+
+  // Route detail page state
+  const [selectedRoute, setSelectedRoute] = useState(null)
 
   // Supabase route fetching state
   const [routes, setRoutes] = useState(DISCOVERY_ROUTES) // Start with fallback
@@ -20,6 +23,11 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
   // Get favorites from store
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
+
+  // Store actions for starting drive
+  const initRouteFromCoordinates = useStore((state) => state.initRouteFromCoordinates)
+  const setCurrentRoute = useStore((state) => state.setCurrentRoute)
+  const setActiveRoute = useStore((state) => state.setActiveRoute)
 
   // Fetch routes from Supabase on mount
   const loadRoutes = useCallback(async () => {
@@ -98,9 +106,33 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
     return favoriteRoutes.some((fav) => fav.discoveryId === routeId || fav.id === routeId)
   }
 
+  // Handle route card tap - open detail page
   const handleSelectRoute = (route) => {
-    if (onStartRoute) {
-      onStartRoute(route)
+    setSelectedRoute(route)
+  }
+
+  // Handle back from detail page
+  const handleBackFromDetail = () => {
+    setSelectedRoute(null)
+  }
+
+  // Handle Start Drive from detail page
+  const handleStartDrive = async (routeObject) => {
+    console.log('🗄️ DiscoverTab: Starting drive with route:', routeObject.name)
+
+    // If we have route geometry, initialize directly
+    if (routeObject.geometry) {
+      // Set the route in store
+      setCurrentRoute(routeObject)
+      setActiveRoute(routeObject)
+
+      // Switch to Home tab (drive mode)
+      if (onTabChange) {
+        onTabChange('home')
+      }
+    } else if (onStartRoute) {
+      // Fallback to the original handler
+      onStartRoute(routeObject)
     }
   }
 
@@ -112,49 +144,34 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
 
   const hasActiveFilters = searchQuery || selectedVibes.length > 0 || selectedRegions.length > 0
 
+  // Show RouteDetailPage when a route is selected
+  if (selectedRoute) {
+    return (
+      <RouteDetailPage
+        route={selectedRoute}
+        onBack={handleBackFromDetail}
+        onStartDrive={handleStartDrive}
+      />
+    )
+  }
+
   return (
-    <div style={{ minHeight: '100%', position: 'relative' }}>
+    <div style={styles.container}>
       {/* Header */}
-      <div style={{ padding: '16px 16px 16px', paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)' }}>
-        <h1 style={{
-          fontFamily: fonts.primary,
-          fontSize: '28px',
-          fontWeight: 600,
-          color: colors.textPrimary,
-          margin: 0,
-          marginBottom: '4px',
-        }}>
-          Discover
-        </h1>
-        <p style={{
-          fontFamily: fonts.primary,
-          fontSize: '13px',
-          color: colors.textDim || 'rgba(255,255,255,0.5)',
-          margin: 0,
-        }}>
-          Browse curated routes near you
-        </p>
+      <div style={styles.header}>
+        <h1 style={styles.title}>Discover</h1>
+        <p style={styles.subtitle}>Browse curated routes near you</p>
       </div>
 
       {/* Search Bar */}
-      <div style={{ padding: '0 16px 12px' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            padding: '12px 14px',
-            background: 'rgba(255,255,255,0.03)',
-            borderRadius: '12px',
-            border: '1px solid rgba(255,255,255,0.06)',
-          }}
-        >
+      <div style={styles.searchSection}>
+        <div style={styles.searchBar}>
           <svg
             width="18"
             height="18"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="rgba(255,255,255,0.4)"
+            stroke="#666666"
             strokeWidth="2"
           >
             <circle cx="11" cy="11" r="8" />
@@ -165,26 +182,12 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search routes, roads, or areas..."
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              fontFamily: fonts.primary,
-              fontSize: '14px',
-              color: colors.textPrimary,
-            }}
+            style={styles.searchInput}
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: '4px',
-                cursor: 'pointer',
-                color: 'rgba(255,255,255,0.4)',
-              }}
+              style={styles.clearSearchButton}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" />
@@ -195,21 +198,11 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
       </div>
 
       {/* Filter Chips */}
-      <div style={{ padding: '0 16px 16px' }}>
+      <div style={styles.filtersSection}>
         {/* Vibes */}
-        <div style={{ marginBottom: '12px' }}>
-          <p style={{
-            fontFamily: fonts.mono,
-            fontSize: '9px',
-            fontWeight: 500,
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'rgba(255,255,255,0.4)',
-            marginBottom: '8px',
-          }}>
-            Vibes
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={styles.filterGroup}>
+          <p style={styles.filterLabel}>Vibes</p>
+          <div style={styles.chipContainer}>
             {VIBE_FILTERS.map((filter) => {
               const isSelected = selectedVibes.includes(filter.id)
               return (
@@ -217,18 +210,9 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
                   key={filter.id}
                   onClick={() => handleVibeToggle(filter.id)}
                   style={{
-                    padding: '6px 12px',
-                    borderRadius: '20px',
-                    border: 'none',
-                    fontFamily: fonts.mono,
-                    fontSize: '10px',
-                    fontWeight: 500,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    cursor: 'pointer',
-                    transition: transitions.snappy,
-                    background: isSelected ? colors.accent : 'rgba(255,255,255,0.05)',
-                    color: isSelected ? '#111114' : 'rgba(255,255,255,0.6)',
+                    ...styles.chip,
+                    background: isSelected ? '#E8622C' : '#1A1A1A',
+                    color: isSelected ? '#FFFFFF' : '#888888',
                   }}
                 >
                   {filter.label}
@@ -239,19 +223,9 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
         </div>
 
         {/* Regions */}
-        <div>
-          <p style={{
-            fontFamily: fonts.mono,
-            fontSize: '9px',
-            fontWeight: 500,
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'rgba(255,255,255,0.4)',
-            marginBottom: '8px',
-          }}>
-            Region
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        <div style={styles.filterGroup}>
+          <p style={styles.filterLabel}>Region</p>
+          <div style={styles.chipContainer}>
             {REGION_FILTERS.map((filter) => {
               const isSelected = selectedRegions.includes(filter.id)
               return (
@@ -259,18 +233,9 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
                   key={filter.id}
                   onClick={() => handleRegionToggle(filter.id)}
                   style={{
-                    padding: '6px 12px',
-                    borderRadius: '20px',
-                    border: 'none',
-                    fontFamily: fonts.mono,
-                    fontSize: '10px',
-                    fontWeight: 500,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    cursor: 'pointer',
-                    transition: transitions.snappy,
-                    background: isSelected ? colors.accent : 'rgba(255,255,255,0.05)',
-                    color: isSelected ? '#111114' : 'rgba(255,255,255,0.6)',
+                    ...styles.chip,
+                    background: isSelected ? '#E8622C' : '#1A1A1A',
+                    color: isSelected ? '#FFFFFF' : '#888888',
                   }}
                 >
                   {filter.label}
@@ -282,60 +247,26 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
       </div>
 
       {/* Results count + Clear filters */}
-      <div style={{
-        padding: '0 16px 12px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <p style={{
-          fontFamily: fonts.mono,
-          fontSize: '10px',
-          color: 'rgba(255,255,255,0.4)',
-          margin: 0,
-        }}>
+      <div style={styles.resultsRow}>
+        <p style={styles.resultsCount}>
           {filteredRoutes.length} route{filteredRoutes.length !== 1 ? 's' : ''}
           {hasActiveFilters && ' found'}
         </p>
         {hasActiveFilters && (
-          <button
-            onClick={clearFilters}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontFamily: fonts.mono,
-              fontSize: '10px',
-              fontWeight: 500,
-              color: colors.accent,
-              cursor: 'pointer',
-            }}
-          >
+          <button onClick={clearFilters} style={styles.clearFiltersButton}>
             Clear all
           </button>
         )}
       </div>
 
       {/* Route Grid */}
-      <div style={{ padding: '0 16px 100px' }}>
+      <div style={styles.gridContainer}>
         {/* Loading State */}
         {isLoading ? (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '12px',
-          }}>
+          <div style={styles.grid}>
             {/* Skeleton cards */}
             {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                style={{
-                  aspectRatio: '4/3',
-                  borderRadius: '12px',
-                  background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                }}
-              />
+              <div key={i} style={styles.skeletonCard} />
             ))}
             <style>{`
               @keyframes pulse {
@@ -346,14 +277,7 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
           </div>
         ) : fetchError ? (
           /* Error State with Retry */
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '48px 0',
-            textAlign: 'center',
-          }}>
+          <div style={styles.emptyState}>
             <svg
               width="40"
               height="40"
@@ -366,48 +290,15 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
               <circle cx="12" cy="12" r="10" />
               <path d="M12 8v4M12 16h.01" />
             </svg>
-            <p style={{
-              fontFamily: fonts.primary,
-              fontSize: '14px',
-              color: 'rgba(255,255,255,0.5)',
-              margin: 0,
-              marginBottom: '4px',
-            }}>
-              Couldn't load routes from server
-            </p>
-            <p style={{
-              fontFamily: fonts.mono,
-              fontSize: '10px',
-              color: 'rgba(255,255,255,0.3)',
-              margin: 0,
-              marginBottom: '16px',
-            }}>
-              Showing cached routes
-            </p>
-            <button
-              onClick={loadRoutes}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '8px',
-                border: 'none',
-                background: colors.accent,
-                color: '#111114',
-                fontFamily: fonts.mono,
-                fontSize: '11px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
+            <p style={styles.emptyTitle}>Couldn't load routes from server</p>
+            <p style={styles.emptySubtitle}>Showing cached routes</p>
+            <button onClick={loadRoutes} style={styles.retryButton}>
               Retry
             </button>
           </div>
         ) : filteredRoutes.length > 0 ? (
           /* Route Cards */
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '12px',
-          }}>
+          <div style={styles.grid}>
             {filteredRoutes.map((route) => (
               <DiscoverGridCard
                 key={route.id}
@@ -419,57 +310,188 @@ export function DiscoverTab({ onStartRoute, onTabChange }) {
           </div>
         ) : (
           /* Empty State */
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '48px 0',
-            textAlign: 'center',
-          }}>
+          <div style={styles.emptyState}>
             <svg
               width="40"
               height="40"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="rgba(255,255,255,0.2)"
+              stroke="#333333"
               strokeWidth="1.5"
               style={{ marginBottom: '12px' }}
             >
               <circle cx="11" cy="11" r="8" />
               <path d="M21 21l-4.35-4.35" />
             </svg>
-            <p style={{
-              fontFamily: fonts.primary,
-              fontSize: '14px',
-              color: 'rgba(255,255,255,0.5)',
-              margin: 0,
-            }}>
+            <p style={styles.emptyTitle}>
               {routes.length === 0
                 ? 'Routes coming soon to this area'
                 : 'No routes match your search'}
             </p>
             {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                style={{
-                  marginTop: '12px',
-                  background: 'none',
-                  border: 'none',
-                  fontFamily: fonts.mono,
-                  fontSize: '11px',
-                  fontWeight: 500,
-                  color: colors.accent,
-                  cursor: 'pointer',
-                }}
-              >
+              <button onClick={clearFilters} style={styles.clearFiltersButton}>
                 Clear filters
               </button>
             )}
           </div>
         )}
       </div>
-
     </div>
   )
+}
+
+const styles = {
+  container: {
+    minHeight: '100%',
+    position: 'relative',
+    background: '#0A0A0A',
+  },
+  header: {
+    padding: '16px 16px 16px',
+    paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)',
+  },
+  title: {
+    fontFamily: "'Outfit', sans-serif",
+    fontSize: '28px',
+    fontWeight: 300,
+    color: '#FFFFFF',
+    margin: 0,
+    marginBottom: '4px',
+  },
+  subtitle: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    color: '#666666',
+    margin: 0,
+  },
+  searchSection: {
+    padding: '0 16px 12px',
+  },
+  searchBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '12px 14px',
+    background: '#111111',
+    borderRadius: '12px',
+    border: '1px solid #1A1A1A',
+  },
+  searchInput: {
+    flex: 1,
+    background: 'transparent',
+    border: 'none',
+    outline: 'none',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    color: '#FFFFFF',
+  },
+  clearSearchButton: {
+    background: 'none',
+    border: 'none',
+    padding: '4px',
+    cursor: 'pointer',
+    color: '#666666',
+  },
+  filtersSection: {
+    padding: '0 16px 16px',
+  },
+  filterGroup: {
+    marginBottom: '12px',
+  },
+  filterLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    color: '#666666',
+    marginBottom: '8px',
+    margin: 0,
+    marginBottom: '8px',
+  },
+  chipContainer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '6px',
+  },
+  chip: {
+    padding: '6px 12px',
+    borderRadius: '20px',
+    border: 'none',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+  },
+  resultsRow: {
+    padding: '0 16px 12px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  resultsCount: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    margin: 0,
+  },
+  clearFiltersButton: {
+    background: 'none',
+    border: 'none',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    fontWeight: 500,
+    color: '#E8622C',
+    cursor: 'pointer',
+  },
+  gridContainer: {
+    padding: '0 16px 100px',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '12px',
+  },
+  skeletonCard: {
+    aspectRatio: '4/3',
+    borderRadius: '12px',
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    animation: 'pulse 1.5s ease-in-out infinite',
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '48px 0',
+    textAlign: 'center',
+  },
+  emptyTitle: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    color: '#888888',
+    margin: 0,
+  },
+  emptySubtitle: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    margin: 0,
+    marginBottom: '16px',
+  },
+  retryButton: {
+    padding: '8px 16px',
+    borderRadius: '8px',
+    border: 'none',
+    background: '#E8622C',
+    color: '#FFFFFF',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
 }

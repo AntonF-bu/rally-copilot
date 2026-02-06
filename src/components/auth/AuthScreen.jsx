@@ -3,6 +3,7 @@
 
 import { useState } from 'react'
 import { signInWithGoogle, signInWithEmail, signUp } from '../../services/authService'
+import TramoLogo from '../TramoLogo'
 
 export function AuthScreen() {
   const [mode, setMode] = useState('signin') // 'signin' or 'signup'
@@ -96,15 +97,10 @@ export function AuthScreen() {
     pointerEvents: 'none',
   }
 
-  const logoStyle = {
-    width: '64px',
-    height: '64px',
-    borderRadius: '16px',
-    background: 'linear-gradient(135deg, #E8622C 0%, #F0854E 100%)',
+  const logoWrapperStyle = {
     display: 'flex',
-    alignItems: 'center',
     justifyContent: 'center',
-    margin: '0 auto 16px',
+    marginBottom: '16px',
     position: 'relative',
     zIndex: 1,
   }
@@ -245,22 +241,8 @@ export function AuthScreen() {
       {/* Logo and branding */}
       <div style={logoContainerStyle}>
         <div style={logoGlowStyle} />
-        <div style={logoStyle}>
-          <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-            {/* T letterform */}
-            <path
-              d="M12 10H36V16H28V38H20V16H12V10Z"
-              fill="#0A0A0A"
-            />
-            {/* Racing line */}
-            <path
-              d="M8 26C12 22 18 20 24 22C30 24 36 28 42 24"
-              stroke="#0A0A0A"
-              strokeWidth="3"
-              strokeLinecap="round"
-              fill="none"
-            />
-          </svg>
+        <div style={logoWrapperStyle}>
+          <TramoLogo size={72} bgColor="#0A0A0A" />
         </div>
         <h1 style={titleStyle}>Tramo</h1>
         <p style={taglineStyle}>Know the road before you see it</p>

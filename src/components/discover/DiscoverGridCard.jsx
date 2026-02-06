@@ -1,12 +1,20 @@
-// Compact grid card for Discover tab
+// Compact grid card for Discover tab - Tramo Brand Identity
 // 2-column grid layout with map thumbnail
 
 import { useState, useEffect, useMemo } from 'react'
-import { colors } from '../../styles/theme'
+
+// Difficulty color mapping
+const DIFFICULTY_COLORS = {
+  easy: { bg: 'rgba(34, 197, 94, 0.15)', text: '#22c55e' },
+  moderate: { bg: 'rgba(232, 98, 44, 0.15)', text: '#E8622C' },
+  hard: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444' },
+  challenging: { bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444' },
+  expert: { bg: 'rgba(220, 38, 38, 0.15)', text: '#dc2626' },
+}
 
 // Polyline encoder for simplified coordinates
 function encodePolyline(coordinates) {
-  // coordinates are [lng, lat] — polyline expects [lat, lng]
+  // coordinates are [lng, lat] - polyline expects [lat, lng]
   let encoded = ''
   let prevLat = 0, prevLng = 0
 
@@ -80,55 +88,39 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
     const startCoord = `${route.start.lng},${route.start.lat}`
     const endCoord = `${route.end.lng},${route.end.lat}`
-    // Cyan start marker, orange end marker
-    const markers = `pin-s+00d4ff(${startCoord}),pin-s+F97316(${endCoord})`
+    // Green start marker, orange end marker
+    const markers = `pin-s+22c55e(${startCoord}),pin-s+E8622C(${endCoord})`
 
     let pathOverlay = ''
     if (routePath) {
-      // Use orange (#F97316) for visibility on dark map
-      pathOverlay = `path-3+F97316-1(${encodeURIComponent(routePath)}),`
+      // Use orange (#E8622C) for visibility on dark map
+      pathOverlay = `path-3+E8622C-1(${encodeURIComponent(routePath)}),`
     }
 
     // Compact card image with no logo/attribution
     return `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/${pathOverlay}${markers}/auto/300x150@2x?padding=30,30,30,30&logo=false&attribution=false&access_token=${mapboxToken}`
   }, [hasValidToken, route, routePath, mapboxToken])
 
-  // Use theme difficulty colors
-  const diffColor = colors.difficulty[route.difficulty] || colors.difficulty.moderate
+  // Get difficulty colors
+  const diffColor = DIFFICULTY_COLORS[route.difficulty] || DIFFICULTY_COLORS.moderate
 
   return (
     <button
       onClick={() => onSelect?.(route)}
-      className="w-full text-left rounded-xl overflow-hidden transition-all duration-150 active:scale-[0.97]"
       style={{
-        background: colors.bgCard,
-        border: isSaved
-          ? `1px solid ${colors.warmBorder}`
-          : `1px solid ${colors.glassBorder}`,
-        boxShadow: isSaved ? `0 0 15px ${colors.accentGlow}` : 'none',
+        ...styles.card,
+        border: isSaved ? '1px solid rgba(232, 98, 44, 0.3)' : '1px solid #1A1A1A',
+        boxShadow: isSaved ? '0 0 15px rgba(232, 98, 44, 0.1)' : 'none',
       }}
     >
       {/* Map Thumbnail - compact 2:1 aspect ratio */}
-      <div
-        className="w-full relative overflow-hidden"
-        style={{ aspectRatio: '2/1', backgroundColor: '#0a0a1a' }}
-      >
+      <div style={styles.mapContainer}>
         {/* Fallback gradient background - always present behind image */}
-        <div
-          className="absolute inset-0 flex items-center justify-center"
-          style={{
-            background: 'linear-gradient(135deg, rgba(0,212,255,0.1) 0%, rgba(10,10,20,1) 100%)'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-cyan-400" />
-            <div
-              className="w-12 h-0.5"
-              style={{
-                background: 'repeating-linear-gradient(90deg, rgba(0,212,255,0.4) 0px, rgba(0,212,255,0.4) 6px, transparent 6px, transparent 10px)'
-              }}
-            />
-            <div className="w-2 h-2 rounded-full bg-orange-400" />
+        <div style={styles.mapFallback}>
+          <div style={styles.fallbackRoute}>
+            <div style={styles.startDot} />
+            <div style={styles.routeLine} />
+            <div style={styles.endDot} />
           </div>
         </div>
 
@@ -137,7 +129,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
           <img
             src={staticMapUrl}
             alt={`Map of ${route.name}`}
-            className="absolute inset-0 w-full h-full object-cover"
+            style={styles.mapImage}
             loading="lazy"
             onError={() => setImageError(true)}
           />
@@ -145,19 +137,13 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
         {/* Saved heart indicator */}
         {isSaved && (
-          <div
-            className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center"
-            style={{
-              background: colors.accentGlow,
-              backdropFilter: 'blur(4px)',
-            }}
-          >
+          <div style={styles.savedBadge}>
             <svg
               width="10"
               height="10"
               viewBox="0 0 24 24"
-              fill={colors.accent}
-              stroke={colors.accent}
+              fill="#E8622C"
+              stroke="#E8622C"
               strokeWidth="2"
             >
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -167,16 +153,10 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
 
         {/* Difficulty badge on map */}
         <div
-          className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded"
           style={{
-            fontFamily: "'Sora', -apple-system, sans-serif",
-            fontSize: '9px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
+            ...styles.difficultyBadge,
             background: diffColor.bg,
             color: diffColor.text,
-            backdropFilter: 'blur(4px)',
           }}
         >
           {route.difficulty}
@@ -184,30 +164,122 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
       </div>
 
       {/* Content - very compact */}
-      <div className="px-2 py-1.5">
+      <div style={styles.content}>
         {/* Route name - truncate */}
-        <h3
-          className="text-white leading-tight truncate"
-          title={route.name}
-          style={{
-            fontFamily: "'Sora', -apple-system, sans-serif",
-            fontSize: '13px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.03em',
-          }}
-        >
+        <h3 style={styles.routeName} title={route.name}>
           {route.name}
         </h3>
 
         {/* Location + Stats on same line */}
-        <p
-          className="text-[11px] mt-0.5 truncate"
-          style={{ color: 'rgba(255,255,255,0.45)' }}
-        >
-          {route.start.label} → {route.end.label} · {route.distance}mi · {route.duration}m
+        <p style={styles.routeMeta}>
+          {route.start.label} to {route.end.label} - {route.distance}mi - {route.duration}m
         </p>
       </div>
     </button>
   )
+}
+
+const styles = {
+  card: {
+    width: '100%',
+    textAlign: 'left',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    transition: 'all 0.15s ease',
+    background: '#111111',
+    padding: 0,
+    cursor: 'pointer',
+  },
+  mapContainer: {
+    width: '100%',
+    position: 'relative',
+    overflow: 'hidden',
+    aspectRatio: '2/1',
+    backgroundColor: '#0A0A0A',
+  },
+  mapFallback: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'linear-gradient(135deg, rgba(232,98,44,0.05) 0%, #0A0A0A 100%)',
+  },
+  fallbackRoute: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  startDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    background: '#22c55e',
+  },
+  routeLine: {
+    width: '40px',
+    height: '2px',
+    background: 'repeating-linear-gradient(90deg, rgba(232,98,44,0.4) 0px, rgba(232,98,44,0.4) 6px, transparent 6px, transparent 10px)',
+  },
+  endDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    background: '#E8622C',
+  },
+  mapImage: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  savedBadge: {
+    position: 'absolute',
+    top: '6px',
+    right: '6px',
+    width: '20px',
+    height: '20px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(232, 98, 44, 0.2)',
+  },
+  difficultyBadge: {
+    position: 'absolute',
+    bottom: '6px',
+    left: '6px',
+    padding: '3px 8px',
+    borderRadius: '6px',
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  content: {
+    padding: '8px 10px 10px',
+  },
+  routeName: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#FFFFFF',
+    margin: 0,
+    marginBottom: '2px',
+    lineHeight: 1.3,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  routeMeta: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 }
