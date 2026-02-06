@@ -70,7 +70,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   // LOCAL STATE
   // ========================================
   // Mode selection
-  const [showModeSelection, setShowModeSelection] = useState(true)
+  const [showModeSelection, setShowModeSelection] = useState(false)
   const [selectedMode, setSelectedMode] = useState(null)
 
   // UI visibility
@@ -308,6 +308,17 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     onStartNavigation()
   }, [onStartNavigation])
 
+  // START NAVIGATION button handler - shows mode selection first time, then proceeds
+  const handleStartNavClick = useCallback(() => {
+    if (!selectedMode) {
+      // No mode selected yet - show mode selection
+      setShowModeSelection(true)
+    } else {
+      // Mode already selected, proceed to copilot prep
+      handleStart()
+    }
+  }, [selectedMode, handleStart])
+
   // ========================================
   // EFFECTS
   // ========================================
@@ -363,6 +374,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
   // ========================================
   // RENDER STATES
   // ========================================
+  // 1. Loading route data
   if (isLoadingRoute) {
     return (
       <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center">
@@ -371,6 +383,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     )
   }
 
+  // 2. Error
   if (loadError) {
     return (
       <div className="absolute inset-0 bg-[#0a0a0f] flex items-center justify-center flex-col gap-4">
@@ -380,16 +393,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     )
   }
 
-  if (showModeSelection && routeData?.coordinates) {
-    return (
-      <ModeSelection
-        routeData={routeData}
-        onSelect={handleModeSelect}
-        onBack={onBack}
-      />
-    )
-  }
-
+  // 3. Analysis loading (shows progress: analyzing curves, zones, etc.)
   if (isAnalysisLoading) {
     return (
       <LoadingScreen
@@ -404,6 +408,18 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     )
   }
 
+  // 4. Voice selection — ONLY after user clicks Start Navigation
+  if (showModeSelection && routeData?.coordinates) {
+    return (
+      <ModeSelection
+        routeData={routeData}
+        onSelect={handleModeSelect}
+        onBack={onBack}
+      />
+    )
+  }
+
+  // 5. Copilot preparation
   if (isPreparingCopilot) {
     return (
       <CopilotLoader
@@ -414,6 +430,8 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
       />
     )
   }
+
+  // 6. DEFAULT: Show the map preview with route, zones, stats, START NAVIGATION button
 
   // ========================================
   // MAIN RENDER
@@ -563,7 +581,7 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
         </div>
 
         {/* Start button */}
-        <button onClick={handleStart} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: colors.accent }}>
+        <button onClick={handleStartNavClick} className="w-full py-3 rounded-xl font-bold text-sm tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all" style={{ background: colors.accent }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
           START NAVIGATION
         </button>
