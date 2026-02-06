@@ -1,4 +1,4 @@
-// src/styles/theme.js — Rally Co-Pilot Design System
+// src/styles/theme.js — Legacy Design System (deprecated)
 // SINGLE SOURCE OF TRUTH. Every component imports from here.
 // Night Stage v2 — Premium dark aesthetic
 
