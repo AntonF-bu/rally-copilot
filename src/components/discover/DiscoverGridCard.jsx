@@ -4,13 +4,42 @@
 import { useState, useEffect, useMemo } from 'react'
 import { colors } from '../../styles/theme'
 
+// Polyline encoder for simplified coordinates
+function encodePolyline(coordinates) {
+  // coordinates are [lng, lat] — polyline expects [lat, lng]
+  let encoded = ''
+  let prevLat = 0, prevLng = 0
+
+  for (const [lng, lat] of coordinates) {
+    const latRound = Math.round(lat * 1e5)
+    const lngRound = Math.round(lng * 1e5)
+    encoded += encodeValue(latRound - prevLat)
+    encoded += encodeValue(lngRound - prevLng)
+    prevLat = latRound
+    prevLng = lngRound
+  }
+  return encoded
+}
+
+function encodeValue(value) {
+  value = value < 0 ? ~(value << 1) : value << 1
+  let encoded = ''
+  while (value >= 0x20) {
+    encoded += String.fromCharCode((0x20 | (value & 0x1f)) + 63)
+    value >>= 5
+  }
+  encoded += String.fromCharCode(value + 63)
+  return encoded
+}
+
 export function DiscoverGridCard({ route, isSaved, onSelect }) {
   const [routePath, setRoutePath] = useState(null)
+  const [imageError, setImageError] = useState(false)
 
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const hasValidToken = mapboxToken && mapboxToken.length > 10
 
-  // Fetch route geometry for the path overlay
+  // Fetch route geometry for the path overlay - using GeoJSON for simplification
   useEffect(() => {
     if (!hasValidToken || routePath) return
 
@@ -22,12 +51,20 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
           `${route.end.lng},${route.end.lat}`,
         ].join(';')
 
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=polyline&overview=full&access_token=${mapboxToken}`
+        // Use geojson format so we can simplify the coordinates
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
         const response = await fetch(url)
         const data = await response.json()
 
-        if (data.routes?.[0]?.geometry) {
-          setRoutePath(data.routes[0].geometry)
+        if (data.routes?.[0]?.geometry?.coordinates) {
+          const fullCoords = data.routes[0].geometry.coordinates
+          // Simplify: take every Nth point to keep under ~50 points (avoids URL length issues)
+          const maxPoints = 50
+          const step = Math.max(1, Math.floor(fullCoords.length / maxPoints))
+          const simplified = fullCoords.filter((_, i) => i % step === 0 || i === fullCoords.length - 1)
+          // Encode as polyline for static map API
+          const encoded = encodePolyline(simplified)
+          setRoutePath(encoded)
         }
       } catch (err) {
         console.error('Failed to fetch route for preview:', err)
@@ -76,34 +113,34 @@ export function DiscoverGridCard({ route, isSaved, onSelect }) {
         className="w-full relative overflow-hidden"
         style={{ aspectRatio: '2/1', backgroundColor: '#0a0a1a' }}
       >
-        {staticMapUrl ? (
+        {/* Fallback gradient background - always present behind image */}
+        <div
+          className="absolute inset-0 flex items-center justify-center"
+          style={{
+            background: 'linear-gradient(135deg, rgba(0,212,255,0.1) 0%, rgba(10,10,20,1) 100%)'
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-cyan-400" />
+            <div
+              className="w-12 h-0.5"
+              style={{
+                background: 'repeating-linear-gradient(90deg, rgba(0,212,255,0.4) 0px, rgba(0,212,255,0.4) 6px, transparent 6px, transparent 10px)'
+              }}
+            />
+            <div className="w-2 h-2 rounded-full bg-orange-400" />
+          </div>
+        </div>
+
+        {/* Map image - overlays fallback when loaded successfully */}
+        {staticMapUrl && !imageError && (
           <img
             src={staticMapUrl}
             alt={`Map of ${route.name}`}
-            className="w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover"
             loading="lazy"
-            onError={(e) => {
-              e.target.style.display = 'none'
-            }}
+            onError={() => setImageError(true)}
           />
-        ) : (
-          <div
-            className="absolute inset-0 flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, rgba(0,212,255,0.1) 0%, rgba(10,10,20,1) 100%)'
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-cyan-400" />
-              <div
-                className="w-12 h-0.5"
-                style={{
-                  background: 'repeating-linear-gradient(90deg, rgba(0,212,255,0.4) 0px, rgba(0,212,255,0.4) 6px, transparent 6px, transparent 10px)'
-                }}
-              />
-              <div className="w-2 h-2 rounded-full bg-orange-400" />
-            </div>
-          </div>
         )}
 
         {/* Saved heart indicator */}
