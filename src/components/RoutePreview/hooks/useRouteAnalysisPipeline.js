@@ -238,6 +238,12 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               console.log(`   Fast: ${groupedSets.fast.length}, Standard: ${groupedSets.standard.length}`)
               window.__groupedCallouts = groupedSets
 
+              // Log the actual callout text for debugging
+              console.log('\n🎯 FINAL CALLOUTS:')
+              groupedSets.standard.forEach((c, i) => {
+                console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | ${c.zone || 'unknown'} | "${c.text}"`)
+              })
+
               const displayCallouts = groupedSets.standard
               setCuratedCallouts(displayCallouts)
               setAgentResult({
@@ -286,6 +292,15 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
 
               console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
               console.log(`   Method: ${chatterResult.method}`)
+
+              // Log the actual chatter text for debugging
+              if (chatterResult.chatterTimeline.length > 0) {
+                console.log('\n🎙️ CHATTER ITEMS:')
+                chatterResult.chatterTimeline.forEach((c, i) => {
+                  const text = c.text || c.variants?.cruise?.[0] || c.message || 'no text'
+                  console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | "${text}"`)
+                })
+              }
 
               useStore.getState().setChatterTimeline?.(chatterResult.chatterTimeline)
               window.__chatterTimeline = chatterResult.chatterTimeline
