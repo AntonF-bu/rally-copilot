@@ -74,7 +74,7 @@ export default function RouteSelector() {
     clearRecentRoutes,
   } = useStore()
 
-  const { initDestinationRoute } = useRouteAnalysis()
+  const { initDestinationRoute, initRouteFromCoordinates } = useRouteAnalysis()
 
   // Tab state
   const [activeTab, setActiveTab] = useState('home')
@@ -171,7 +171,60 @@ export default function RouteSelector() {
     }
   }
 
+  // Handler for discovery routes with coordinates
+  const handleStartDiscoveryRoute = async (route) => {
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      clearRouteData()
+      setRouteMode('destination')
+
+      // Get start coords - use current position or route's start
+      const startCoords = position || (route.start ? [route.start.lng, route.start.lat] : null)
+      // Get end coords from route
+      const endCoords = route.endCoords || (route.end ? [route.end.lng, route.end.lat] : null)
+
+      if (!startCoords) {
+        setError('Cannot get your current location.')
+        setIsLoading(false)
+        return
+      }
+
+      if (!endCoords) {
+        setError('Route has no destination coordinates.')
+        setIsLoading(false)
+        return
+      }
+
+      const success = await initRouteFromCoordinates(
+        startCoords,
+        endCoords,
+        route.waypoints,
+        route.end?.label || route.destination || route.name
+      )
+
+      if (success) {
+        setShowRouteSelector(false)
+        setShowRoutePreview(true)
+      } else {
+        setError('Could not load route. Try again.')
+      }
+    } catch (err) {
+      setError('Error loading route.')
+      console.error(err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleSelectSavedRoute = async (route) => {
+    // If route has start/end coordinates (discovery or saved with coords), use direct routing
+    if ((route.start?.lng && route.end?.lng) || (route.startCoords && route.endCoords)) {
+      return handleStartDiscoveryRoute(route)
+    }
+
+    // Otherwise fall back to geocoding
     setError(null)
     setIsLoading(true)
 
@@ -235,6 +288,7 @@ export default function RouteSelector() {
               favoriteRoutes={favoriteRoutes}
               onStartDrive={handleStartDrive}
               onSelectSavedRoute={handleSelectSavedRoute}
+              onStartDiscoveryRoute={handleStartDiscoveryRoute}
               onRemoveRecent={removeRecentRoute}
               onRemoveFavorite={removeFavoriteRoute}
               onClearRecentRoutes={clearRecentRoutes}
@@ -247,7 +301,7 @@ export default function RouteSelector() {
           )}
           {activeTab === 'discover' && (
             <DiscoverTab
-              onStartDrive={handleStartDrive}
+              onStartRoute={handleStartDiscoveryRoute}
               onTabChange={setActiveTab}
             />
           )}

@@ -165,7 +165,7 @@ export function useRouteAnalysis() {
     try {
       // Import getRouteWithWaypoints dynamically to avoid circular deps
       const { getRouteWithWaypoints } = await import('../services/routeService')
-      
+
       const route = await getRouteWithWaypoints(waypointCoords)
       if (!route?.coordinates) {
         console.error('Failed to get multi-stop route')
@@ -194,6 +194,50 @@ export function useRouteAnalysis() {
       return false
     }
   }, [setRouteData, calculateRouteDistance])
+
+  // ================================================================
+  // INIT ROUTE FROM COORDINATES - For discovery routes with known coords
+  // Takes start/end coordinates directly, no geocoding needed
+  // ================================================================
+  const initRouteFromCoordinates = useCallback(async (startCoords, endCoords, waypoints, routeName) => {
+    try {
+      // Build waypoint array: [start, ...waypoints, end]
+      const allPoints = [startCoords]
+      if (waypoints?.length) {
+        allPoints.push(...waypoints.map(wp => [wp.lng, wp.lat]))
+      }
+      allPoints.push(endCoords)
+
+      let route
+      if (allPoints.length > 2) {
+        const { getRouteWithWaypoints } = await import('../services/routeService')
+        route = await getRouteWithWaypoints(allPoints)
+      } else {
+        route = await getRoute(startCoords, endCoords)
+      }
+
+      if (!route?.coordinates) return false
+
+      const distance = route.distance || calculateRouteDistance(route.coordinates)
+
+      setDestination({ coordinates: endCoords, name: routeName })
+      setRouteData({
+        coordinates: route.coordinates,
+        curves: [],
+        destination: routeName,
+        distance: distance,
+        duration: route.duration,
+        name: `Route to ${routeName}`,
+        legs: route.legs,
+      })
+
+      console.log(`📍 Route from coords initialized: ${routeName}, ${(distance/1609.34).toFixed(1)}mi`)
+      return true
+    } catch (error) {
+      console.error('initRouteFromCoordinates error:', error)
+      return false
+    }
+  }, [setRouteData, setDestination, calculateRouteDistance])
 
   // ================================================================
   // INIT IMPORTED ROUTE - For routes from Google Maps URLs
@@ -340,6 +384,7 @@ export function useRouteAnalysis() {
   return {
     initDestinationRoute,
     initMultiStopRoute,
+    initRouteFromCoordinates,
     initImportedRoute,
     importRouteFromUrl,
     fetchRoadAhead,

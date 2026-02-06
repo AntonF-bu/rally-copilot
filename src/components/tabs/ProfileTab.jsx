@@ -160,7 +160,7 @@ export function ProfileTab({ onNavigateToSettings, logbookStats, recentRoutes = 
   }
 
   return (
-    <div style={{ padding: '24px 16px 100px' }}>
+    <div style={{ padding: '16px 16px 100px', paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)' }}>
       {/* Profile Header */}
       <div style={{
         display: 'flex',

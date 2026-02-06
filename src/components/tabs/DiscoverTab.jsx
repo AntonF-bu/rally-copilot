@@ -8,7 +8,7 @@ import { DiscoverGridCard } from '../discover/DiscoverGridCard'
 import { RouteDetailView } from '../discover/RouteDetailView'
 import { colors, fonts, transitions } from '../../styles/theme'
 
-export function DiscoverTab({ onStartDrive, onTabChange }) {
+export function DiscoverTab({ onStartRoute, onTabChange }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedVibes, setSelectedVibes] = useState([])
   const [selectedRegions, setSelectedRegions] = useState([])
@@ -79,7 +79,7 @@ export function DiscoverTab({ onStartDrive, onTabChange }) {
   return (
     <div style={{ minHeight: '100%', position: 'relative' }}>
       {/* Header */}
-      <div style={{ padding: '24px 16px 16px' }}>
+      <div style={{ padding: '16px 16px 16px', paddingTop: 'calc(env(safe-area-inset-top, 20px) + 8px)' }}>
         <h1 style={{
           fontFamily: fonts.primary,
           fontSize: '28px',
@@ -353,7 +353,7 @@ export function DiscoverTab({ onStartDrive, onTabChange }) {
         <RouteDetailView
           route={selectedRoute}
           onClose={() => setSelectedRoute(null)}
-          onStartDrive={onStartDrive}
+          onStartDrive={onStartRoute}
         />
       )}
     </div>
