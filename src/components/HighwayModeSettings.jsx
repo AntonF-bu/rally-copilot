@@ -11,7 +11,7 @@ export default function HighwayModeSettings() {
     highwayMode,
     highwayFeatures,
     setHighwayMode,
-    toggleHighwayFeature
+    toggleFeature  // Fixed: store exports 'toggleFeature' not 'toggleHighwayFeature'
   } = useHighwayStore()
 
   const isCompanion = highwayMode === HIGHWAY_MODE.COMPANION
@@ -63,59 +63,23 @@ export default function HighwayModeSettings() {
 
       {/* Feature Toggles */}
       <div style={styles.featureList}>
-        {/* Always-available features */}
-        <FeatureRow
-          label="Sweeper Callouts"
-          description="Gentle highway curves (8-25)"
-          enabled={highwayFeatures.sweepers}
-          onChange={() => toggleHighwayFeature('sweepers')}
-        />
-
-        <FeatureRow
-          label="Progress Updates"
-          description="Halfway, 10 miles to go..."
-          enabled={highwayFeatures.progress}
-          onChange={() => toggleHighwayFeature('progress')}
-        />
-
-        {/* Companion-only features */}
+        {/* Companion-only feature: Chatter (the only toggle that's actually used during navigation) */}
         {isCompanion && (
-          <>
-            <div style={styles.companionHeader}>
-              <span style={{ ...styles.companionLabel, color: `${companionColor}99` }}>
-                COMPANION EXTRAS
-              </span>
-            </div>
-
-            <FeatureRow
-              label="Apex Timing"
-              description="'Apex... now' on sweepers"
-              enabled={highwayFeatures.apex}
-              onChange={() => toggleHighwayFeature('apex')}
-            />
-
-            <FeatureRow
-              label="Silence Breaker"
-              description="Random chatter after 45-60s"
-              enabled={highwayFeatures.chatter}
-              onChange={() => toggleHighwayFeature('chatter')}
-            />
-
-            <FeatureRow
-              label="Stats Callouts"
-              description="'15 sweepers cleared', avg speed"
-              enabled={highwayFeatures.stats}
-              onChange={() => toggleHighwayFeature('stats')}
-            />
-
-            <FeatureRow
-              label="Sweeper Feedback"
-              description="'Clean line', 'Smooth' after sweepers"
-              enabled={highwayFeatures.feedback}
-              onChange={() => toggleHighwayFeature('feedback')}
-            />
-          </>
+          <FeatureRow
+            label="Silence Breaker"
+            description="AI chatter during quiet highway stretches"
+            enabled={highwayFeatures.chatter}
+            onChange={() => toggleFeature('chatter')}
+          />
         )}
+
+        {/* Note: Removed non-functional toggles per bug fix requirements
+            - Sweeper Callouts: always enabled, no toggle needed (callouts happen automatically)
+            - Progress Updates: always enabled, no toggle needed
+            - Apex Timing: feature not yet implemented
+            - Stats Callouts: feature not yet implemented
+            - Sweeper Feedback: feature not yet implemented
+        */}
       </div>
     </div>
   )
