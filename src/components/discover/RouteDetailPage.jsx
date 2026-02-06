@@ -79,9 +79,9 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
     loadRouteStats()
   }, [route.id, user?.id])
 
-  // Check if route is saved
+  // Check if route is saved - check multiple identifiers for robustness
   const isSaved = favoriteRoutes.some(
-    (fav) => fav.discoveryId === route.id || fav.id === route.id
+    (fav) => fav.discoveryId === route.id || fav.slug === route.id || fav.name === route.name
   )
 
   // Fetch route geometry
