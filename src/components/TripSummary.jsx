@@ -1,12 +1,13 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import useStore from '../store'
 import { useSwipeBack } from '../hooks/useSwipeBack'
+import { saveDriveLog } from '../services/driveLogService'
 import { colors } from '../styles/theme'
 
 // ================================
 // Trip Summary - Premium Redesign
 // Strava-inspired with deeper insights
-// Refactored to use theme system
+// Auto-saves drive to database on mount
 // ================================
 
 // Zone colors for trip summary visualization
@@ -17,7 +18,7 @@ const ZONE_COLORS = {
 }
 
 export default function TripSummary() {
-  const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, routeZones, settings } = useStore()
+  const { getTripSummary, closeTripSummary, goToMenu, mode, routeData, routeZones, settings, user, tripStats } = useStore()
 
   // Enable iOS-style swipe-back gesture
   useSwipeBack(closeTripSummary)
@@ -27,7 +28,9 @@ export default function TripSummary() {
   const [showDetails, setShowDetails] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
   const [shareSuccess, setShareSuccess] = useState(false)
+  const [driveSaved, setDriveSaved] = useState(false)
   const shareCardRef = useRef(null)
+  const saveAttemptedRef = useRef(false)
 
   // Mode colors - cyan for cruise is acceptable for mode visualization
   const modeColors = { cruise: colors.cyan, fast: '#ffd500', race: '#ff3366' }
@@ -60,6 +63,74 @@ export default function TripSummary() {
     const timer = setTimeout(() => setShowDetails(true), 600)
     return () => clearTimeout(timer)
   }, [])
+
+  // Auto-save drive to database on mount
+  useEffect(() => {
+    if (saveAttemptedRef.current || !summary || !tripStats?.startTime || !tripStats?.endTime) {
+      return
+    }
+
+    // Only save if user is authenticated
+    if (!user?.id) {
+      console.log('🗄️ Drive not saved: user not authenticated')
+      return
+    }
+
+    saveAttemptedRef.current = true
+
+    const saveDrive = async () => {
+      try {
+        // Calculate stats
+        const durationMs = tripStats.endTime - tripStats.startTime
+        const durationMinutes = durationMs / 60000
+        const distanceMiles = tripStats.distance * 0.000621371 // meters to miles
+
+        // Calculate avg speed from samples or from distance/duration
+        let avgSpeedMph = 0
+        if (tripStats.speedSamples && tripStats.speedSamples.length > 0) {
+          avgSpeedMph = tripStats.speedSamples.reduce((a, b) => a + b, 0) / tripStats.speedSamples.length
+        } else if (durationMinutes > 0 && distanceMiles > 0) {
+          avgSpeedMph = distanceMiles / (durationMinutes / 60)
+        }
+
+        // Build zone breakdown summary
+        let zoneBreakdown = null
+        if (routeZones && routeZones.length > 0) {
+          const breakdown = { urban: 0, transit: 0, technical: 0 }
+          routeZones.forEach(zone => {
+            const miles = (zone.endMile || 0) - (zone.startMile || 0)
+            const char = zone.character || 'technical'
+            if (breakdown[char] !== undefined) {
+              breakdown[char] += miles
+            }
+          })
+          zoneBreakdown = breakdown
+        }
+
+        await saveDriveLog({
+          userId: user.id,
+          routeSlug: routeData?.id || routeData?.discoveryId || null,
+          startedAt: tripStats.startTime,
+          endedAt: tripStats.endTime,
+          durationMinutes,
+          distanceMiles,
+          avgSpeedMph,
+          maxSpeedMph: tripStats.maxSpeed || 0,
+          curvesCompleted: tripStats.curvesCompleted || 0,
+          zoneBreakdown,
+        })
+
+        setDriveSaved(true)
+        // Hide the saved message after 2 seconds
+        setTimeout(() => setDriveSaved(false), 2000)
+      } catch (error) {
+        // Don't show error to user, just log it
+        console.error('🗄️ Failed to auto-save drive:', error)
+      }
+    }
+
+    saveDrive()
+  }, [user, tripStats, routeData, routeZones, summary])
 
   // Generate SVG path string for route
   const routePath = useMemo(() => {
@@ -601,16 +672,29 @@ export default function TripSummary() {
           
           {/* Branding */}
           <div className="text-center pt-4 border-t border-white/10">
-            <div className="font-bold text-sm tracking-wider mb-1" style={{ color: modeColor }}>RALLY CO-PILOT</div>
+            <div className="font-bold text-sm tracking-wider mb-1" style={{ color: modeColor }}>TRAMO</div>
             <div className="text-white/30 text-[10px] tracking-widest">{mode.toUpperCase()} MODE</div>
           </div>
         </div>
       </div>
 
+      {/* Drive Saved Toast */}
+      {driveSaved && (
+        <div
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-green-500/20 border border-green-500/30 flex items-center gap-2 animate-fade-in-out"
+          style={{ zIndex: 100 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2">
+            <path d="M20 6L9 17l-5-5"/>
+          </svg>
+          <span className="text-green-400 text-xs font-medium">Drive saved</span>
+        </div>
+      )}
+
       <style>{`
         .safe-top { padding-top: env(safe-area-inset-top, 12px); }
         .tabular-nums { font-variant-numeric: tabular-nums; }
-        
+
         @keyframes draw {
           from { stroke-dashoffset: 1000; }
           to { stroke-dashoffset: 0; }
@@ -618,6 +702,16 @@ export default function TripSummary() {
         .animate-draw {
           stroke-dasharray: 1000;
           animation: draw 2s ease-out forwards;
+        }
+
+        @keyframes fadeInOut {
+          0% { opacity: 0; transform: translate(-50%, 10px); }
+          15% { opacity: 1; transform: translate(-50%, 0); }
+          85% { opacity: 1; transform: translate(-50%, 0); }
+          100% { opacity: 0; transform: translate(-50%, -10px); }
+        }
+        .animate-fade-in-out {
+          animation: fadeInOut 2s ease-in-out forwards;
         }
       `}</style>
     </div>

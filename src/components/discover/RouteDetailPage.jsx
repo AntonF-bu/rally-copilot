@@ -7,6 +7,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import useStore from '../../store'
 import { useSwipeBack } from '../../hooks/useSwipeBack'
 import TramoLogo from '../TramoLogo'
+import { fetchRouteDriveCountBySlug } from '../../services/driveLogService'
 
 // Difficulty color mapping
 const DIFFICULTY_COLORS = {
@@ -27,6 +28,7 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
   const [routeGeometry, setRouteGeometry] = useState(null)
   const [loadingRoute, setLoadingRoute] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [driveCount, setDriveCount] = useState(0)
 
   // Store access for favorites
   const favoriteRoutes = useStore((state) => state.favoriteRoutes) || []
@@ -35,6 +37,21 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
 
   const mapboxToken = import.meta.env.VITE_MAPBOX_TOKEN
   const mapboxStyle = 'mapbox://styles/antonflk/cml9m9s1j001401sgggri2ovp'
+
+  // Fetch drive count for this route
+  useEffect(() => {
+    const loadDriveCount = async () => {
+      if (!route.id) return
+      try {
+        const count = await fetchRouteDriveCountBySlug(route.id)
+        setDriveCount(count)
+        console.log(`🗄️ Route ${route.id} has ${count} drives`)
+      } catch (err) {
+        console.error('🗄️ Failed to fetch drive count:', err)
+      }
+    }
+    loadDriveCount()
+  }, [route.id])
 
   // Check if route is saved
   const isSaved = favoriteRoutes.some(
@@ -409,12 +426,10 @@ export function RouteDetailPage({ route, onBack, onStartDrive }) {
               </span>
               <span style={styles.statLabel}>Difficulty</span>
             </div>
-            {route.curveCount && (
-              <div style={styles.statCard}>
-                <span style={styles.statValue}>{route.curveCount}</span>
-                <span style={styles.statLabel}>Curves</span>
-              </div>
-            )}
+            <div style={styles.statCard}>
+              <span style={styles.statValue}>{driveCount}</span>
+              <span style={styles.statLabel}>Drives</span>
+            </div>
           </div>
 
           {/* Description Section */}
