@@ -1,14 +1,13 @@
-// Profile Tab - Tramo Brand Identity
-// Drive stats, history, and account management
+// Profile Tab - Tramo Brand Design
+// Drive stats, collection progress, history, and account management
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import useStore from '../../store'
 import { signOut, updateProfile } from '../../services/authService'
-import { supabase } from '../../services/supabase'
 import { DISCOVERY_ROUTES } from '../../data/discoveryRoutes'
 import { fetchDriverStats, fetchDriveLogs } from '../../services/driveLogService'
 
-export function ProfileTab({ onNavigateToSettings }) {
+export function ProfileTab() {
   // Get profile and user from store
   const profile = useStore((state) => state.profile)
   const user = useStore((state) => state.user)
@@ -26,13 +25,10 @@ export function ProfileTab({ onNavigateToSettings }) {
   const [isSaving, setIsSaving] = useState(false)
   const [isSigningOut, setIsSigningOut] = useState(false)
 
-  // Seed routes state (temporary)
-  const [seedStatus, setSeedStatus] = useState('idle')
-  const [seedMessage, setSeedMessage] = useState('')
-
   // Get display values from profile
   const displayName = profile?.display_name || user?.email?.split('@')[0] || 'Driver'
   const car = profile?.car || ''
+  const avatarUrl = profile?.avatar_url || null
   const avatarInitial = displayName.charAt(0).toUpperCase()
 
   // Load stats and drive history on mount
@@ -47,12 +43,12 @@ export function ProfileTab({ onNavigateToSettings }) {
       try {
         const [stats, logs] = await Promise.all([
           fetchDriverStats(user.id),
-          fetchDriveLogs(user.id, 20),
+          fetchDriveLogs(user.id, 50), // Get more logs for collection tracking
         ])
         setDriverStats(stats)
         setDriveLogs(logs)
       } catch (error) {
-        console.error('🗄️ Failed to load profile data:', error)
+        console.error('Failed to load profile data:', error)
       } finally {
         setLoadingStats(false)
       }
@@ -60,6 +56,40 @@ export function ProfileTab({ onNavigateToSettings }) {
 
     loadData()
   }, [user?.id])
+
+  // Calculate collection progress
+  const collectionProgress = useMemo(() => {
+    const curatedRoutes = DISCOVERY_ROUTES.slice(0, 10) // First 10 are the curated collection
+    const curatedSlugs = new Set(curatedRoutes.map(r => r.id))
+
+    // Find which curated routes have been driven
+    const drivenSlugs = new Set()
+    driveLogs.forEach(log => {
+      const routeSlug = log.routes?.slug || log.route_id
+      if (routeSlug && curatedSlugs.has(routeSlug)) {
+        drivenSlugs.add(routeSlug)
+      }
+    })
+
+    return {
+      total: curatedRoutes.length,
+      driven: drivenSlugs.size,
+      routes: curatedRoutes.map(route => ({
+        id: route.id,
+        name: route.name,
+        abbreviation: getRouteAbbreviation(route.name),
+        isDriven: drivenSlugs.has(route.id),
+      })),
+    }
+  }, [driveLogs])
+
+  // Get abbreviated route name
+  function getRouteAbbreviation(name) {
+    // Take first word or first two letters of each word
+    const words = name.split(' ')
+    if (words.length === 1) return words[0].substring(0, 6)
+    return words.slice(0, 2).map(w => w.substring(0, 3)).join(' ')
+  }
 
   // Format date for drive card
   const formatDate = (dateString) => {
@@ -99,7 +129,7 @@ export function ProfileTab({ onNavigateToSettings }) {
       }
       setIsEditing(false)
     } catch (error) {
-      console.error('🔐 Failed to update profile:', error)
+      console.error('Failed to update profile:', error)
     } finally {
       setIsSaving(false)
     }
@@ -111,95 +141,38 @@ export function ProfileTab({ onNavigateToSettings }) {
     try {
       await signOut()
     } catch (error) {
-      console.error('🔐 Failed to sign out:', error)
+      console.error('Failed to sign out:', error)
       setIsSigningOut(false)
     }
   }
 
-  // Seed routes (temporary dev function)
-  const handleSeedRoutes = async () => {
-    if (!user) return
-
-    setSeedStatus('seeding')
-    setSeedMessage('Deleting existing routes...')
-
-    try {
-      const { error: deleteError } = await supabase
-        .from('routes')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000')
-
-      if (deleteError) {
-        throw new Error(`Delete failed: ${deleteError.message}`)
-      }
-
-      setSeedMessage('Inserting new routes...')
-
-      const routesToInsert = DISCOVERY_ROUTES.map(route => ({
-        slug: route.id,
-        name: route.name,
-        region: route.region,
-        start_lat: route.start.lat,
-        start_lng: route.start.lng,
-        start_label: route.start.label,
-        end_lat: route.end.lat,
-        end_lng: route.end.lng,
-        end_label: route.end.label,
-        waypoints: route.waypoints || [],
-        distance_miles: route.distance,
-        duration_minutes: route.duration,
-        difficulty: route.difficulty,
-        tags: route.tags || [],
-        description: route.description || '',
-        is_published: true,
-      }))
-
-      const { data, error: insertError } = await supabase
-        .from('routes')
-        .insert(routesToInsert)
-        .select()
-
-      if (insertError) {
-        throw new Error(`Insert failed: ${insertError.message}`)
-      }
-
-      console.log(`🗄️ Seeded ${data?.length || 0} routes`)
-      setSeedStatus('done')
-      setSeedMessage(`Done! ${data?.length || 0} routes seeded`)
-
-      setTimeout(() => {
-        setSeedStatus('idle')
-        setSeedMessage('')
-      }, 3000)
-
-    } catch (error) {
-      console.error('🗄️ Seed failed:', error)
-      setSeedStatus('error')
-      setSeedMessage(error.message || 'Seeding failed')
-    }
-  }
+  const progressPercent = collectionProgress.total > 0
+    ? (collectionProgress.driven / collectionProgress.total) * 100
+    : 0
 
   return (
     <div style={styles.container}>
       {/* Profile Header */}
       <div style={styles.header}>
         <div style={styles.avatarContainer}>
-          <span style={styles.avatarInitial}>{avatarInitial}</span>
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" style={styles.avatarImage} />
+          ) : (
+            <span style={styles.avatarInitial}>{avatarInitial}</span>
+          )}
         </div>
         <div style={styles.headerInfo}>
           <h1 style={styles.displayName}>{displayName}</h1>
           {car && <p style={styles.carLabel}>{car}</p>}
-        </div>
-        {!isEditing && (
-          <button onClick={handleStartEdit} style={styles.editButton}>
-            Edit
+          <button onClick={handleStartEdit} style={styles.editProfileLink}>
+            Edit Profile
           </button>
-        )}
+        </div>
       </div>
 
-      {/* Edit Profile Section */}
+      {/* Edit Profile Modal */}
       {isEditing && (
-        <div style={styles.card}>
+        <div style={styles.editCard}>
           <span style={styles.cardLabel}>EDIT PROFILE</span>
           <div style={styles.inputGroup}>
             <label style={styles.inputLabel}>Display Name</label>
@@ -254,6 +227,49 @@ export function ProfileTab({ onNavigateToSettings }) {
         </div>
       </div>
 
+      {/* Collection Progress */}
+      <div style={styles.section}>
+        <span style={styles.sectionLabel}>NEW ENGLAND COLLECTION</span>
+
+        <div style={styles.progressContainer}>
+          <div style={styles.progressTrack}>
+            <div
+              style={{
+                ...styles.progressFill,
+                width: `${progressPercent}%`,
+              }}
+            />
+          </div>
+          <p style={styles.progressText}>
+            {collectionProgress.driven} of {collectionProgress.total} routes driven
+          </p>
+        </div>
+
+        {/* Route indicators - horizontal scroll */}
+        <div style={styles.routeIndicatorScroll}>
+          <div style={styles.routeIndicatorRow}>
+            {collectionProgress.routes.map((route) => (
+              <div key={route.id} style={styles.routeIndicator}>
+                <div
+                  style={{
+                    ...styles.routeCircle,
+                    background: route.isDriven ? '#E8622C' : 'transparent',
+                    borderColor: route.isDriven ? '#E8622C' : '#666666',
+                  }}
+                >
+                  {route.isDriven && (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </div>
+                <span style={styles.routeAbbr}>{route.abbreviation}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Drive History Section */}
       <div style={styles.section}>
         <span style={styles.sectionLabel}>DRIVE HISTORY</span>
@@ -264,13 +280,12 @@ export function ProfileTab({ onNavigateToSettings }) {
           </div>
         ) : driveLogs.length === 0 ? (
           <div style={styles.emptyState}>
-            <p style={styles.emptyText}>No drives yet. Hit the road!</p>
+            <p style={styles.emptyText}>No drives yet. Hit the road.</p>
           </div>
         ) : (
           <div style={styles.driveList}>
-            {driveLogs.map((drive) => {
+            {driveLogs.slice(0, 10).map((drive) => {
               const routeName = drive.routes?.name || 'Free Drive'
-              const notes = drive.notes ? JSON.parse(drive.notes) : {}
 
               return (
                 <div key={drive.id} style={styles.driveCard}>
@@ -282,11 +297,11 @@ export function ProfileTab({ onNavigateToSettings }) {
                     <span style={styles.driveStat}>
                       {drive.distance_miles?.toFixed(1) || '0'} mi
                     </span>
-                    <span style={styles.driveStatDivider}>-</span>
+                    <span style={styles.driveStatDot} />
                     <span style={styles.driveStat}>
                       {drive.duration_minutes || 0}m
                     </span>
-                    <span style={styles.driveStatDivider}>-</span>
+                    <span style={styles.driveStatDot} />
                     <span style={styles.driveStat}>
                       {drive.max_speed_mph?.toFixed(0) || '0'} mph max
                     </span>
@@ -299,43 +314,8 @@ export function ProfileTab({ onNavigateToSettings }) {
       </div>
 
       {/* Account Section */}
-      <div style={styles.section}>
-        <span style={styles.sectionLabel}>ACCOUNT</span>
-
-        {/* Settings Button */}
-        {onNavigateToSettings && (
-          <button onClick={onNavigateToSettings} style={styles.menuButton}>
-            <div style={styles.menuButtonContent}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#888888" strokeWidth="2">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-              <span style={styles.menuButtonText}>Settings</span>
-            </div>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666666" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-          </button>
-        )}
-
-        {/* Seed Routes (Dev) */}
-        {user && (
-          <button
-            onClick={handleSeedRoutes}
-            disabled={seedStatus === 'seeding'}
-            style={{
-              ...styles.devButton,
-              color: seedStatus === 'done' ? '#22c55e' : seedStatus === 'error' ? '#ef4444' : '#666666',
-            }}
-          >
-            {seedStatus === 'idle' && 'Seed Routes (Dev)'}
-            {seedStatus === 'seeding' && seedMessage}
-            {seedStatus === 'done' && seedMessage}
-            {seedStatus === 'error' && seedMessage}
-          </button>
-        )}
-
-        {/* Sign Out Button */}
+      <div style={styles.accountSection}>
+        <div style={styles.divider} />
         <button
           onClick={handleSignOut}
           disabled={isSigningOut}
@@ -344,12 +324,7 @@ export function ProfileTab({ onNavigateToSettings }) {
             opacity: isSigningOut ? 0.7 : 1,
           }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-          <span>{isSigningOut ? 'Signing out...' : 'Sign Out'}</span>
+          {isSigningOut ? 'Signing out...' : 'Sign Out'}
         </button>
       </div>
 
@@ -366,9 +341,11 @@ const styles = {
     padding: '16px',
     paddingTop: 'calc(env(safe-area-inset-top, 20px) + 16px)',
   },
+
+  // Header
   header: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: '16px',
     marginBottom: '24px',
   },
@@ -376,22 +353,28 @@ const styles = {
     width: '64px',
     height: '64px',
     borderRadius: '50%',
-    background: 'linear-gradient(135deg, rgba(232, 98, 44, 0.2) 0%, rgba(232, 98, 44, 0.05) 100%)',
-    border: '2px solid rgba(232, 98, 44, 0.3)',
+    background: '#1A1A1A',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
   },
   avatarInitial: {
     fontFamily: "'Outfit', sans-serif",
     fontSize: '24px',
     fontWeight: 300,
-    color: '#E8622C',
+    color: '#FFFFFF',
   },
   headerInfo: {
     flex: 1,
     minWidth: 0,
+    paddingTop: '4px',
   },
   displayName: {
     fontFamily: "'Outfit', sans-serif",
@@ -410,24 +393,25 @@ const styles = {
     margin: 0,
     marginTop: '4px',
   },
-  editButton: {
-    padding: '8px 16px',
-    borderRadius: '8px',
-    border: '1px solid #1A1A1A',
-    background: '#111111',
-    color: '#888888',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '11px',
-    fontWeight: 500,
+  editProfileLink: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    marginTop: '8px',
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    color: '#666666',
+    textDecoration: 'underline',
     cursor: 'pointer',
-    flexShrink: 0,
   },
-  card: {
+
+  // Edit Card
+  editCard: {
     background: '#111111',
     border: '1px solid #1A1A1A',
     borderRadius: '12px',
     padding: '16px',
-    marginBottom: '20px',
+    marginBottom: '24px',
   },
   cardLabel: {
     fontFamily: "'JetBrains Mono', monospace",
@@ -492,6 +476,8 @@ const styles = {
     fontWeight: 600,
     cursor: 'pointer',
   },
+
+  // Stats Row
   statsRow: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -523,6 +509,8 @@ const styles = {
     color: '#666666',
     marginTop: '6px',
   },
+
+  // Section
   section: {
     marginBottom: '24px',
   },
@@ -535,6 +523,72 @@ const styles = {
     display: 'block',
     marginBottom: '12px',
   },
+
+  // Collection Progress
+  progressContainer: {
+    marginBottom: '16px',
+  },
+  progressTrack: {
+    height: '6px',
+    background: '#1A1A1A',
+    borderRadius: '3px',
+    overflow: 'hidden',
+    marginBottom: '8px',
+  },
+  progressFill: {
+    height: '100%',
+    background: '#E8622C',
+    borderRadius: '3px',
+    transition: 'width 0.5s ease',
+  },
+  progressText: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '13px',
+    color: '#888888',
+    margin: 0,
+  },
+  routeIndicatorScroll: {
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+    margin: '0 -16px',
+    padding: '0 16px',
+  },
+  routeIndicatorRow: {
+    display: 'flex',
+    gap: '16px',
+    paddingBottom: '8px',
+  },
+  routeIndicator: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '6px',
+    flexShrink: 0,
+  },
+  routeCircle: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    border: '2px solid',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeAbbr: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '8px',
+    fontWeight: 500,
+    color: '#666666',
+    textAlign: 'center',
+    maxWidth: '48px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+
+  // Empty State
   emptyState: {
     background: '#111111',
     border: '1px solid #1A1A1A',
@@ -548,6 +602,8 @@ const styles = {
     color: '#666666',
     margin: 0,
   },
+
+  // Drive List
   driveList: {
     display: 'flex',
     flexDirection: 'column',
@@ -592,60 +648,30 @@ const styles = {
     fontSize: '11px',
     color: '#888888',
   },
-  driveStatDivider: {
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '11px',
-    color: '#333333',
+  driveStatDot: {
+    width: '2px',
+    height: '2px',
+    borderRadius: '50%',
+    background: '#444444',
   },
-  menuButton: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '14px 16px',
-    background: '#111111',
-    border: '1px solid #1A1A1A',
-    borderRadius: '12px',
-    cursor: 'pointer',
-    marginBottom: '10px',
+
+  // Account Section
+  accountSection: {
+    marginTop: '16px',
   },
-  menuButtonContent: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
-  menuButtonText: {
-    fontFamily: "'DM Sans', sans-serif",
-    fontSize: '14px',
-    color: '#FFFFFF',
-  },
-  devButton: {
-    width: '100%',
-    padding: '12px 16px',
-    borderRadius: '12px',
-    border: '1px solid #1A1A1A',
-    background: 'transparent',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '11px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    textAlign: 'center',
-    marginBottom: '10px',
+  divider: {
+    height: '1px',
+    background: '#1A1A1A',
+    marginBottom: '16px',
   },
   signOutButton: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '10px',
-    padding: '14px 16px',
-    background: 'transparent',
-    border: '1px solid rgba(239, 68, 68, 0.2)',
-    borderRadius: '12px',
-    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
+    padding: 0,
     fontFamily: "'DM Sans', sans-serif",
     fontSize: '14px',
     fontWeight: 500,
     color: '#ef4444',
+    cursor: 'pointer',
   },
 }

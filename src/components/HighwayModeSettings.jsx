@@ -1,12 +1,10 @@
 // ================================
 // Highway Mode Settings Component
-// Refactored to use theme system
+// Tramo Brand Design
 // ================================
 
 import useHighwayStore from '../services/highwayStore'
 import { HIGHWAY_MODE } from '../services/highwayModeService'
-import { colors, fonts, glassPanel, transitions } from '../styles/theme'
-import { Toggle } from './ui'
 
 export default function HighwayModeSettings() {
   const {
@@ -20,38 +18,24 @@ export default function HighwayModeSettings() {
   const companionColor = '#f59e0b' // Amber for companion mode
 
   return (
-    <div className="mb-6">
+    <div style={styles.section}>
       {/* Section Header */}
-      <div className="flex items-center gap-2 mb-3" style={{ color: colors.textMuted }}>
+      <div style={styles.sectionHeader}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
           <line x1="4" y1="22" x2="4" y2="15"/>
         </svg>
-        <span style={{
-          fontFamily: fonts.heading,
-          fontSize: '10px',
-          fontWeight: 500,
-          letterSpacing: '0.2em',
-          textTransform: 'uppercase',
-        }}>
-          HIGHWAY MODE
-        </span>
+        <span style={styles.sectionTitle}>HIGHWAY MODE</span>
       </div>
 
       {/* Mode Toggle - Basic vs Companion */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div style={styles.modeGrid}>
         <ModeButton
           active={highwayMode === HIGHWAY_MODE.BASIC}
           onClick={() => setHighwayMode(HIGHWAY_MODE.BASIC)}
-          color={colors.accent}
+          color="#E8622C"
           title="Basic"
           subtitle="Clean co-driver"
-          icon={
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 6v6l4 2"/>
-            </svg>
-          }
         />
         <ModeButton
           active={highwayMode === HIGHWAY_MODE.COMPANION}
@@ -59,51 +43,32 @@ export default function HighwayModeSettings() {
           color={companionColor}
           title="Companion"
           subtitle="Full engagement"
-          icon={
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-          }
         />
       </div>
 
       {/* Feature Description */}
-      <div
-        className="rounded-lg p-3 mb-4"
-        style={{
-          ...glassPanel,
-        }}
-      >
+      <div style={styles.descriptionCard}>
         {isCompanion ? (
-          <p style={{ color: colors.textSecondary, fontSize: '12px' }}>
+          <p style={styles.descriptionText}>
             <span style={{ color: companionColor, fontWeight: 600 }}>Companion Mode:</span> Full co-driver experience with chatter,
             apex timing, stats, and feedback. Makes highway driving engaging.
           </p>
         ) : (
-          <p style={{ color: colors.textSecondary, fontSize: '12px' }}>
-            <span style={{ color: colors.accent, fontWeight: 600 }}>Basic Mode:</span> Clean,
+          <p style={styles.descriptionText}>
+            <span style={{ color: '#E8622C', fontWeight: 600 }}>Basic Mode:</span> Clean,
             professional callouts. Sweepers, elevation changes, and progress milestones.
           </p>
         )}
       </div>
 
       {/* Feature Toggles */}
-      <div className="space-y-0">
+      <div style={styles.featureList}>
         {/* Always-available features */}
         <FeatureRow
           label="Sweeper Callouts"
-          description="Gentle highway curves (8-25°)"
+          description="Gentle highway curves (8-25)"
           enabled={highwayFeatures.sweepers}
           onChange={() => toggleHighwayFeature('sweepers')}
-        />
-
-        <FeatureRow
-          label="Elevation Callouts"
-          description="Crests, dips, grades"
-          enabled={highwayFeatures.elevation}
-          onChange={() => toggleHighwayFeature('elevation')}
-          disabled={true}
-          disabledReason="Coming soon"
         />
 
         <FeatureRow
@@ -116,22 +81,15 @@ export default function HighwayModeSettings() {
         {/* Companion-only features */}
         {isCompanion && (
           <>
-            <div className="mt-3 mb-2">
-              <span style={{
-                fontFamily: fonts.heading,
-                fontSize: '10px',
-                fontWeight: 500,
-                letterSpacing: '0.2em',
-                textTransform: 'uppercase',
-                color: `${companionColor}99`,
-              }}>
+            <div style={styles.companionHeader}>
+              <span style={{ ...styles.companionLabel, color: `${companionColor}99` }}>
                 COMPANION EXTRAS
               </span>
             </div>
 
             <FeatureRow
               label="Apex Timing"
-              description={'"Apex... now" on sweepers'}
+              description="'Apex... now' on sweepers"
               enabled={highwayFeatures.apex}
               onChange={() => toggleHighwayFeature('apex')}
             />
@@ -145,14 +103,14 @@ export default function HighwayModeSettings() {
 
             <FeatureRow
               label="Stats Callouts"
-              description='"15 sweepers cleared", avg speed'
+              description="'15 sweepers cleared', avg speed"
               enabled={highwayFeatures.stats}
               onChange={() => toggleHighwayFeature('stats')}
             />
 
             <FeatureRow
               label="Sweeper Feedback"
-              description='"Clean line", "Smooth" after sweepers'
+              description="'Clean line', 'Smooth' after sweepers"
               enabled={highwayFeatures.feedback}
               onChange={() => toggleHighwayFeature('feedback')}
             />
@@ -164,69 +122,213 @@ export default function HighwayModeSettings() {
 }
 
 // Mode selection button
-function ModeButton({ active, onClick, color, title, subtitle, icon }) {
+function ModeButton({ active, onClick, color, title, subtitle }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center py-4 px-3 rounded-xl"
       style={{
-        ...glassPanel,
-        border: active ? `2px solid ${color}` : `2px solid ${colors.glassBorder}`,
+        ...styles.modeButton,
+        border: active ? `2px solid ${color}` : '2px solid #1A1A1A',
         boxShadow: active ? `0 0 16px ${color}30` : 'none',
-        transition: transitions.smooth,
       }}
     >
       <div
-        className="mb-2"
-        style={{ color: active ? color : colors.textMuted }}
-      >
-        {icon}
-      </div>
-      <span
         style={{
-          fontSize: '14px',
-          fontWeight: 600,
-          color: active ? color : colors.textSecondary,
-          fontFamily: fonts.heading,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
+          ...styles.modeIcon,
+          background: `${color}20`,
         }}
       >
+        <div
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: color,
+          }}
+        />
+      </div>
+      <span style={{
+        ...styles.modeTitle,
+        color: active ? color : '#888888',
+      }}>
         {title}
       </span>
-      <span style={{ fontSize: '10px', color: colors.textMuted, marginTop: '2px' }}>
-        {subtitle}
-      </span>
+      <span style={styles.modeSubtitle}>{subtitle}</span>
     </button>
   )
 }
 
 // Feature toggle row
-function FeatureRow({ label, description, enabled, onChange, disabled = false, disabledReason }) {
+function FeatureRow({ label, description, enabled, onChange, disabled = false }) {
   return (
-    <div
-      className="flex items-center justify-between py-2.5"
-      style={{ borderBottom: `1px solid ${colors.glassBorder}` }}
-    >
-      <div className="flex-1 mr-4">
-        <div style={{
-          color: colors.textPrimary,
-          fontSize: '14px',
-          fontWeight: 500,
-          fontFamily: fonts.body,
+    <div style={styles.featureRow}>
+      <div style={styles.featureInfo}>
+        <span style={{
+          ...styles.featureLabel,
           opacity: disabled ? 0.5 : 1,
         }}>
           {label}
-        </div>
-        <div style={{ color: colors.textMuted, fontSize: '12px', marginTop: '2px' }}>
-          {disabled ? disabledReason : description}
-        </div>
+        </span>
+        <span style={styles.featureDescription}>{description}</span>
       </div>
-      <Toggle
-        enabled={enabled}
-        onChange={onChange}
-        disabled={disabled}
-      />
+      <Toggle enabled={enabled} onChange={onChange} disabled={disabled} />
     </div>
   )
+}
+
+// Toggle component
+function Toggle({ enabled, onChange, disabled = false }) {
+  return (
+    <button
+      onClick={() => !disabled && onChange(!enabled)}
+      disabled={disabled}
+      style={{
+        ...styles.toggle,
+        background: enabled ? '#E8622C' : '#333333',
+        opacity: disabled ? 0.3 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      <div
+        style={{
+          ...styles.toggleThumb,
+          left: enabled ? '22px' : '2px',
+        }}
+      />
+    </button>
+  )
+}
+
+const styles = {
+  section: {
+    marginBottom: '24px',
+  },
+  sectionHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    color: '#666666',
+    marginBottom: '12px',
+  },
+  sectionTitle: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 500,
+    letterSpacing: '0.15em',
+  },
+
+  // Mode grid
+  modeGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '10px',
+    marginBottom: '16px',
+  },
+  modeButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '16px 12px',
+    borderRadius: '12px',
+    background: '#111111',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+  },
+  modeIcon: {
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '8px',
+  },
+  modeTitle: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 600,
+  },
+  modeSubtitle: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '10px',
+    color: '#666666',
+    marginTop: '2px',
+  },
+
+  // Description card
+  descriptionCard: {
+    background: '#111111',
+    border: '1px solid #1A1A1A',
+    borderRadius: '12px',
+    padding: '12px',
+    marginBottom: '16px',
+  },
+  descriptionText: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '12px',
+    color: '#888888',
+    margin: 0,
+    lineHeight: 1.5,
+  },
+
+  // Feature list
+  featureList: {},
+  featureRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 0',
+    borderBottom: '1px solid #1A1A1A',
+  },
+  featureInfo: {
+    flex: 1,
+    marginRight: '16px',
+  },
+  featureLabel: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '14px',
+    fontWeight: 500,
+    color: '#FFFFFF',
+    display: 'block',
+  },
+  featureDescription: {
+    fontFamily: "'DM Sans', sans-serif",
+    fontSize: '12px',
+    color: '#666666',
+    display: 'block',
+    marginTop: '2px',
+  },
+
+  // Companion header
+  companionHeader: {
+    marginTop: '12px',
+    marginBottom: '8px',
+  },
+  companionLabel: {
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: '9px',
+    fontWeight: 500,
+    letterSpacing: '0.15em',
+  },
+
+  // Toggle
+  toggle: {
+    position: 'relative',
+    width: '44px',
+    height: '24px',
+    borderRadius: '12px',
+    border: 'none',
+    padding: 0,
+    transition: 'background 0.2s ease',
+  },
+  toggleThumb: {
+    position: 'absolute',
+    top: '2px',
+    width: '20px',
+    height: '20px',
+    background: '#FFFFFF',
+    borderRadius: '50%',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+    transition: 'left 0.2s ease',
+  },
 }
