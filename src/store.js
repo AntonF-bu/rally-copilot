@@ -504,6 +504,7 @@ const useStore = create(
     }),
     {
       name: 'rally-copilot-storage',
+      version: 2, // Increment to clear stale favorites from old route data
       partialize: (state) => ({
         theme: state.theme,
         settings: state.settings,
@@ -512,6 +513,18 @@ const useStore = create(
         favoriteRoutes: state.favoriteRoutes,
         globalZoneOverrides: state.globalZoneOverrides,
       }),
+      migrate: (persistedState, version) => {
+        // Clear favorites when migrating from version 1 to 2
+        // Old favorites had stale route data that no longer exists
+        if (version < 2) {
+          console.log('🗄️ Migrating store: clearing stale favoriteRoutes')
+          return {
+            ...persistedState,
+            favoriteRoutes: [],
+          }
+        }
+        return persistedState
+      },
     }
   )
 )
