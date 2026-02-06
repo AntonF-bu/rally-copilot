@@ -494,16 +494,18 @@ export default function App() {
   }
 
   // iOS mobile container styles - consistent 420px width across all screens
+  // Using position: fixed with top/bottom: 0 for reliable iOS Safari full-screen
   const mobileContainerStyle = {
     maxWidth: '420px',
     margin: '0 auto',
-    height: '100%',
-    minHeight: '100vh',
-    minHeight: '-webkit-fill-available',
-    position: 'relative',
+    position: 'fixed',
+    top: 0,
+    bottom: 0,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: '100%',
     overflow: 'hidden',
     background: '#12121A',
-    boxShadow: '0 0 80px rgba(0,0,0,0.5)',
   }
 
   // Render
