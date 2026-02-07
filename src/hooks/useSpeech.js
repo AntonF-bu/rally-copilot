@@ -15,67 +15,118 @@ const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
 // ================================
-// BUG FIX #5: Clean text for natural speech
-// Transforms raw callout text into TTS-friendly format
-// ROUND 4 FIX: Complete rewrite for proper severity scale and compound patterns
-// Severity scale:
-//   0-20°:  "Slight {dir}" (barely a bend)
-//   20-45°: "Easy {dir}"   (gentle curve, notable)
-//   45-70°: "{Dir}, tightens" (moderate, needs attention)
-//   70-100°: "Sharp {dir}" (significant curve)
-//   100°+:  "Hard {dir}"   (severe, already has prefix)
+// ROUND 5: Rally 1-6 Scale
+// Converts degrees to professional rally co-driver pace notes
+// Scale: 1 = hairpin (tightest), 6 = barely a bend (flat out)
 // ================================
+
+function degreesToRallyScale(deg) {
+  // Based on test case mappings:
+  // 180° → Hairpin (special), 120° → 1, 108° → 2, 88° → 2, 72° → 3, 67° → 3, 59° → 4, 57° → 4, 30° → 5, 12° → 6
+  if (deg >= 120) return 1;  // Tight corner (120°+) - scale 1
+  if (deg >= 80)  return 2;  // Hard, needs heavy braking (80-119°)
+  if (deg >= 60)  return 3;  // Moderate, lift and brake (60-79°)
+  if (deg >= 40)  return 4;  // Easy curve, slight lift (40-59°)
+  if (deg >= 20)  return 5;  // Gentle, maintain speed (20-39°)
+  return 6;                   // Barely a bend, flat out (<20°)
+}
+
 function cleanForSpeech(text) {
   if (!text) return text;
 
-  // Remove "CAUTION - " or "CAUTION – " prefix
+  // Remove "CAUTION - " prefix
   let clean = text.replace(/^CAUTION\s*[-–—]\s*/i, '');
 
   // Remove "DANGER - " prefix
   clean = clean.replace(/^DANGER\s*[-–—]\s*/i, '');
 
-  // Replace dashes with commas for speech flow (before other processing)
-  clean = clean.replace(/\s*[-–—]\s*/g, ', ');
+  // Check for modifiers BEFORE stripping degrees
+  const hasTightens = /tightens/i.test(clean);
+  const hasOpens = /opens/i.test(clean);
+  const hasLong = /\blong\b/i.test(clean);
+  const hasDontCut = /don'?t\s*cut/i.test(clean);
 
-  // Handle each "Direction Degrees°" pattern individually
-  // This regex does NOT require end-of-string, so it works for compound patterns
+  // Handle "Technical section" and other non-curve announcements
+  if (/technical section|urban section|open road|highway|clear\./i.test(clean)) {
+    // Replace dashes with periods and ensure proper capitalization after periods
+    let result = clean.replace(/\s*-\s*/g, '. ')
+    // Capitalize first letter after each period
+    result = result.replace(/\.\s+([a-z])/g, (match, letter) => `. ${letter.toUpperCase()}`)
+    result = result.trim()
+    // Ensure ends with period
+    if (!result.endsWith('.')) result += '.'
+    return result;
+  }
+
+  // Handle HAIRPIN specially - keep the word
+  if (/hairpin/i.test(clean)) {
+    // "Right into HAIRPIN LEFT" → "Right into hairpin left"
+    // "HAIRPIN LEFT" → "Hairpin left"
+    clean = clean.toLowerCase();
+    clean = clean.replace(/\s*\d+°?\s*/g, ' '); // strip any degrees
+    clean = clean.replace(/\s+/g, ' ').trim();
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  }
+
+  // Track if we have compound patterns (for "into" insertion)
+  let hasCompound = false;
+
+  // Strip modifier words from the text before conversion (we'll add them back later)
+  clean = clean.replace(/,?\s*(tightens|opens|long|don'?t\s*cut)/gi, '');
+
+  // Convert each "Direction Degrees°" to rally scale
+  // Match patterns like "Hard left 120°", "Left 74°", "Right 31°"
   clean = clean.replace(/(Hard\s+)?(left|right)\s+(\d+)°?/gi, (match, hardPrefix, direction, degrees) => {
     const deg = parseInt(degrees);
     const dir = direction.toLowerCase();
+    const scale = degreesToRallyScale(deg);
 
-    // If already has "Hard" prefix from the callout engine, keep it
-    if (hardPrefix) return `hard ${dir}`;
-
-    // Severity scale based on degrees
-    if (deg < 20) return `slight ${dir}`;
-    if (deg < 45) return `easy ${dir}`;
-    if (deg < 70) return `${dir}, tightens`;
-    if (deg < 100) return `sharp ${dir}`;
-    return `hard ${dir}`;
+    // Only say "Hairpin" for 180°+ turns (true hairpins)
+    if (deg >= 180) return `hairpin ${dir}`;
+    // Scale 1 (120-179°) uses numeric form
+    if (scale === 1) return `${dir} 1`;
+    if (scale === 6) return `${dir} 6`;  // modifier added later
+    return `${dir} ${scale}`;
   });
 
-  // Handle compound patterns: "easy left, easy right" → "easy left into easy right"
-  // The comma between two direction phrases should become "into"
-  clean = clean.replace(/(left|right)(,\s*)(slight\s+|easy\s+|sharp\s+|hard\s+)?(left|right)/gi,
-    (match, dir1, sep, severity, dir2) => {
-      if (severity) {
-        return `${dir1} into ${severity}${dir2}`;
-      }
-      return `${dir1} into ${dir2}`;
-    }
-  );
+  // Convert comma-separated curves to "into" notation
+  // "left 5, right 5" → "left 5 into right 5"
+  // Also handles "left 5, left 3" etc
+  clean = clean.replace(/(\d)(,?\s+)(left|right)/gi, (match, num, sep, dir) => {
+    hasCompound = true;
+    return `${num} into ${dir}`;
+  });
 
-  // Clean remaining degree symbols
+  // Also handle "direction into direction" that's already there (e.g., "right into hairpin left")
+  if (/\binto\b/i.test(clean)) {
+    hasCompound = true;
+  }
+
+  // Strip remaining degree symbols and "Hard" prefix artifacts
   clean = clean.replace(/°/g, '');
 
-  // Normalize case: HARD → Hard, HAIRPIN → hairpin, LEFT → left, RIGHT → right
-  clean = clean.replace(/\bHARD\b/g, 'hard');
-  clean = clean.replace(/\bHAIRPIN\b/g, 'hairpin');
-  clean = clean.replace(/\bLEFT\b/g, 'left');
-  clean = clean.replace(/\bRIGHT\b/g, 'right');
+  // Normalize case
+  clean = clean.replace(/\bHARD\b/gi, '');
   clean = clean.replace(/\bINTO\b/g, 'into');
 
-  // Clean extra whitespace
+  // Build modifiers list
+  let modifiers = [];
+  if (hasTightens) modifiers.push('tightens');
+  if (hasOpens) modifiers.push('opens');
+  if (hasLong) modifiers.push('long');
+  if (hasDontCut) modifiers.push("don't cut");
+
+  // Add modifiers to the end of the phrase
+  if (modifiers.length > 0) {
+    clean = clean + ', ' + modifiers.join(', ');
+  }
+
+  // Add "flat out" for severity 6 curves (if not already modified and not compound)
+  if (/\b6\b/.test(clean) && modifiers.length === 0 && !hasCompound) {
+    clean = clean + ', flat out';
+  }
+
+  // Clean whitespace
   clean = clean.replace(/\s+/g, ' ').trim();
 
   // Capitalize first letter
@@ -89,49 +140,47 @@ function cleanForSpeech(text) {
 // ================================
 // UNIT TEST for cleanForSpeech
 // Run in console: window.testCleanForSpeech()
-// ROUND 4: Updated expected values for new severity scale
+// ROUND 5: Rally 1-6 scale tests
 // ================================
 function testCleanForSpeech() {
   const tests = [
-    // Hard prefix cases (100°+)
-    { input: 'CAUTION - Hard left 180°', expected: 'Hard left' },
-    { input: 'CAUTION - Hard left 120°', expected: 'Hard left' },
-    { input: 'CAUTION - Hard right 136°', expected: 'Hard right' },
-    { input: 'CAUTION - Hard left 106°', expected: 'Hard left' },
-    { input: 'CAUTION - Hard right 101°', expected: 'Hard right' },
-    // Sharp range (70-100°)
-    { input: 'CAUTION - Left 88°', expected: 'Sharp left' },
-    { input: 'CAUTION - Left 87°', expected: 'Sharp left' },
-    { input: 'CAUTION - Right 72°', expected: 'Sharp right' },
-    { input: 'CAUTION - Right 71°', expected: 'Sharp right' },
-    // Tightens range (45-70°)
-    { input: 'CAUTION - Right 67°', expected: 'Right, tightens' },
-    { input: 'CAUTION - Right 57°', expected: 'Right, tightens' },
-    { input: 'CAUTION - Left 65°', expected: 'Left, tightens' },
-    { input: 'CAUTION - Left 56°', expected: 'Left, tightens' },
-    { input: 'CAUTION - Right 47°', expected: 'Right, tightens' },
-    { input: 'CAUTION - Right 46°', expected: 'Right, tightens' },
-    // Easy range (20-45°) - FIXED: was returning bare direction
-    { input: 'Left 30°', expected: 'Easy left' },
-    { input: 'Right 31°', expected: 'Easy right' },
-    { input: 'Right 27°', expected: 'Easy right' },
-    { input: 'Right 25°', expected: 'Easy right' },
-    { input: 'Left 28°', expected: 'Easy left' },
-    // Slight range (0-20°)
-    { input: 'Left 12°', expected: 'Slight left' },
-    { input: 'Left 13°', expected: 'Slight left' },
-    // Compound patterns - FIXED: now uses "into" properly
-    { input: 'Left 32°, Right 31°', expected: 'Easy left into easy right' },
-    { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Hard left into hard right' },
-    // Special cases
+    // Basic severity conversions - Rally 1-6 scale
+    { input: 'CAUTION - Hard left 180°', expected: 'Hairpin left' },
+    { input: 'CAUTION - Hard left 120°', expected: 'Left 1' },
+    { input: 'CAUTION - Hard right 103°', expected: 'Right 2' },
+    { input: 'CAUTION - Left 88°', expected: 'Left 2' },
+    { input: 'CAUTION - Left 87°', expected: 'Left 2' },
+    { input: 'CAUTION - Right 67°', expected: 'Right 3' },
+    { input: 'CAUTION - Right 57°', expected: 'Right 4' },
+    { input: 'CAUTION - Left 65°', expected: 'Left 3' },
+    { input: 'CAUTION - Left 59°', expected: 'Left 4' },
+    { input: 'Left 30°', expected: 'Left 5' },
+    { input: 'Right 31°', expected: 'Right 5' },
+    { input: 'Right 27°', expected: 'Right 5' },
+    { input: 'Right 25°', expected: 'Right 5' },
+    { input: 'Left 12°', expected: 'Left 6, flat out' },
+    { input: 'Left 13°', expected: 'Left 6, flat out' },
+    { input: 'Right 34°', expected: 'Right 5' },
+    { input: 'Left 27°', expected: 'Left 5' },
+
+    // Compound callouts - "into" notation
+    { input: 'Left 32°, Right 31°', expected: 'Left 5 into right 5' },
+    { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Left 2 into right 2' },
+
+    // Special patterns
     { input: 'Right into HAIRPIN LEFT', expected: 'Right into hairpin left' },
-    { input: 'Technical section ahead - stay sharp', expected: 'Technical section ahead, stay sharp' },
+    { input: 'Technical section ahead - stay sharp', expected: 'Technical section ahead. Stay sharp.' },
+
+    // With modifiers (if they appear in original text)
+    { input: 'CAUTION - Right 67°, tightens', expected: 'Right 3, tightens' },
+    { input: 'CAUTION - Left 59°, opens', expected: 'Left 4, opens' },
+    { input: 'CAUTION - Right 72°, long', expected: 'Right 3, long' },
   ];
 
   let passed = 0;
   let failed = 0;
 
-  console.log('\n🧪 TESTING cleanForSpeech()\n');
+  console.log('\n🧪 TESTING cleanForSpeech() - Rally 1-6 Scale\n');
 
   tests.forEach((test, i) => {
     const result = cleanForSpeech(test.input);
@@ -169,6 +218,9 @@ export function useSpeech() {
   const lastSpokenRef = useRef(null)
   const lastSpokenTimeRef = useRef(0)
   const isPlayingRef = useRef(false)
+
+  // ROUND 5 CHANGE 5: Track currently playing audio for priority-based interruption
+  const currentlyPlayingRef = useRef(null) // { text, priority }
 
   // Initialize
   useEffect(() => {
@@ -284,13 +336,16 @@ export function useSpeech() {
       utterance.pitch = 1.0
       utterance.volume = settings.volume || 1.0
 
+      // ROUND 5 CHANGE 5: Clear currentlyPlayingRef on audio end
       utterance.onend = () => {
         isPlayingRef.current = false
+        currentlyPlayingRef.current = null
         setSpeaking(false, '')
       }
-      
+
       utterance.onerror = () => {
         isPlayingRef.current = false
+        currentlyPlayingRef.current = null
         setSpeaking(false, '')
       }
 
@@ -368,8 +423,10 @@ export function useSpeech() {
       globalAudioElement.currentTime = 0
       
       // Set up event handlers
+      // ROUND 5 CHANGE 5: Clear currentlyPlayingRef on audio end
       const onEnded = () => {
         isPlayingRef.current = false
+        currentlyPlayingRef.current = null
         setSpeaking(false, '')
         globalAudioElement.removeEventListener('ended', onEnded)
         globalAudioElement.removeEventListener('error', onError)
@@ -377,6 +434,7 @@ export function useSpeech() {
       const onError = (e) => {
         console.log('🔊 Playback error:', e)
         isPlayingRef.current = false
+        currentlyPlayingRef.current = null
         setSpeaking(false, '')
         globalAudioElement.removeEventListener('ended', onEnded)
         globalAudioElement.removeEventListener('error', onError)
@@ -405,8 +463,9 @@ export function useSpeech() {
 
   // ================================
   // MAIN SPEAK FUNCTION
-  // BUG FIX #3: Always cancel previous audio on new callout
-  // This prevents audio queue stacking - only the most recent callout plays
+  // ROUND 5 CHANGE 5: Priority-based interruption
+  // Higher priority can interrupt lower priority, same priority can interrupt same
+  // low < normal < high
   // ================================
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled || !text) {
@@ -420,25 +479,38 @@ export function useSpeech() {
       return false
     }
 
-    // BUG FIX #3: ALWAYS cancel any currently playing audio
-    // This ensures we only ever hear the most recent/relevant callout
-    // The priority now only affects haptic feedback, not audio interruption
-    if (isPlayingRef.current) {
-      console.log(`🔊 Interrupting previous callout for: "${text.substring(0, 30)}..."`)
+    // ROUND 5 CHANGE 5: Priority-based interruption logic
+    const priorityRank = { low: 0, normal: 1, high: 2 }
+    const newRank = priorityRank[priority] ?? 1
+
+    if (isPlayingRef.current && currentlyPlayingRef.current) {
+      const currentRank = priorityRank[currentlyPlayingRef.current.priority] ?? 1
+
+      // Lower priority items cannot interrupt higher priority items
+      if (newRank < currentRank) {
+        console.log(`🔇 SKIPPED (lower priority): "${text.substring(0, 30)}..." (${priority}) while "${currentlyPlayingRef.current.text.substring(0, 20)}..." (${currentlyPlayingRef.current.priority}) playing`)
+        return false
+      }
+
+      // Same or higher priority - interrupt
+      console.log(`⏹️ INTERRUPTED: "${currentlyPlayingRef.current.text.substring(0, 20)}..." replaced by "${text.substring(0, 30)}..."`)
       globalAudioElement?.pause()
       if (globalAudioElement) {
         globalAudioElement.currentTime = 0
       }
       synthRef.current?.cancel()
       isPlayingRef.current = false
+      currentlyPlayingRef.current = null
     }
 
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    // BUG FIX #5: Clean text for natural TTS pronunciation
-    // "CAUTION - Right 67°" → "Sharp right"
-    // "HARD LEFT 120°" → "Hard left"
+    // Track what's playing
+    currentlyPlayingRef.current = { text, priority }
+
+    // Clean text for natural TTS pronunciation
+    // "CAUTION - Right 67°" → "Right 3"
     const spokenText = cleanForSpeech(text)
     console.log(`🔊 Speaking: "${spokenText}" (original: "${text}", ${priority})`)
 
@@ -455,6 +527,7 @@ export function useSpeech() {
     globalAudioElement?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
+    currentlyPlayingRef.current = null  // ROUND 5 CHANGE 5
     setSpeaking(false, '')
   }, [setSpeaking])
 
@@ -473,13 +546,18 @@ export function useSpeech() {
 
 // ================================
 // PRELOAD - Just fetch blob URLs, don't create Howls
+// ROUND 5: Updated for rally 1-6 scale callouts
 // ================================
 export async function preloadCopilotVoices(curves, segments, onProgress) {
   const essentialCallouts = [
-    'Left 2', 'Left 3', 'Left 4', 'Left 5',
-    'Right 2', 'Right 3', 'Right 4', 'Right 5',
-    'Technical section', 'Highway', 'Urban area',
-    'Entering technical section', 'Highway ahead'
+    // Rally scale callouts
+    'Left 1', 'Left 2', 'Left 3', 'Left 4', 'Left 5', 'Left 6',
+    'Right 1', 'Right 2', 'Right 3', 'Right 4', 'Right 5', 'Right 6',
+    'Hairpin left', 'Hairpin right',
+    'Left 6, flat out', 'Right 6, flat out',
+    // Zone announcements
+    'Technical section. Stay sharp.', 'Open road.', 'Urban section.',
+    'Clear. Open road.'
   ]
   
   let cached = 0

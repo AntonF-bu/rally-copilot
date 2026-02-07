@@ -127,6 +127,10 @@ export default function App() {
   const prevDistanceRef = useRef(0)
   const lastTickLogRef = useRef(0)
 
+  // ROUND 5 CHANGE 4: Distance-based silence tracking for chatter
+  // Track distance where last audio (curated or chatter) was spoken
+  const lastSpeakDistanceRef = useRef(0)
+
   // FIX #2: Distance tracking ref that NEVER resets during navigation
   // This survives React re-renders and effect re-runs
   const distanceStateRef = useRef({
@@ -313,13 +317,18 @@ export default function App() {
     
     if (zone) {
       const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.TECHNICAL
-      
+
       if (newMode !== currentMode) {
+        const prevZone = sortedZones.find(z =>
+          z.endDistance < zone.startDistance
+        )
         console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
         setCurrentMode(newMode)
-        
-        if (lastZoneAnnouncedRef.current !== zone.id) {
-          const announcement = getZoneAnnouncement(zone.character)
+
+        // ROUND 5 CHANGE 3: Zone announcements are now in curated callouts
+        // Only speak inline announcement if we don't have curated callouts
+        if (lastZoneAnnouncedRef.current !== zone.id && !curatedHighwayCallouts?.length) {
+          const announcement = getZoneAnnouncement(zone.character, prevZone?.character)
           if (announcement) {
             console.log(`📢 Zone: "${announcement}"`)
             speak(announcement, 'normal')
@@ -438,6 +447,7 @@ export default function App() {
         speak(calloutText, priority)
         announcedCuratedCalloutsRef.current.add(toFire.id)
         lastCalloutRef.current = now
+        lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
 
         if (toFire.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate([150])
@@ -567,6 +577,7 @@ export default function App() {
 
       announcedCuratedCalloutsRef.current.add(upcomingCallout.id)
       lastCalloutRef.current = now
+      lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
 
       if (upcomingCallout.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
         navigator.vibrate([150])
@@ -590,6 +601,7 @@ export default function App() {
 
     announcedCuratedCalloutsRef.current.add(calloutToSpeak.id)
     lastCalloutRef.current = now
+    lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
 
     if (calloutToSpeak.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
       navigator.vibrate([150])
@@ -647,15 +659,27 @@ export default function App() {
     if (distSinceLastCheck < 50) return
     lastChatterCheckRef.current = currentDist
 
-    // FIX ROUND 4: Respect minimum gap after last spoken callout (15 seconds)
-    // Chatter should not interrupt curve callouts or fire too close after them
-    if (now - lastCalloutRef.current < 15000) return
+    // ROUND 5 CHANGE 4: Distance-based silence check (400m minimum)
+    // This scales with speed automatically - faster = more distance covered
+    const MIN_SILENCE_DISTANCE = 400  // meters
+    const distSinceLastSpeak = currentDist - lastSpeakDistanceRef.current
+
+    if (distSinceLastSpeak < MIN_SILENCE_DISTANCE) {
+      if (DEBUG_CALLOUTS && now - lastChatterLogRef.current > 2000) {
+        console.log(`💬 CHATTER SKIPPED (too close): ${Math.round(distSinceLastSpeak)}m since last speak (min ${MIN_SILENCE_DISTANCE}m)`)
+      }
+      return
+    }
+
+    // Also respect time-based minimum (backup)
+    if (now - lastCalloutRef.current < 10000) return
 
     // getChatter handles zone checking and threshold crossing internally
     const chatter = getChatter()
     if (chatter) {
-      console.log(`🎤 CHATTER FIRED: "${chatter}"`)
+      console.log(`🎤 CHATTER FIRED: "${chatter}" (${Math.round(distSinceLastSpeak)}m since last speak)`)
       speak(chatter, 'low')
+      lastSpeakDistanceRef.current = currentDist  // ROUND 5 CHANGE 4
     }
   }, [isRunning, settings.voiceEnabled, inHighwayZone, userDistanceAlongRoute, getChatter, speak, chatterTimeline])
 
@@ -1060,12 +1084,20 @@ export default function App() {
   )
 }
 
-// Zone transition announcements
-function getZoneAnnouncement(character) {
-  const announcements = {
-    [ROUTE_CHARACTER.TECHNICAL]: 'Technical section',
-    [ROUTE_CHARACTER.TRANSIT]: 'Highway',
-    [ROUTE_CHARACTER.URBAN]: 'Urban area'
+// ROUND 5 CHANGE 3: Zone transition announcements
+// Now returns full rally-style zone announcements
+function getZoneAnnouncement(character, previousCharacter = null) {
+  if (character === ROUTE_CHARACTER.TECHNICAL) {
+    return 'Technical section. Stay sharp.'
   }
-  return announcements[character] || null
+  if (character === ROUTE_CHARACTER.TRANSIT) {
+    if (previousCharacter === ROUTE_CHARACTER.TECHNICAL) {
+      return 'Clear. Open road.'
+    }
+    return 'Open road.'
+  }
+  if (character === ROUTE_CHARACTER.URBAN) {
+    return 'Urban section.'
+  }
+  return null
 }
