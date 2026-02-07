@@ -262,6 +262,8 @@ export function useSpeech() {
 
   // ================================
   // MAIN SPEAK FUNCTION
+  // BUG FIX #3: Always cancel previous audio on new callout
+  // This prevents audio queue stacking - only the most recent callout plays
   // ================================
   const speak = useCallback(async (text, priority = 'normal') => {
     if (!settings.voiceEnabled || !text) {
@@ -269,19 +271,23 @@ export function useSpeech() {
     }
 
     const now = Date.now()
-    
-    // Prevent duplicates
+
+    // Prevent duplicates (same text within 1.5s)
     if (text === lastSpokenRef.current && now - lastSpokenTimeRef.current < 1500) {
       return false
     }
 
-    // Handle priority
-    if (priority === 'high') {
+    // BUG FIX #3: ALWAYS cancel any currently playing audio
+    // This ensures we only ever hear the most recent/relevant callout
+    // The priority now only affects haptic feedback, not audio interruption
+    if (isPlayingRef.current) {
+      console.log(`🔊 Interrupting previous callout for: "${text.substring(0, 30)}..."`)
       globalAudioElement?.pause()
+      if (globalAudioElement) {
+        globalAudioElement.currentTime = 0
+      }
       synthRef.current?.cancel()
       isPlayingRef.current = false
-    } else if (isPlayingRef.current) {
-      return false
     }
 
     lastSpokenRef.current = text
@@ -292,7 +298,7 @@ export function useSpeech() {
     // Try ElevenLabs first
     const success = await speakElevenLabs(text)
     if (success) return true
-    
+
     // Fall back to native
     console.log('🔊 Falling back to native')
     return speakNative(text)

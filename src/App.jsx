@@ -283,12 +283,41 @@ export default function App() {
     const prevDist = prevDistanceRef.current
     const now = Date.now()
 
-    // BUG FIX #4: Detect seek jumps and handle intermediate callouts
-    const JUMP_THRESHOLD = 200 // meters - anything larger than normal tick movement is a "jump"
-    const jumpDistance = userDist - prevDist
+    // BUG FIX #2 (Option A): Skip callout processing while seeking/scrubbing
+    // When user is dragging the progress bar, just mark passed callouts as played silently
+    if (simulatorRef.current?.isSeeking) {
+      // Find all unplayed callouts we've passed
+      const passedCallouts = curatedHighwayCallouts.filter(c => {
+        if (announcedCuratedCalloutsRef.current.has(c.id)) return false
+        const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        return calloutDist < userDist
+      })
 
-    if (jumpDistance > JUMP_THRESHOLD) {
-      console.log(`🚀 SEEK DETECTED: jumped from ${Math.round(prevDist)}m to ${Math.round(userDist)}m (${Math.round(jumpDistance)}m)`)
+      if (passedCallouts.length > 0) {
+        console.log(`🔇 SEEKING: marking ${passedCallouts.length} callouts as played (silent)`)
+        passedCallouts.forEach(c => {
+          announcedCuratedCalloutsRef.current.add(c.id)
+        })
+      }
+
+      // Update previous distance and return early - no callout firing during seek
+      prevDistanceRef.current = userDist
+      return
+    }
+
+    // BUG FIX #2 (Option B): Speed-aware seek detection
+    // Calculate expected movement based on current speed and tick interval
+    const tickIntervalMs = 500 // approximate tick interval
+    const currentSpeedMps = (currentSpeed || 30) * 0.44704 // mph to m/s
+    const expectedTickMovement = currentSpeedMps * (tickIntervalMs / 1000)
+    // At 180mph = 80m/s, expected tick is ~40m. Use 3x margin for tolerance
+    const seekThreshold = Math.max(200, expectedTickMovement * 3)
+
+    const jumpDistance = userDist - prevDist
+    const isSeekJump = jumpDistance > seekThreshold
+
+    if (isSeekJump) {
+      console.log(`🚀 SEEK DETECTED: jumped ${Math.round(jumpDistance)}m (threshold=${Math.round(seekThreshold)}m at ${Math.round(currentSpeed || 0)}mph)`)
 
       // Find all unplayed callouts in the jumped range
       const jumpedOverCallouts = curatedHighwayCallouts.filter(c => {
@@ -481,26 +510,53 @@ export default function App() {
   // HIGHWAY COMPANION CHATTER
   // FIXED: Distance-based triggers instead of setInterval
   // Uses pre-generated chatter timeline from RoutePreview
+  // BUG FIX #4: Added debug logging and better integration
   // ================================
   const lastChatterCheckRef = useRef(0)
-  
-  useEffect(() => {
-    if (!isRunning || !settings.voiceEnabled || !inHighwayZone) return
+  const lastChatterLogRef = useRef(0)
 
-    // BUG FIX #5: Check chatter every 100m instead of 500m
-    // The trigger window uses threshold crossing, so more frequent checks are needed
+  // Get chatter timeline from store
+  const chatterTimeline = useStore(state => state.chatterTimeline)
+
+  useEffect(() => {
+    if (!isRunning || !settings.voiceEnabled) return
+
     const currentDist = userDistanceAlongRoute
+    const now = Date.now()
+
+    // Debug log chatter status every 2 seconds (reduced frequency)
+    if (DEBUG_CALLOUTS && now - lastChatterLogRef.current > 2000) {
+      lastChatterLogRef.current = now
+      const timeline = chatterTimeline || window.__chatterTimeline
+      if (timeline?.length > 0) {
+        const nextChatter = timeline.find(c => {
+          const triggerDist = (c.triggerMile || c.mile || 0) * 1609.34
+          return triggerDist > currentDist
+        })
+        if (nextChatter) {
+          const nextDist = (nextChatter.triggerMile || nextChatter.mile || 0) * 1609.34
+          console.log(`💬 CHATTER: next at ${Math.round(nextDist)}m (${((nextChatter.triggerMile || nextChatter.mile || 0)).toFixed(1)}mi), car at ${Math.round(currentDist)}m, distAway=${Math.round(nextDist - currentDist)}m, inHighway=${inHighwayZone}`)
+        }
+      } else {
+        console.log(`💬 CHATTER: no timeline available, inHighway=${inHighwayZone}`)
+      }
+    }
+
+    // Check chatter every 50m for more responsive triggering
     const distSinceLastCheck = Math.abs(currentDist - lastChatterCheckRef.current)
-    if (distSinceLastCheck < 100) return // Check every 100m
+    if (distSinceLastCheck < 50) return
     lastChatterCheckRef.current = currentDist
 
-    // getChatter now uses threshold crossing (like callouts)
+    // Respect minimum gap after last spoken callout (10 seconds)
+    if (now - lastCalloutRef.current < 10000) return
+
+    // getChatter handles zone checking and threshold crossing internally
     const chatter = getChatter()
     if (chatter) {
-      console.log(`🎤 CHATTER: "${chatter}"`)
+      console.log(`🎤 CHATTER FIRED: "${chatter}"`)
       speak(chatter, 'low')
     }
-  }, [isRunning, settings.voiceEnabled, inHighwayZone, userDistanceAlongRoute, getChatter, speak])
+  }, [isRunning, settings.voiceEnabled, inHighwayZone, userDistanceAlongRoute, getChatter, speak, chatterTimeline])
 
   // ================================
   // LEGACY CURVE CALLOUTS (fallback when no curated callouts)
