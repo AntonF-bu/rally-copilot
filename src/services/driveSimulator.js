@@ -169,6 +169,13 @@ export class DriveSimulator {
     this.lastTickTime = null
     this.initialDelayComplete = false
 
+    // NEW: Speed override mode (replaces time multiplier)
+    // When set, overrides zone/curve speed modeling with fixed speed
+    this.speedOverride = null  // Speed in mph, or null to use zone-based speed
+
+    // NEW: Seeking state - prevents callout cascade during scrubbing
+    this.isSeeking = false
+
     // Timing
     this.tickInterval = null
 
@@ -297,17 +304,23 @@ export class DriveSimulator {
       console.log('🚗 Initial delay complete, starting drive')
     }
 
-    // Calculate time delta
-    const dt = (now - this.lastTickTime) / 1000 * this.playbackSpeed
+    // Calculate time delta (no more time multiplier - use speed override instead)
+    const dt = (now - this.lastTickTime) / 1000
     this.lastTickTime = now
 
     // Get previous zone for transition calculation
     const prevZone = this.currentZone
 
-    // Calculate current speed
-    const speedMps = this.calculateSpeed(this.currentDistance, prevZone)
+    // NEW: Use speed override if set, otherwise use zone-based speed
+    let speedMps
+    if (this.speedOverride !== null) {
+      // Convert mph to m/s (1 mph = 0.44704 m/s)
+      speedMps = this.speedOverride * 0.44704
+    } else {
+      speedMps = this.calculateSpeed(this.currentDistance, prevZone)
+    }
 
-    // Advance position
+    // Advance position (smooth, consistent movement)
     this.currentDistance += speedMps * dt
 
     // Check for zone change
@@ -410,14 +423,45 @@ export class DriveSimulator {
   }
 
   /**
-   * Set playback speed multiplier
+   * Set playback speed multiplier (DEPRECATED - use setSpeedOverride instead)
    */
   setSpeed(multiplier) {
     const validSpeeds = [1, 2, 4, 8]
     if (validSpeeds.includes(multiplier)) {
-      console.log(`🚗 Playback speed: ${multiplier}x`)
+      console.log(`🚗 Playback speed: ${multiplier}x (legacy mode)`)
       this.playbackSpeed = multiplier
     }
+  }
+
+  /**
+   * NEW: Set speed override in mph
+   * This replaces the time multiplier approach for smoother simulation
+   * @param {number|null} speedMph - Speed in mph, or null to use zone-based speed
+   */
+  setSpeedOverride(speedMph) {
+    if (speedMph === null) {
+      console.log('🚗 Speed override: OFF (using zone-based speed)')
+      this.speedOverride = null
+    } else {
+      console.log(`🚗 Speed override: ${speedMph} mph`)
+      this.speedOverride = speedMph
+    }
+  }
+
+  /**
+   * NEW: Start seeking mode (prevents callout cascade during scrubbing)
+   */
+  startSeeking() {
+    this.isSeeking = true
+    console.log('🚗 Seek mode: STARTED')
+  }
+
+  /**
+   * NEW: End seeking mode
+   */
+  endSeeking() {
+    this.isSeeking = false
+    console.log('🚗 Seek mode: ENDED')
   }
 
   /**
@@ -450,7 +494,13 @@ export class DriveSimulator {
    * Get current progress info
    */
   getProgress() {
-    const speedMps = this.calculateSpeed(this.currentDistance)
+    // Use speed override if set, otherwise calculate from zone
+    let speedMps
+    if (this.speedOverride !== null) {
+      speedMps = this.speedOverride * 0.44704
+    } else {
+      speedMps = this.calculateSpeed(this.currentDistance)
+    }
     const speedMph = speedMps * 2.237
 
     return {
@@ -464,7 +514,10 @@ export class DriveSimulator {
       currentZone: this.currentZone?.character || 'unknown',
       isRunning: this.isRunning,
       isPaused: this.isPaused,
-      playbackSpeed: this.playbackSpeed
+      playbackSpeed: this.playbackSpeed,
+      // NEW: Include speed override and seeking state
+      speedOverride: this.speedOverride,
+      isSeeking: this.isSeeking
     }
   }
 }

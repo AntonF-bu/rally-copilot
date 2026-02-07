@@ -42,8 +42,12 @@ export default function DriveSimulatorPanel({ simulator, onStop }) {
 
   const handleMouseDown = useCallback((e) => {
     setIsDragging(true)
+    // NEW: Start seeking mode to prevent callout cascade
+    if (simulator) {
+      simulator.startSeeking()
+    }
     handleSeek(e)
-  }, [handleSeek])
+  }, [simulator, handleSeek])
 
   const handleMouseMove = useCallback((e) => {
     if (isDragging) handleSeek(e)
@@ -51,7 +55,11 @@ export default function DriveSimulatorPanel({ simulator, onStop }) {
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
-  }, [])
+    // NEW: End seeking mode
+    if (simulator) {
+      simulator.endSeeking()
+    }
+  }, [simulator])
 
   // Add/remove global mouse handlers when dragging
   useEffect(() => {
@@ -80,10 +88,10 @@ export default function DriveSimulatorPanel({ simulator, onStop }) {
     setProgress(simulator.getProgress())
   }, [simulator, progress?.isPaused])
 
-  // Change playback speed
-  const handleSpeedChange = useCallback((speed) => {
+  // Change speed override (NEW: mph instead of multiplier)
+  const handleSpeedChange = useCallback((speedMph) => {
     if (!simulator) return
-    simulator.setSpeed(speed)
+    simulator.setSpeedOverride(speedMph)
     setProgress(simulator.getProgress())
   }, [simulator])
 
@@ -148,22 +156,22 @@ export default function DriveSimulatorPanel({ simulator, onStop }) {
             )}
           </button>
 
-          {/* Speed selector */}
+          {/* Speed selector (NEW: mph instead of multiplier) */}
           <div className="flex items-center gap-1">
-            {[1, 2, 4, 8].map(speed => (
+            {[60, 90, 120, 180].map(speed => (
               <button
                 key={speed}
                 onClick={() => handleSpeedChange(speed)}
-                className="px-3 py-1.5 rounded-full text-xs font-bold transition-all"
+                className="px-2 py-1.5 rounded-full text-xs font-bold transition-all"
                 style={{
-                  background: progress.playbackSpeed === speed
+                  background: progress.speedOverride === speed
                     ? 'rgba(232, 98, 44, 0.2)'
                     : 'rgba(255, 255, 255, 0.05)',
-                  color: progress.playbackSpeed === speed ? '#E8622C' : 'rgba(255, 255, 255, 0.6)',
-                  border: `1px solid ${progress.playbackSpeed === speed ? 'rgba(232, 98, 44, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`
+                  color: progress.speedOverride === speed ? '#E8622C' : 'rgba(255, 255, 255, 0.6)',
+                  border: `1px solid ${progress.speedOverride === speed ? 'rgba(232, 98, 44, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`
                 }}
               >
-                {speed}x
+                {speed}
               </button>
             ))}
           </div>
