@@ -92,14 +92,18 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   const zoneColor = currentCharacter ? ZONE_COLORS[currentCharacter] : ZONE_COLORS.technical
   const characterLabel = currentCharacter ? CHARACTER_LABELS[currentCharacter] : null
 
-  // Get upcoming curated callouts
+  // Debug flag for HUD logging
+  const DEBUG_HUD = false
+
+  // Get upcoming curated callouts (only those AHEAD of the car)
   const upcomingCallouts = useMemo(() => {
     if (!curatedHighwayCallouts?.length) return []
-    
-    return curatedHighwayCallouts
+
+    const filtered = curatedHighwayCallouts
       .filter(callout => {
         const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
         const distanceToCallout = calloutDist - userDistance
+        // Only show callouts that are AHEAD (positive distance) and within 2km
         return distanceToCallout > 0 && distanceToCallout < 2000
       })
       .sort((a, b) => {
@@ -108,10 +112,21 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
         return distA - distB
       })
       .slice(0, 5)
+
+    return filtered
   }, [curatedHighwayCallouts, userDistance])
 
   // Next callout (for main display)
   const nextCallout = upcomingCallouts[0] || null
+
+  // Debug: log HUD state periodically
+  useEffect(() => {
+    if (!DEBUG_HUD || !isRunning) return
+    if (nextCallout) {
+      const nextDist = nextCallout.triggerDistance ?? (nextCallout.triggerMile * 1609.34)
+      console.log(`📺 HUD: showing "${(nextCallout.text || '').substring(0, 25)}..." at ${Math.round(nextDist)}m, car at ${Math.round(userDistance)}m, dist ahead: ${Math.round(nextDist - userDistance)}m`)
+    }
+  }, [nextCallout?.id, userDistance, isRunning])
 
   // Calculate route progress
   const routeProgress = useMemo(() => {
