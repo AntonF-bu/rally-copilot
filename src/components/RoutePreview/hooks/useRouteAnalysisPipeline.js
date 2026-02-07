@@ -18,6 +18,131 @@ import { generateChatterTimeline } from '../../../services/highwayChatterService
 import { dumpHighwayData } from '../../../services/highwayDataDebug'
 import { getLLMApiKey, hasLLMApiKey } from '../../../services/llmZoneService'
 
+// ================================
+// ROUND 5 CHANGE 2: Merge close callouts in technical zones
+// A real rally co-driver chains close curves together
+// ================================
+function getZoneAtDistance(distance, zones) {
+  if (!zones?.length) return null
+  for (const zone of zones) {
+    if (distance >= zone.startDistance && distance <= zone.endDistance) {
+      return zone.character
+    }
+  }
+  return null
+}
+
+// ================================
+// ROUND 5 CHANGE 3: Zone transition announcements
+// Announce every zone change for driver awareness
+// ================================
+function getZoneAnnouncementText(entering, leaving) {
+  if (entering === 'technical') return "Technical section. Stay sharp."
+  if (entering === 'transit' && leaving === 'technical') return "Clear. Open road."
+  if (entering === 'transit') return "Open road."
+  if (entering === 'urban') return "Urban section."
+  return ""
+}
+
+function generateZoneAnnouncements(zones) {
+  if (!zones?.length) return []
+
+  const announcements = []
+
+  zones.forEach((zone, i) => {
+    const prevZone = i > 0 ? zones[i - 1] : null
+    const text = getZoneAnnouncementText(zone.character, prevZone?.character)
+
+    if (text) {
+      announcements.push({
+        id: `zone-${i}-${zone.character}`,
+        position: null,
+        triggerDistance: zone.startDistance + 50, // 50m into the zone
+        triggerMile: (zone.startDistance + 50) / 1609.34,
+        text: text,
+        shortText: text,
+        type: 'zone_announcement',
+        priority: 'normal',
+        zone: zone.character,
+        isZoneAnnouncement: true,
+      })
+      console.log(`📍 Zone announcement: "${text}" at ${Math.round(zone.startDistance + 50)}m`)
+    }
+  })
+
+  return announcements
+}
+
+function mergeCloseCallouts(sortedCallouts, zones) {
+  if (!sortedCallouts?.length || !zones?.length) return sortedCallouts
+
+  const MERGE_DISTANCE = 250 // meters - if next curve is within 250m, merge
+  const MAX_CHAIN = 3 // max curves per merged callout
+
+  const merged = []
+  let i = 0
+
+  while (i < sortedCallouts.length) {
+    const current = sortedCallouts[i]
+    const currentDist = current.triggerDistance ?? (current.triggerMile ?? current.mile ?? 0) * 1609.34
+
+    // Check if we're in a technical zone
+    const currentZone = getZoneAtDistance(currentDist, zones)
+    if (currentZone !== 'technical') {
+      merged.push(current)
+      i++
+      continue
+    }
+
+    // Start a chain
+    let chain = [current]
+    let j = i + 1
+
+    while (j < sortedCallouts.length && chain.length < MAX_CHAIN) {
+      const next = sortedCallouts[j]
+      const nextDist = next.triggerDistance ?? (next.triggerMile ?? next.mile ?? 0) * 1609.34
+      const prevDist = chain[chain.length - 1].triggerDistance ??
+                       (chain[chain.length - 1].triggerMile ?? chain[chain.length - 1].mile ?? 0) * 1609.34
+      const gap = nextDist - prevDist
+
+      // Also check next is in technical zone
+      const nextZone = getZoneAtDistance(nextDist, zones)
+      if (nextZone !== 'technical') break
+
+      if (gap <= MERGE_DISTANCE && gap > 0) {
+        chain.push(next)
+        j++
+      } else {
+        break
+      }
+    }
+
+    if (chain.length === 1) {
+      // No merge needed
+      merged.push(current)
+    } else {
+      // Create merged callout
+      const mergedText = chain.map(c => c.text).join(', ')
+      const mergedCallout = {
+        ...current,
+        text: mergedText,
+        mergedFrom: chain,
+        isMerged: true,
+        mergedCount: chain.length,
+      }
+      merged.push(mergedCallout)
+      console.log(`🔗 MERGED ${chain.length} callouts: "${mergedText.substring(0, 60)}..."`)
+
+      // Don't add the subsequent callouts (they're merged)
+    }
+
+    i = j
+  }
+
+  console.log(`📋 Merging: ${sortedCallouts.length} callouts → ${merged.length} (${sortedCallouts.length - merged.length} merged)`)
+  return merged
+}
+
 /**
  * Hook to run the full route analysis pipeline
  * @param {Object} routeData - Route with coordinates, legs, distance, curves
@@ -296,7 +421,24 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
                 console.log(`  ${i + 1}. ${Math.round(trigDist)}m (${(trigDist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
               })
 
-              const displayCallouts = sortedCallouts
+              // ROUND 5 CHANGE 2: Merge close callouts in technical zones
+              console.log('\n🔗 STAGE 4: Merging close callouts in technical zones')
+              const mergedCallouts = mergeCloseCallouts(sortedCallouts, activeZones)
+
+              // ROUND 5 CHANGE 3: Add zone transition announcements
+              console.log('\n📍 STAGE 5: Adding zone transition announcements')
+              const zoneAnnouncements = generateZoneAnnouncements(activeZones)
+              console.log(`   Generated ${zoneAnnouncements.length} zone announcements`)
+
+              // Combine callouts with zone announcements and re-sort
+              const allCallouts = [...mergedCallouts, ...zoneAnnouncements]
+              allCallouts.sort((a, b) => {
+                const distA = a.triggerDistance ?? (a.triggerMile ?? a.mile ?? 0) * 1609.34
+                const distB = b.triggerDistance ?? (b.triggerMile ?? b.mile ?? 0) * 1609.34
+                return distA - distB
+              })
+
+              const displayCallouts = allCallouts
               setCuratedCallouts(displayCallouts)
               setAgentResult({
                 summary: { summary: finalResult.analysis },
