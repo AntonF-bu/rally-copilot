@@ -17,7 +17,13 @@ const getCacheKey = (text) => text.toLowerCase().trim()
 // ================================
 // BUG FIX #5: Clean text for natural speech
 // Transforms raw callout text into TTS-friendly format
-// ROUND 3 FIX: Complete rewrite to fix doubling and missing info
+// ROUND 4 FIX: Complete rewrite for proper severity scale and compound patterns
+// Severity scale:
+//   0-20°:  "Slight {dir}" (barely a bend)
+//   20-45°: "Easy {dir}"   (gentle curve, notable)
+//   45-70°: "{Dir}, tightens" (moderate, needs attention)
+//   70-100°: "Sharp {dir}" (significant curve)
+//   100°+:  "Hard {dir}"   (severe, already has prefix)
 // ================================
 function cleanForSpeech(text) {
   if (!text) return text;
@@ -28,39 +34,42 @@ function cleanForSpeech(text) {
   // Remove "DANGER - " prefix
   clean = clean.replace(/^DANGER\s*[-–—]\s*/i, '');
 
-  // Handle compound callouts like "HARD LEFT 109° into HARD RIGHT 82°"
-  // Convert to: "Hard left into hard right"
-  clean = clean.replace(/(\w+)\s+(\w+)\s+\d+°/g, (match, word1, word2) => {
-    return `${word1} ${word2}`;
-  });
+  // Replace dashes with commas for speech flow (before other processing)
+  clean = clean.replace(/\s*[-–—]\s*/g, ', ');
 
-  // Handle simple callouts like "Left 88°" or "Right 57°" or "Hard left 120°"
-  // Strategy: convert degree to severity descriptor
-  clean = clean.replace(/^(Hard\s+)?(left|right)\s+(\d+)°?$/i, (match, hardPrefix, direction, degrees) => {
+  // Handle each "Direction Degrees°" pattern individually
+  // This regex does NOT require end-of-string, so it works for compound patterns
+  clean = clean.replace(/(Hard\s+)?(left|right)\s+(\d+)°?/gi, (match, hardPrefix, direction, degrees) => {
     const deg = parseInt(degrees);
     const dir = direction.toLowerCase();
 
-    // If already has "Hard" prefix, keep it, don't add more
-    if (hardPrefix) {
-      return `Hard ${dir}`;
-    }
+    // If already has "Hard" prefix from the callout engine, keep it
+    if (hardPrefix) return `hard ${dir}`;
 
-    // Add severity based on degrees
-    if (deg < 25) return `Slight ${dir}`;
-    if (deg < 45) return `${dir.charAt(0).toUpperCase() + dir.slice(1)}`; // "Right" or "Left" - mild curve
-    if (deg < 70) return `${dir.charAt(0).toUpperCase() + dir.slice(1)}, tightens`; // adds info
-    if (deg < 100) return `Sharp ${dir}`;
-    return `Hard ${dir}`;
+    // Severity scale based on degrees
+    if (deg < 20) return `slight ${dir}`;
+    if (deg < 45) return `easy ${dir}`;
+    if (deg < 70) return `${dir}, tightens`;
+    if (deg < 100) return `sharp ${dir}`;
+    return `hard ${dir}`;
   });
 
-  // Remove any remaining degree symbols
+  // Handle compound patterns: "easy left, easy right" → "easy left into easy right"
+  // The comma between two direction phrases should become "into"
+  clean = clean.replace(/(left|right)(,\s*)(slight\s+|easy\s+|sharp\s+|hard\s+)?(left|right)/gi,
+    (match, dir1, sep, severity, dir2) => {
+      if (severity) {
+        return `${dir1} into ${severity}${dir2}`;
+      }
+      return `${dir1} into ${dir2}`;
+    }
+  );
+
+  // Clean remaining degree symbols
   clean = clean.replace(/°/g, '');
 
-  // Replace " - " with ", " for natural speech flow
-  clean = clean.replace(/\s+-\s+/g, ', ');
-
   // Normalize case: HARD → Hard, HAIRPIN → hairpin, LEFT → left, RIGHT → right
-  clean = clean.replace(/\bHARD\b/g, 'Hard');
+  clean = clean.replace(/\bHARD\b/g, 'hard');
   clean = clean.replace(/\bHAIRPIN\b/g, 'hairpin');
   clean = clean.replace(/\bLEFT\b/g, 'left');
   clean = clean.replace(/\bRIGHT\b/g, 'right');
@@ -80,39 +89,49 @@ function cleanForSpeech(text) {
 // ================================
 // UNIT TEST for cleanForSpeech
 // Run in console: window.testCleanForSpeech()
+// ROUND 4: Updated expected values for new severity scale
 // ================================
 function testCleanForSpeech() {
   const tests = [
-    // Core fixes - these were broken before
-    { input: 'CAUTION - Hard left 120°', expected: 'Hard left' },
+    // Hard prefix cases (100°+)
     { input: 'CAUTION - Hard left 180°', expected: 'Hard left' },
-    { input: 'CAUTION - Right 67°', expected: 'Sharp right' },
+    { input: 'CAUTION - Hard left 120°', expected: 'Hard left' },
+    { input: 'CAUTION - Hard right 136°', expected: 'Hard right' },
+    { input: 'CAUTION - Hard left 106°', expected: 'Hard left' },
+    { input: 'CAUTION - Hard right 101°', expected: 'Hard right' },
+    // Sharp range (70-100°)
     { input: 'CAUTION - Left 88°', expected: 'Sharp left' },
+    { input: 'CAUTION - Left 87°', expected: 'Sharp left' },
+    { input: 'CAUTION - Right 72°', expected: 'Sharp right' },
+    { input: 'CAUTION - Right 71°', expected: 'Sharp right' },
+    // Tightens range (45-70°)
+    { input: 'CAUTION - Right 67°', expected: 'Right, tightens' },
     { input: 'CAUTION - Right 57°', expected: 'Right, tightens' },
+    { input: 'CAUTION - Left 65°', expected: 'Left, tightens' },
     { input: 'CAUTION - Left 56°', expected: 'Left, tightens' },
     { input: 'CAUTION - Right 47°', expected: 'Right, tightens' },
     { input: 'CAUTION - Right 46°', expected: 'Right, tightens' },
-    { input: 'CAUTION - Left 65°', expected: 'Sharp left' },
-    { input: 'CAUTION - Right 72°', expected: 'Sharp right' },
-    // Simple cases without CAUTION prefix
-    { input: 'Left 30°', expected: 'Left' },
-    { input: 'Right 27°', expected: 'Left' }, // Fixed: 27 is in 25-44 range
-    { input: 'Right 25°', expected: 'Right' },
+    // Easy range (20-45°) - FIXED: was returning bare direction
+    { input: 'Left 30°', expected: 'Easy left' },
+    { input: 'Right 31°', expected: 'Easy right' },
+    { input: 'Right 27°', expected: 'Easy right' },
+    { input: 'Right 25°', expected: 'Easy right' },
+    { input: 'Left 28°', expected: 'Easy left' },
+    // Slight range (0-20°)
     { input: 'Left 12°', expected: 'Slight left' },
-    // Compound callouts
-    { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Hard left into Hard right' },
-    { input: 'Right into HAIRPIN LEFT', expected: 'Right into hairpin left' },
+    { input: 'Left 13°', expected: 'Slight left' },
+    // Compound patterns - FIXED: now uses "into" properly
+    { input: 'Left 32°, Right 31°', expected: 'Easy left into easy right' },
+    { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Hard left into hard right' },
     // Special cases
+    { input: 'Right into HAIRPIN LEFT', expected: 'Right into hairpin left' },
     { input: 'Technical section ahead - stay sharp', expected: 'Technical section ahead, stay sharp' },
   ];
-
-  // Fix test case - Right 27° should be 'Right' not 'Left' (typo in test)
-  tests[11] = { input: 'Right 27°', expected: 'Right' };
 
   let passed = 0;
   let failed = 0;
 
-  console.log('\\n🧪 TESTING cleanForSpeech()\\n');
+  console.log('\n🧪 TESTING cleanForSpeech()\n');
 
   tests.forEach((test, i) => {
     const result = cleanForSpeech(test.input);
@@ -129,7 +148,7 @@ function testCleanForSpeech() {
     }
   });
 
-  console.log(`\\n📊 Results: ${passed} passed, ${failed} failed\\n`);
+  console.log(`\n📊 Results: ${passed} passed, ${failed} failed\n`);
   return { passed, failed };
 }
 
