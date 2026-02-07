@@ -127,6 +127,19 @@ export default function App() {
   const prevDistanceRef = useRef(0)
   const lastTickLogRef = useRef(0)
 
+  // FIX #2: Distance tracking ref that NEVER resets during navigation
+  // This survives React re-renders and effect re-runs
+  const distanceStateRef = useRef({
+    prevDist: 0,
+    initialized: false,
+    navigationId: null,  // unique per navigation session
+    lastValidDist: 0,    // last known good distance
+  })
+
+  // FIX #4: Track when we just finished seeking to suppress false seek detection
+  const justSeekedRef = useRef(0)
+  const wasSeekingRef = useRef(false)
+
   // Debug flag for callout logging
   const DEBUG_CALLOUTS = true
 
@@ -144,7 +157,15 @@ export default function App() {
   const currentSpeed = getDisplaySpeed()
 
   // Reset on route/navigation change
+  // FIX #2: Only reset distance if navigation is NOT active
   useEffect(() => {
+    // If navigation is running, DON'T reset distance tracking
+    // This prevents mid-drive resets when routeData reference changes
+    if (isRunning && distanceStateRef.current.initialized) {
+      console.log('⚠️ Route effect re-ran during navigation - skipping distance reset')
+      return
+    }
+
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
@@ -153,8 +174,14 @@ export default function App() {
     lastCalloutRef.current = 0
     lastZoneAnnouncedRef.current = null
     setUserDistanceAlongRoute(0)
+    distanceStateRef.current = {
+      prevDist: 0,
+      initialized: false,
+      navigationId: null,
+      lastValidDist: 0,
+    }
     resetHighwayTrip()
-  }, [routeMode, routeData, resetHighwayTrip])
+  }, [routeMode, routeData, resetHighwayTrip, isRunning])
 
   useEffect(() => {
     if (isRunning) {
@@ -166,6 +193,20 @@ export default function App() {
       announcedCuratedCalloutsRef.current = new Set() // NEW
       lastCalloutRef.current = Date.now() - 5000
       lastZoneAnnouncedRef.current = null
+
+      // FIX #2: Initialize distance tracker for this navigation session
+      if (!distanceStateRef.current.initialized) {
+        distanceStateRef.current = {
+          prevDist: 0,
+          initialized: true,
+          navigationId: Date.now(),
+          lastValidDist: 0,
+        }
+        console.log('🚀 Navigation distance tracker initialized, sessionId:', distanceStateRef.current.navigationId)
+      }
+    } else {
+      // Navigation ended - reset the initialized flag
+      distanceStateRef.current.initialized = false
     }
   }, [isRunning])
 
@@ -221,9 +262,26 @@ export default function App() {
     if (Math.random() < 0.1) {
       console.log(`📍 Distance: idx=${closestIdx}, dist=${Math.round(distanceAlong)}m`)
     }
-    
+
+    // FIX #2: Guard against distance anomalies
+    // If distance went to 0 or jumped backwards significantly, something re-initialized. Ignore it.
+    const prevValid = distanceStateRef.current.lastValidDist
+    if (distanceAlong < prevValid - 50 || (distanceAlong === 0 && prevValid > 100)) {
+      console.warn(`⚠️ DISTANCE ANOMALY: prev=${Math.round(prevValid)}m, current=${Math.round(distanceAlong)}m. Ignoring.`)
+      return // Don't update state with bad value
+    }
+
+    // Update last valid distance
+    distanceStateRef.current.lastValidDist = distanceAlong
+    distanceStateRef.current.prevDist = distanceAlong
+
+    // Check for distance reset (debug)
+    if (distanceAlong === 0 && prevValid > 100) {
+      console.error('🚨 DISTANCE RESET DETECTED! prevDist was', prevValid)
+    }
+
     setUserDistanceAlongRoute(distanceAlong)
-    
+
   }, [isRunning, position, routeData, isDemoMode])
 
   // Detect mode from zones using calculated distance
@@ -283,9 +341,18 @@ export default function App() {
     const prevDist = prevDistanceRef.current
     const now = Date.now()
 
+    // FIX #4: Detect when seeking ends (isSeeking transitions from true to false)
+    const currentlySeeking = simulatorRef.current?.isSeeking || false
+    if (wasSeekingRef.current && !currentlySeeking) {
+      // Just finished seeking - suppress seek detection for next 3 ticks
+      justSeekedRef.current = 3
+      console.log('🔇 Seek ended - suppressing seek detection for 3 ticks')
+    }
+    wasSeekingRef.current = currentlySeeking
+
     // BUG FIX #2 (Option A): Skip callout processing while seeking/scrubbing
     // When user is dragging the progress bar, just mark passed callouts as played silently
-    if (simulatorRef.current?.isSeeking) {
+    if (currentlySeeking) {
       // Find all unplayed callouts we've passed
       const passedCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
@@ -305,17 +372,26 @@ export default function App() {
       return
     }
 
-    // BUG FIX #3: Speed-aware seek detection with higher minimum threshold
-    // Calculate expected movement based on current speed and tick interval
+    // FIX #4: Decrement justSeekedRef counter and skip seek detection if still positive
+    if (justSeekedRef.current > 0) {
+      justSeekedRef.current--
+      console.log(`🔇 Post-seek tick ${3 - justSeekedRef.current}/3 - skipping seek detection`)
+      // Process normally but skip seek detection below
+      prevDistanceRef.current = userDist
+      // Fall through to normal callout processing, but skip the seek jump handling
+    }
+
+    // FIX #4: Speed-aware seek detection with HIGHER minimum threshold
+    // Only check if we're not in the post-seek grace period
     const tickIntervalMs = 1000 // simulator tick interval
     const currentSpeedMps = (currentSpeed || 30) * 0.44704 // mph to m/s
     const expectedTickMovement = currentSpeedMps * (tickIntervalMs / 1000)
-    // At 180mph = 80m/s, expected tick is ~80m. Use 3x margin for tolerance
-    // Minimum 500m to prevent false seek detection during normal driving
-    const seekThreshold = Math.max(500, expectedTickMovement * 3)
+    // FIX #4: Raised minimum to 500m, and use 10x speed for high speeds
+    // At 60mph: 500m minimum, at 180mph: 804m (180 * 0.44704 * 10 = 804m)
+    const seekThreshold = Math.max(500, currentSpeedMps * 10)
 
     const jumpDistance = userDist - prevDist
-    const isSeekJump = jumpDistance > seekThreshold
+    const isSeekJump = jumpDistance > seekThreshold && justSeekedRef.current === 0
 
     if (isSeekJump) {
       console.log(`🚀 SEEK DETECTED: jumped ${Math.round(jumpDistance)}m (threshold=${Math.round(seekThreshold)}m at ${Math.round(currentSpeed || 0)}mph)`)
@@ -531,8 +607,17 @@ export default function App() {
     const now = Date.now()
 
     // Debug log chatter status every 2 seconds (reduced frequency)
+    // FIX #5: Use direct zone lookup for accurate inHighway detection
     if (DEBUG_CALLOUTS && now - lastChatterLogRef.current > 2000) {
       lastChatterLogRef.current = now
+
+      // FIX #5: Direct zone lookup (same as getChatter uses) for accurate display
+      const directZone = routeZones?.find(z =>
+        currentDist >= z.startDistance && currentDist <= z.endDistance
+      )
+      // FIX #5: Check for 'transit' character (which maps to highway mode)
+      const directInHighway = directZone?.character === 'transit'
+
       const timeline = chatterTimeline || window.__chatterTimeline
       if (timeline?.length > 0) {
         const nextChatter = timeline.find(c => {
@@ -541,10 +626,10 @@ export default function App() {
         })
         if (nextChatter) {
           const nextDist = (nextChatter.triggerMile || nextChatter.mile || 0) * 1609.34
-          console.log(`💬 CHATTER: next at ${Math.round(nextDist)}m (${((nextChatter.triggerMile || nextChatter.mile || 0)).toFixed(1)}mi), car at ${Math.round(currentDist)}m, distAway=${Math.round(nextDist - currentDist)}m, inHighway=${inHighwayZone}`)
+          console.log(`💬 CHATTER: next at ${Math.round(nextDist)}m (${((nextChatter.triggerMile || nextChatter.mile || 0)).toFixed(1)}mi), car at ${Math.round(currentDist)}m, distAway=${Math.round(nextDist - currentDist)}m, inHighway=${directInHighway}, zone=${directZone?.character || 'none'}`)
         }
       } else {
-        console.log(`💬 CHATTER: no timeline available, inHighway=${inHighwayZone}`)
+        console.log(`💬 CHATTER: no timeline available, inHighway=${directInHighway}, zone=${directZone?.character || 'none'}`)
       }
     }
 
@@ -743,12 +828,32 @@ export default function App() {
   }
 
   // Handle simulator position updates
+  // FIX #3: Use distanceAlongRoute directly from simulator instead of recalculating
   const handleSimulatorPosition = useCallback((positionData) => {
     const { latitude, longitude, speed: speedMps, heading } = positionData.coords
     setPosition([longitude, latitude])
     setHeading(heading || 0)
     setSpeed(speedMps ? speedMps * 2.237 : 0) // Convert m/s to mph
-  }, [setPosition, setHeading, setSpeed])
+
+    // FIX #3: Use distanceAlongRoute from simulator directly
+    // This is more accurate than recalculating from lat/lng
+    if (positionData.distanceAlongRoute !== undefined) {
+      const currentDist = positionData.distanceAlongRoute
+      const prevDist = distanceStateRef.current.lastValidDist
+
+      // FIX #2: Guard against distance anomalies during seeking
+      if (!positionData.isSeeking) {
+        if (currentDist < prevDist - 50 || (currentDist === 0 && prevDist > 100)) {
+          console.warn(`⚠️ DISTANCE ANOMALY: prev=${Math.round(prevDist)}m, current=${Math.round(currentDist)}m. Ignoring.`)
+          return
+        }
+        distanceStateRef.current.lastValidDist = currentDist
+        distanceStateRef.current.prevDist = currentDist
+      }
+
+      setUserDistanceAlongRoute(currentDist)
+    }
+  }, [setPosition, setHeading, setSpeed, setUserDistanceAlongRoute])
 
   // Handle simulation complete
   const handleSimulationComplete = useCallback(() => {

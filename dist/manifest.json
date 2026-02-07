@@ -1,7 +1,7 @@
 {
-  "name": "Rally Co-Pilot",
-  "short_name": "Rally",
-  "description": "Audio rally pace notes for your drive",
+  "name": "Tramo",
+  "short_name": "Tramo",
+  "description": "Your AI co-driver for every road",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
