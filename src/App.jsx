@@ -283,6 +283,53 @@ export default function App() {
     const prevDist = prevDistanceRef.current
     const now = Date.now()
 
+    // BUG FIX #4: Detect seek jumps and handle intermediate callouts
+    const JUMP_THRESHOLD = 200 // meters - anything larger than normal tick movement is a "jump"
+    const jumpDistance = userDist - prevDist
+
+    if (jumpDistance > JUMP_THRESHOLD) {
+      console.log(`🚀 SEEK DETECTED: jumped from ${Math.round(prevDist)}m to ${Math.round(userDist)}m (${Math.round(jumpDistance)}m)`)
+
+      // Find all unplayed callouts in the jumped range
+      const jumpedOverCallouts = curatedHighwayCallouts.filter(c => {
+        if (announcedCuratedCalloutsRef.current.has(c.id)) return false
+        const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        return calloutDist >= prevDist && calloutDist <= userDist
+      })
+
+      if (jumpedOverCallouts.length > 0) {
+        // Sort by trigger distance (ascending)
+        jumpedOverCallouts.sort((a, b) => {
+          const distA = a.triggerDistance ?? (a.triggerMile * 1609.34)
+          const distB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+          return distA - distB
+        })
+
+        // Mark all but the last one as skipped
+        jumpedOverCallouts.slice(0, -1).forEach(c => {
+          announcedCuratedCalloutsRef.current.add(c.id)
+          console.log(`⏭️ SEEK-SKIPPED: "${(c.text || '').substring(0, 30)}..."`)
+        })
+
+        // Fire the last one (closest to current position)
+        const toFire = jumpedOverCallouts[jumpedOverCallouts.length - 1]
+        const calloutText = toFire.text
+        const isUrgent = ['danger', 'significant'].includes(toFire.type) ||
+                         calloutText.toLowerCase().includes('caution') ||
+                         calloutText.toLowerCase().includes('hard')
+        const priority = isUrgent ? 'high' : 'normal'
+
+        console.log(`✅ SEEK-FIRED: "${calloutText}" from jump`)
+        speak(calloutText, priority)
+        announcedCuratedCalloutsRef.current.add(toFire.id)
+        lastCalloutRef.current = now
+
+        if (toFire.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
+          navigator.vibrate([150])
+        }
+      }
+    }
+
     // Throttled tick logging (1 per second max)
     if (DEBUG_CALLOUTS && now - lastTickLogRef.current > 1000) {
       lastTickLogRef.current = now
@@ -299,15 +346,23 @@ export default function App() {
         console.log(`🎯 NEXT: "${(nextUnannounced.text || '').substring(0, 30)}..." trigger=${Math.round(nextDist)}m, distAway=${Math.round(nextDist - userDist)}m`)
       }
 
-      // Check for missed callouts (unannounced but behind the car)
-      const MAX_OVERSHOOT = 500 // meters
-      const missedCallouts = curatedHighwayCallouts.filter(c => {
+      // BUG FIX #3: Check for missed callouts AND mark them as played
+      // This prevents expired callouts from blocking future checks
+      const MAX_OVERSHOOT_EXPIRED = 500 // meters - beyond this, callout is expired
+      const expiredCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
         const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
-        return calloutDist < userDist - MAX_OVERSHOOT
+        return calloutDist < userDist - MAX_OVERSHOOT_EXPIRED
       })
-      if (missedCallouts.length > 0) {
-        console.warn(`⚠️ MISSED ${missedCallouts.length} callouts! First: "${(missedCallouts[0].text || '').substring(0, 30)}..." at ${Math.round(missedCallouts[0].triggerDistance ?? (missedCallouts[0].triggerMile * 1609.34))}m (car at ${Math.round(userDist)}m)`)
+
+      // Mark ALL expired callouts as played so they don't block future checks
+      expiredCallouts.forEach(c => {
+        announcedCuratedCalloutsRef.current.add(c.id)
+        console.log(`⏭️ EXPIRED: "${(c.text || '').substring(0, 30)}..." at ${Math.round(c.triggerDistance ?? (c.triggerMile * 1609.34))}m (car at ${Math.round(userDist)}m)`)
+      })
+
+      if (expiredCallouts.length > 0) {
+        console.warn(`⚠️ Marked ${expiredCallouts.length} callouts as expired`)
       }
     }
 
@@ -431,13 +486,15 @@ export default function App() {
   
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled || !inHighwayZone) return
-    
-    // Only check every 500m of travel to reduce CPU
+
+    // BUG FIX #5: Check chatter every 100m instead of 500m
+    // The trigger window uses threshold crossing, so more frequent checks are needed
     const currentDist = userDistanceAlongRoute
-    if (Math.abs(currentDist - lastChatterCheckRef.current) < 500) return
+    const distSinceLastCheck = Math.abs(currentDist - lastChatterCheckRef.current)
+    if (distSinceLastCheck < 100) return // Check every 100m
     lastChatterCheckRef.current = currentDist
-    
-    // getChatter now uses pre-generated timeline (no computation)
+
+    // getChatter now uses threshold crossing (like callouts)
     const chatter = getChatter()
     if (chatter) {
       console.log(`🎤 CHATTER: "${chatter}"`)

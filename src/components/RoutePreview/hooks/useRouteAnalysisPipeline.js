@@ -191,6 +191,18 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
             // LLM Polish (optional)
             let finalResult = ruleBasedResult
 
+            // BUG FIX #2: Log triggerDistance after rule-based filter
+            console.log('\n📍 TRIGGER DISTANCE CHECK (after rule filter):')
+            const zeroTriggers = ruleBasedResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
+            if (zeroTriggers.length > 0) {
+              console.warn(`⚠️ ${zeroTriggers.length} callouts with triggerDistance=0:`)
+              zeroTriggers.slice(0, 5).forEach(c => {
+                console.warn(`   "${(c.text || '').substring(0, 30)}" mile=${c.mile}, triggerMile=${c.triggerMile}, triggerDist=${c.triggerDistance}`)
+              })
+            } else {
+              console.log('   ✅ All callouts have valid triggerDistance')
+            }
+
             if (hasLLMApiKey()) {
               console.log('\n✨ STAGE 2: LLM Polish')
               try {
@@ -204,6 +216,15 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
                 }
               } catch (polishErr) {
                 console.warn('⚠️ LLM polish failed:', polishErr.message)
+              }
+
+              // BUG FIX #2: Log triggerDistance after LLM polish
+              console.log('\n📍 TRIGGER DISTANCE CHECK (after LLM polish):')
+              const zeroTriggersAfterPolish = finalResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
+              if (zeroTriggersAfterPolish.length > 0) {
+                console.warn(`⚠️ ${zeroTriggersAfterPolish.length} callouts with triggerDistance=0 after polish`)
+              } else {
+                console.log('   ✅ All callouts still have valid triggerDistance')
               }
             }
 
@@ -238,13 +259,44 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               console.log(`   Fast: ${groupedSets.fast.length}, Standard: ${groupedSets.standard.length}`)
               window.__groupedCallouts = groupedSets
 
+              // BUG FIX #2: Log triggerDistance after grouping
+              console.log('\n📍 TRIGGER DISTANCE CHECK (after grouping):')
+              const zeroTriggersAfterGroup = groupedSets.standard.filter(c => {
+                const td = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
+                return td === 0 || td === undefined || td === null
+              })
+              if (zeroTriggersAfterGroup.length > 0) {
+                console.warn(`⚠️ ${zeroTriggersAfterGroup.length} callouts with triggerDistance=0 after grouping:`)
+                zeroTriggersAfterGroup.forEach(c => {
+                  console.warn(`   "${(c.text || '').substring(0, 30)}" triggerMile=${c.triggerMile}, mile=${c.mile}, triggerDist=${c.triggerDistance}`)
+                })
+              } else {
+                console.log('   ✅ All callouts have valid triggerDistance')
+              }
+
               // Log the actual callout text for debugging
               console.log('\n🎯 FINAL CALLOUTS:')
               groupedSets.standard.forEach((c, i) => {
                 console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | ${c.zone || 'unknown'} | "${c.text}"`)
               })
 
-              const displayCallouts = groupedSets.standard
+              // BUG FIX #1: Sort callouts by triggerDistance (ascending)
+              // This ensures the "find next unplayed callout" logic works correctly
+              // Without sorting, callouts can get "stuck" if an earlier trigger appears after a later one
+              const sortedCallouts = [...groupedSets.standard].sort((a, b) => {
+                const distA = a.triggerDistance ?? (a.triggerMile ?? a.mile ?? 0) * 1609.34
+                const distB = b.triggerDistance ?? (b.triggerMile ?? b.mile ?? 0) * 1609.34
+                return distA - distB
+              })
+
+              // Log sorted list for verification
+              console.log('\n📋 SORTED CALLOUT TRIGGERS:')
+              sortedCallouts.forEach((c, i) => {
+                const trigDist = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
+                console.log(`  ${i + 1}. ${Math.round(trigDist)}m (${(trigDist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
+              })
+
+              const displayCallouts = sortedCallouts
               setCuratedCallouts(displayCallouts)
               setAgentResult({
                 summary: { summary: finalResult.analysis },
