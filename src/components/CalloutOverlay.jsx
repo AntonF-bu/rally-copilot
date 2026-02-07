@@ -96,25 +96,35 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   const DEBUG_HUD = false
 
   // Get upcoming curated callouts (only those AHEAD of the car)
+  // BUG FIX #1: Speed-based HUD preview distance (3x lookahead)
   const upcomingCallouts = useMemo(() => {
     if (!curatedHighwayCallouts?.length) return []
 
+    // Calculate speed-based preview distance
+    // Base lookahead is ~2 meters per mph, HUD shows 3x further
+    const currentSpeedMph = speed || 30
+    const lookaheadMeters = Math.max(80, currentSpeedMph * 2)
+    const hudPreviewDistance = lookaheadMeters * 3 // Show on HUD earlier than audio fires
+
     const filtered = curatedHighwayCallouts
       .filter(callout => {
-        const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+        // BUG FIX #4: Handle triggerDistance=0 by falling back to triggerMile
+        const calloutDist = callout.triggerDistance > 0
+          ? callout.triggerDistance
+          : (callout.triggerMile * 1609.34)
         const distanceToCallout = calloutDist - userDistance
-        // Only show callouts that are AHEAD (positive distance) and within 2km
-        return distanceToCallout > 0 && distanceToCallout < 2000
+        // Only show callouts within preview distance (speed-dependent)
+        return distanceToCallout > 0 && distanceToCallout <= hudPreviewDistance
       })
       .sort((a, b) => {
-        const distA = a.triggerDistance ?? (a.triggerMile * 1609.34)
-        const distB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+        const distA = a.triggerDistance > 0 ? a.triggerDistance : (a.triggerMile * 1609.34)
+        const distB = b.triggerDistance > 0 ? b.triggerDistance : (b.triggerMile * 1609.34)
         return distA - distB
       })
       .slice(0, 5)
 
     return filtered
-  }, [curatedHighwayCallouts, userDistance])
+  }, [curatedHighwayCallouts, userDistance, speed])
 
   // Next callout (for main display)
   const nextCallout = upcomingCallouts[0] || null
@@ -123,7 +133,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   useEffect(() => {
     if (!DEBUG_HUD || !isRunning) return
     if (nextCallout) {
-      const nextDist = nextCallout.triggerDistance ?? (nextCallout.triggerMile * 1609.34)
+      const nextDist = nextCallout.triggerDistance > 0 ? nextCallout.triggerDistance : (nextCallout.triggerMile * 1609.34)
       console.log(`📺 HUD: showing "${(nextCallout.text || '').substring(0, 25)}..." at ${Math.round(nextDist)}m, car at ${Math.round(userDistance)}m, dist ahead: ${Math.round(nextDist - userDistance)}m`)
     }
   }, [nextCallout?.id, userDistance, isRunning])
@@ -189,7 +199,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   // CURATED CALLOUT HUD - when we have curated callouts
   // ========================================
   if (curatedHighwayCallouts?.length > 0 && nextCallout) {
-    const calloutDist = nextCallout.triggerDistance ?? (nextCallout.triggerMile * 1609.34)
+    const calloutDist = nextCallout.triggerDistance > 0 ? nextCallout.triggerDistance : (nextCallout.triggerMile * 1609.34)
     const distanceToCallout = calloutDist - userDistance
     const distanceDisplay = isMetric 
       ? Math.round(distanceToCallout) 
@@ -619,7 +629,7 @@ function CalloutDisplay({ callout, color }) {
 // Upcoming Callout Row
 // ========================================
 function UpcomingCalloutRow({ callout, userDistance, isMetric }) {
-  const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+  const calloutDist = callout.triggerDistance > 0 ? callout.triggerDistance : (callout.triggerMile * 1609.34)
   const distanceToCallout = calloutDist - userDistance
   const dist = isMetric ? Math.round(distanceToCallout) : Math.round(distanceToCallout * 3.28084)
   const unit = isMetric ? 'm' : 'ft'

@@ -289,7 +289,7 @@ export default function App() {
       // Find all unplayed callouts we've passed
       const passedCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
-        const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        const calloutDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
         return calloutDist < userDist
       })
 
@@ -305,13 +305,14 @@ export default function App() {
       return
     }
 
-    // BUG FIX #2 (Option B): Speed-aware seek detection
+    // BUG FIX #3: Speed-aware seek detection with higher minimum threshold
     // Calculate expected movement based on current speed and tick interval
-    const tickIntervalMs = 500 // approximate tick interval
+    const tickIntervalMs = 1000 // simulator tick interval
     const currentSpeedMps = (currentSpeed || 30) * 0.44704 // mph to m/s
     const expectedTickMovement = currentSpeedMps * (tickIntervalMs / 1000)
-    // At 180mph = 80m/s, expected tick is ~40m. Use 3x margin for tolerance
-    const seekThreshold = Math.max(200, expectedTickMovement * 3)
+    // At 180mph = 80m/s, expected tick is ~80m. Use 3x margin for tolerance
+    // Minimum 500m to prevent false seek detection during normal driving
+    const seekThreshold = Math.max(500, expectedTickMovement * 3)
 
     const jumpDistance = userDist - prevDist
     const isSeekJump = jumpDistance > seekThreshold
@@ -322,15 +323,15 @@ export default function App() {
       // Find all unplayed callouts in the jumped range
       const jumpedOverCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
-        const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        const calloutDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
         return calloutDist >= prevDist && calloutDist <= userDist
       })
 
       if (jumpedOverCallouts.length > 0) {
         // Sort by trigger distance (ascending)
         jumpedOverCallouts.sort((a, b) => {
-          const distA = a.triggerDistance ?? (a.triggerMile * 1609.34)
-          const distB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+          const distA = a.triggerDistance > 0 ? a.triggerDistance : (a.triggerMile * 1609.34)
+          const distB = b.triggerDistance > 0 ? b.triggerDistance : (b.triggerMile * 1609.34)
           return distA - distB
         })
 
@@ -368,10 +369,10 @@ export default function App() {
       // Find next unannounced callout ahead
       const nextUnannounced = curatedHighwayCallouts.find(c =>
         !announcedCuratedCalloutsRef.current.has(c.id) &&
-        (c.triggerDistance ?? (c.triggerMile * 1609.34)) > userDist
+        (c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)) > userDist
       )
       if (nextUnannounced) {
-        const nextDist = nextUnannounced.triggerDistance ?? (nextUnannounced.triggerMile * 1609.34)
+        const nextDist = nextUnannounced.triggerDistance > 0 ? nextUnannounced.triggerDistance : (nextUnannounced.triggerMile * 1609.34)
         console.log(`🎯 NEXT: "${(nextUnannounced.text || '').substring(0, 30)}..." trigger=${Math.round(nextDist)}m, distAway=${Math.round(nextDist - userDist)}m`)
       }
 
@@ -380,14 +381,14 @@ export default function App() {
       const MAX_OVERSHOOT_EXPIRED = 500 // meters - beyond this, callout is expired
       const expiredCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
-        const calloutDist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        const calloutDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
         return calloutDist < userDist - MAX_OVERSHOOT_EXPIRED
       })
 
       // Mark ALL expired callouts as played so they don't block future checks
       expiredCallouts.forEach(c => {
         announcedCuratedCalloutsRef.current.add(c.id)
-        console.log(`⏭️ EXPIRED: "${(c.text || '').substring(0, 30)}..." at ${Math.round(c.triggerDistance ?? (c.triggerMile * 1609.34))}m (car at ${Math.round(userDist)}m)`)
+        console.log(`⏭️ EXPIRED: "${(c.text || '').substring(0, 30)}..." at ${Math.round(c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34))}m (car at ${Math.round(userDist)}m)`)
       })
 
       if (expiredCallouts.length > 0) {
@@ -418,7 +419,7 @@ export default function App() {
     const crossedCallouts = curatedHighwayCallouts.filter(callout => {
       if (announcedCuratedCalloutsRef.current.has(callout.id)) return false
 
-      const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+      const calloutDist = callout.triggerDistance > 0 ? callout.triggerDistance : (callout.triggerMile * 1609.34)
       const overshoot = userDist - calloutDist
 
       // Fire if: we've passed it (overshoot > 0) but not too far past
@@ -427,8 +428,8 @@ export default function App() {
 
     // Sort by trigger distance (earliest first)
     crossedCallouts.sort((a, b) => {
-      const distA = a.triggerDistance ?? (a.triggerMile * 1609.34)
-      const distB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+      const distA = a.triggerDistance > 0 ? a.triggerDistance : (a.triggerMile * 1609.34)
+      const distB = b.triggerDistance > 0 ? b.triggerDistance : (b.triggerMile * 1609.34)
       return distA - distB
     })
 
@@ -449,14 +450,19 @@ export default function App() {
 
     if (!calloutToSpeak) {
       // Also check for upcoming callouts within lookahead
-      const speedMps = (currentSpeed || 30) * 0.44704
-      const lookaheadDistance = Math.max(150, Math.min(500, speedMps * 6))
+      // BUG FIX #1: Speed-based lookahead formula
+      // At 60mph: ~120m (~400ft), at 90mph: ~180m (~600ft), at 180mph: ~360m (~1200ft)
+      const currentSpeedMph = currentSpeed || 30
+      const lookaheadMeters = Math.max(80, currentSpeedMph * 2) // ~2 meters per mph
 
       const upcomingCallout = curatedHighwayCallouts.find(callout => {
         if (announcedCuratedCalloutsRef.current.has(callout.id)) return false
-        const calloutDist = callout.triggerDistance ?? (callout.triggerMile * 1609.34)
+        // BUG FIX #4: Use || instead of ?? to fall back when triggerDistance is 0
+        const calloutDist = callout.triggerDistance > 0
+          ? callout.triggerDistance
+          : (callout.triggerMile * 1609.34)
         const distanceToCallout = calloutDist - userDist
-        return distanceToCallout > 0 && distanceToCallout < lookaheadDistance
+        return distanceToCallout > 0 && distanceToCallout <= lookaheadMeters
       })
 
       if (!upcomingCallout) return
@@ -468,7 +474,7 @@ export default function App() {
                        calloutText.toLowerCase().includes('hard')
       const priority = isUrgent ? 'high' : 'normal'
 
-      const calloutDist = upcomingCallout.triggerDistance ?? (upcomingCallout.triggerMile * 1609.34)
+      const calloutDist = upcomingCallout.triggerDistance > 0 ? upcomingCallout.triggerDistance : (upcomingCallout.triggerMile * 1609.34)
       if (DEBUG_CALLOUTS) {
         console.log(`✅ FIRED (lookahead): "${calloutText}" | trigger=${Math.round(calloutDist)}m, carAt=${Math.round(userDist)}m, distAhead=${Math.round(calloutDist - userDist)}m`)
       }
@@ -490,7 +496,7 @@ export default function App() {
                      calloutText.toLowerCase().includes('hard')
     const priority = isUrgent ? 'high' : 'normal'
 
-    const calloutDist = calloutToSpeak.triggerDistance ?? (calloutToSpeak.triggerMile * 1609.34)
+    const calloutDist = calloutToSpeak.triggerDistance > 0 ? calloutToSpeak.triggerDistance : (calloutToSpeak.triggerMile * 1609.34)
     const overshoot = userDist - calloutDist
     if (DEBUG_CALLOUTS) {
       console.log(`✅ FIRED (crossed): "${calloutText}" | trigger=${Math.round(calloutDist)}m, carAt=${Math.round(userDist)}m, overshoot=${Math.round(overshoot)}m`)
@@ -727,7 +733,7 @@ export default function App() {
     if (DEBUG_CALLOUTS && curatedHighwayCallouts?.length > 0) {
       console.log('\n📋 CALLOUT TRIGGER MAP:')
       curatedHighwayCallouts.forEach((c, i) => {
-        const dist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        const dist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
         console.log(`  ${i + 1}. trigger=${Math.round(dist)}m (${(dist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
       })
       console.log('')
@@ -772,7 +778,7 @@ export default function App() {
     if (DEBUG_CALLOUTS && curatedHighwayCallouts?.length > 0) {
       console.log('\n📋 CALLOUT TRIGGER MAP (Simulation):')
       curatedHighwayCallouts.forEach((c, i) => {
-        const dist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+        const dist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
         console.log(`  ${i + 1}. trigger=${Math.round(dist)}m (${(dist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
       })
       console.log('')
