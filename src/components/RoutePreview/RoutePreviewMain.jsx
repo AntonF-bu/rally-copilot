@@ -37,7 +37,17 @@ import { DEMO_START, DEMO_END, MAP_STYLES, MODE_COLORS, HIGHWAY_BEND_COLOR } fro
  * RoutePreview - Refactored orchestrator
  * Uses extracted hooks and components
  */
-export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
+// Check if simulation mode is available (dev only)
+const isSimulationEnabled = () => {
+  if (import.meta.env.DEV) return true
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost') return true
+    if (window.location.search.includes('sim=1')) return true
+  }
+  return false
+}
+
+export default function RoutePreviewNew({ onStartNavigation, onStartSimulation, onBack, onEdit }) {
   // Enable iOS-style swipe-back gesture
   useSwipeBack(onBack)
 
@@ -305,6 +315,18 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
     onStartNavigation()
   }, [onStartNavigation])
 
+  // Handle simulate drive button
+  const handleSimulate = useCallback(async () => {
+    if (!onStartSimulation) return
+    await initAudio()
+    // Pass route data needed for simulation
+    onStartSimulation({
+      coordinates: routeData?.coordinates || [],
+      zones: routeCharacter?.segments || [],
+      curves: routeData?.curves || []
+    })
+  }, [initAudio, onStartSimulation, routeData, routeCharacter])
+
   // ========================================
   // EFFECTS
   // ========================================
@@ -562,6 +584,25 @@ export default function RoutePreviewNew({ onStartNavigation, onBack, onEdit }) {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
           START NAVIGATION
         </button>
+
+        {/* Simulate button - dev only */}
+        {isSimulationEnabled() && onStartSimulation && (
+          <button
+            onClick={handleSimulate}
+            className="w-full py-2.5 mt-2 rounded-xl font-bold text-xs tracking-wider flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+            style={{
+              background: 'rgba(59, 130, 246, 0.15)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: '#3B82F6'
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" />
+            </svg>
+            SIMULATE DRIVE
+          </button>
+        )}
       </div>
 
       {/* Modals */}

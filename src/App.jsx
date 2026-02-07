@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useLayoutEffect } from 'react'
+import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
 import useStore from './store'
 import { useAuth } from './hooks/useAuth'
 import AuthScreen from './components/auth/AuthScreen'
+import { DriveSimulator } from './services/driveSimulator'
+import DriveSimulatorPanel from './components/DriveSimulatorPanel'
 
 // Theme application hook - runs before render to prevent flash
 function useThemeSync() {
@@ -66,6 +68,8 @@ export default function App() {
 
   const {
     isRunning,
+    isSimulating,
+    setIsSimulating,
     mode,
     settings,
     upcomingCurves,
@@ -86,6 +90,10 @@ export default function App() {
     speed,
     showRouteEditor,
     goToEditor,
+    setPosition,
+    setHeading,
+    setSpeed,
+    endTrip,
   } = useStore()
 
   // Highway mode hook (still used for zone tracking, chatter, etc)
@@ -117,6 +125,9 @@ export default function App() {
   
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
+
+  // Drive simulator instance ref
+  const simulatorRef = useRef(null)
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
@@ -487,7 +498,7 @@ export default function App() {
   const handleStartNavigation = async () => {
     // CRITICAL: Unlock audio on iOS before navigation starts
     await initAudio()
-    
+
     announcedRef.current = new Set()
     earlyRef.current = new Set()
     finalRef.current = new Set()
@@ -497,6 +508,83 @@ export default function App() {
     resetHighwayTrip()
     goToDriving()
   }
+
+  // Handle simulator position updates
+  const handleSimulatorPosition = useCallback((positionData) => {
+    const { latitude, longitude, speed: speedMps, heading } = positionData.coords
+    setPosition([longitude, latitude])
+    setHeading(heading || 0)
+    setSpeed(speedMps ? speedMps * 2.237 : 0) // Convert m/s to mph
+  }, [setPosition, setHeading, setSpeed])
+
+  // Handle simulation complete
+  const handleSimulationComplete = useCallback(() => {
+    console.log('Simulation complete - ending trip')
+    if (simulatorRef.current) {
+      simulatorRef.current.stop()
+      simulatorRef.current = null
+    }
+    endTrip()
+  }, [endTrip])
+
+  // Start simulation
+  const handleStartSimulation = useCallback(async ({ coordinates, zones, curves }) => {
+    // CRITICAL: Unlock audio on iOS before navigation starts
+    await initAudio()
+
+    announcedRef.current = new Set()
+    earlyRef.current = new Set()
+    finalRef.current = new Set()
+    announcedHighwayBendsRef.current = new Set()
+    announcedCuratedCalloutsRef.current = new Set()
+    lastCalloutRef.current = Date.now() - 5000
+    resetHighwayTrip()
+
+    // Set simulation flag BEFORE starting navigation
+    setIsSimulating(true)
+
+    // Create simulator
+    simulatorRef.current = new DriveSimulator({
+      coordinates,
+      zones,
+      curves,
+      onPosition: handleSimulatorPosition,
+      onComplete: handleSimulationComplete,
+      onZoneChange: (zone) => {
+        console.log(`Simulator zone change: ${zone.character}`)
+      }
+    })
+
+    // Start navigation (this sets isRunning=true)
+    goToDriving()
+
+    // Start simulator after a brief delay
+    setTimeout(() => {
+      if (simulatorRef.current) {
+        simulatorRef.current.start()
+      }
+    }, 500)
+  }, [initAudio, resetHighwayTrip, setIsSimulating, goToDriving, handleSimulatorPosition, handleSimulationComplete])
+
+  // Stop simulation
+  const handleStopSimulation = useCallback(() => {
+    if (simulatorRef.current) {
+      simulatorRef.current.stop()
+      simulatorRef.current = null
+    }
+    setIsSimulating(false)
+    goToPreview()
+  }, [setIsSimulating, goToPreview])
+
+  // Cleanup simulator on unmount
+  useEffect(() => {
+    return () => {
+      if (simulatorRef.current) {
+        simulatorRef.current.stop()
+        simulatorRef.current = null
+      }
+    }
+  }, [])
 
   // iOS mobile container styles - consistent 420px width across all screens
   // Using position: fixed with top/bottom: 0 for reliable iOS Safari full-screen
@@ -566,6 +654,7 @@ export default function App() {
       <div style={mobileContainerStyle}>
         <RoutePreview
           onStartNavigation={handleStartNavigation}
+          onStartSimulation={handleStartSimulation}
           onBack={() => { clearRouteData(); goToMenu() }}
           onEdit={goToEditor}
         />
@@ -599,6 +688,13 @@ export default function App() {
           <BottomBar />
           <SettingsPanel />
           <VoiceIndicator />
+          {/* Drive Simulator Panel - only when simulating */}
+          {isSimulating && simulatorRef.current && (
+            <DriveSimulatorPanel
+              simulator={simulatorRef.current}
+              onStop={handleStopSimulation}
+            />
+          )}
         </div>
       </div>
     </div>
