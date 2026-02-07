@@ -19,6 +19,7 @@ const useStore = create(
       toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
 
       isRunning: false,
+      isSimulating: false, // Drive simulator active (uses synthetic GPS)
       position: null,
       heading: 0,
       speed: 0,
@@ -284,13 +285,16 @@ const useStore = create(
       clearTripWaypoints: () => set({ tripWaypoints: [] }),
       
       // ========== Navigation Actions ==========
+      setIsSimulating: (isSimulating) => set({ isSimulating }),
+
       goToMenu: () => {
-        set({ 
-          showRouteSelector: true, 
+        set({
+          showRouteSelector: true,
           showRoutePreview: false,
           showTripSummary: false,
           showRouteEditor: false,
           isRunning: false,
+          isSimulating: false,
           simulationProgress: 0,
           activeCurve: null,
           upcomingCurves: [],
@@ -347,8 +351,9 @@ const useStore = create(
       startDrive: () => get().goToDriving(),
       
       stopDrive: () => {
-        set({ 
+        set({
           isRunning: false,
+          isSimulating: false,
           simulationProgress: 0,
           activeCurve: null,
           upcomingCurves: [],
@@ -360,6 +365,7 @@ const useStore = create(
         const { tripStats } = get()
         set({
           isRunning: false,
+          isSimulating: false,
           showTripSummary: true,
           simulationProgress: 0,
           simulationPaused: false,

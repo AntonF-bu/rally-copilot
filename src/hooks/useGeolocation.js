@@ -13,7 +13,8 @@ export function useGeolocation(enabled = false) {
     setSpeed,
     setAltitude,
     setGpsAccuracy,
-    isRunning
+    isRunning,
+    isSimulating
   } = useStore()
 
   const watchIdRef = useRef(null)
@@ -205,7 +206,25 @@ export function useGeolocation(enabled = false) {
   // Start/stop GPS watching
   useEffect(() => {
     mountedRef.current = true
-    
+
+    // Skip real GPS when simulation is active
+    if (isSimulating) {
+      console.log('📍 Skipping real GPS - simulation active')
+      if (watchIdRef.current !== null) {
+        try {
+          navigator.geolocation.clearWatch(watchIdRef.current)
+        } catch (e) {
+          console.error('📍 clearWatch error:', e)
+        }
+        watchIdRef.current = null
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      return
+    }
+
     if (!enabled || !isRunning) {
       if (watchIdRef.current !== null) {
         try {
@@ -284,7 +303,7 @@ export function useGeolocation(enabled = false) {
     } catch (e) {
       console.error('📍 GPS initialization error:', e)
     }
-  }, [enabled, isRunning, handlePosition, handleError, interpolatePosition])
+  }, [enabled, isRunning, isSimulating, handlePosition, handleError, interpolatePosition])
 
   // Reset on stop
   useEffect(() => {
