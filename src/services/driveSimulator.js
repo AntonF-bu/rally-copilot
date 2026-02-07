@@ -261,8 +261,9 @@ export class DriveSimulator {
 
   /**
    * Generate a GPS position object matching the Geolocation API format
+   * FIX #3: Now includes distanceAlongRoute for direct use by App.jsx
    */
-  createPositionObject(coord, speedMps, heading) {
+  createPositionObject(coord, speedMps, heading, distanceAlongRoute = null, isSeeking = false) {
     return {
       coords: {
         latitude: coord[1],
@@ -273,7 +274,12 @@ export class DriveSimulator {
         altitude: null,
         altitudeAccuracy: null
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      // FIX #3: Include distanceAlongRoute directly from simulator
+      // App.jsx should use this instead of recalculating from lat/lng
+      distanceAlongRoute: distanceAlongRoute !== null ? distanceAlongRoute : this.currentDistance,
+      // FIX #4: Include seeking flag so App.jsx can suppress callouts during seek
+      isSeeking: isSeeking || this.isSeeking
     }
   }
 

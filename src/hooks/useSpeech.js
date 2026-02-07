@@ -17,60 +17,125 @@ const getCacheKey = (text) => text.toLowerCase().trim()
 // ================================
 // BUG FIX #5: Clean text for natural speech
 // Transforms raw callout text into TTS-friendly format
+// ROUND 3 FIX: Complete rewrite to fix doubling and missing info
 // ================================
 function cleanForSpeech(text) {
-  if (!text) return text
+  if (!text) return text;
 
-  let clean = text
+  // Remove "CAUTION - " or "CAUTION – " prefix
+  let clean = text.replace(/^CAUTION\s*[-–—]\s*/i, '');
 
-  // Remove "CAUTION - " prefix (voice tone conveys urgency)
-  clean = clean.replace(/^CAUTION\s*[-–—]\s*/i, '')
+  // Remove "DANGER - " prefix
+  clean = clean.replace(/^DANGER\s*[-–—]\s*/i, '');
 
-  // Convert degree numbers to descriptive words for severity
-  // "Right 67°" → "Sharp right" (67° is sharp)
-  // "Left 30°" → "Slight left" (30° is mild)
-  // "Hard left 120°" → "Hard left" (already descriptive)
-  clean = clean.replace(/(\w+)\s+(\d+)°/gi, (match, direction, degrees) => {
-    const deg = parseInt(degrees)
-    const dir = direction.toLowerCase()
+  // Handle compound callouts like "HARD LEFT 109° into HARD RIGHT 82°"
+  // Convert to: "Hard left into hard right"
+  clean = clean.replace(/(\w+)\s+(\w+)\s+\d+°/g, (match, word1, word2) => {
+    return `${word1} ${word2}`;
+  });
 
-    // If already has severity modifier (hard/hairpin), keep direction only
-    if (dir === 'hard' || dir === 'hairpin') {
-      return direction
+  // Handle simple callouts like "Left 88°" or "Right 57°" or "Hard left 120°"
+  // Strategy: convert degree to severity descriptor
+  clean = clean.replace(/^(Hard\s+)?(left|right)\s+(\d+)°?$/i, (match, hardPrefix, direction, degrees) => {
+    const deg = parseInt(degrees);
+    const dir = direction.toLowerCase();
+
+    // If already has "Hard" prefix, keep it, don't add more
+    if (hardPrefix) {
+      return `Hard ${dir}`;
     }
 
-    // Add severity based on angle
-    if (deg >= 90) {
-      return `hard ${dir}`
-    } else if (deg >= 60) {
-      return `sharp ${dir}`
-    } else if (deg <= 25) {
-      return `slight ${dir}`
-    }
-    // 26-59° just use direction
-    return dir
-  })
+    // Add severity based on degrees
+    if (deg < 25) return `Slight ${dir}`;
+    if (deg < 45) return `${dir.charAt(0).toUpperCase() + dir.slice(1)}`; // "Right" or "Left" - mild curve
+    if (deg < 70) return `${dir.charAt(0).toUpperCase() + dir.slice(1)}, tightens`; // adds info
+    if (deg < 100) return `Sharp ${dir}`;
+    return `Hard ${dir}`;
+  });
 
-  // Remove remaining degree symbols
-  clean = clean.replace(/°/g, '')
+  // Remove any remaining degree symbols
+  clean = clean.replace(/°/g, '');
 
-  // Clean up "HARD" prefix casing for natural speech
-  clean = clean.replace(/\bHARD\b/g, 'hard')
-  clean = clean.replace(/\bHAIRPIN\b/g, 'hairpin')
+  // Replace " - " with ", " for natural speech flow
+  clean = clean.replace(/\s+-\s+/g, ', ');
 
-  // Remove DANGER prefix (already urgent from voice)
-  clean = clean.replace(/^DANGER\s*[-–—]?\s*/i, '')
+  // Normalize case: HARD → Hard, HAIRPIN → hairpin, LEFT → left, RIGHT → right
+  clean = clean.replace(/\bHARD\b/g, 'Hard');
+  clean = clean.replace(/\bHAIRPIN\b/g, 'hairpin');
+  clean = clean.replace(/\bLEFT\b/g, 'left');
+  clean = clean.replace(/\bRIGHT\b/g, 'right');
+  clean = clean.replace(/\bINTO\b/g, 'into');
 
-  // Remove raw standalone numbers (leftover degree values)
-  clean = clean.replace(/\s+\d+\s+/g, ' ')
-
-  // Clean up multiple spaces
-  clean = clean.replace(/\s+/g, ' ').trim()
+  // Clean extra whitespace
+  clean = clean.replace(/\s+/g, ' ').trim();
 
   // Capitalize first letter
-  clean = clean.charAt(0).toUpperCase() + clean.slice(1)
+  if (clean.length > 0) {
+    clean = clean.charAt(0).toUpperCase() + clean.slice(1);
+  }
 
-  return clean
+  return clean;
+}
+
+// ================================
+// UNIT TEST for cleanForSpeech
+// Run in console: window.testCleanForSpeech()
+// ================================
+function testCleanForSpeech() {
+  const tests = [
+    // Core fixes - these were broken before
+    { input: 'CAUTION - Hard left 120°', expected: 'Hard left' },
+    { input: 'CAUTION - Hard left 180°', expected: 'Hard left' },
+    { input: 'CAUTION - Right 67°', expected: 'Sharp right' },
+    { input: 'CAUTION - Left 88°', expected: 'Sharp left' },
+    { input: 'CAUTION - Right 57°', expected: 'Right, tightens' },
+    { input: 'CAUTION - Left 56°', expected: 'Left, tightens' },
+    { input: 'CAUTION - Right 47°', expected: 'Right, tightens' },
+    { input: 'CAUTION - Right 46°', expected: 'Right, tightens' },
+    { input: 'CAUTION - Left 65°', expected: 'Sharp left' },
+    { input: 'CAUTION - Right 72°', expected: 'Sharp right' },
+    // Simple cases without CAUTION prefix
+    { input: 'Left 30°', expected: 'Left' },
+    { input: 'Right 27°', expected: 'Left' }, // Fixed: 27 is in 25-44 range
+    { input: 'Right 25°', expected: 'Right' },
+    { input: 'Left 12°', expected: 'Slight left' },
+    // Compound callouts
+    { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Hard left into Hard right' },
+    { input: 'Right into HAIRPIN LEFT', expected: 'Right into hairpin left' },
+    // Special cases
+    { input: 'Technical section ahead - stay sharp', expected: 'Technical section ahead, stay sharp' },
+  ];
+
+  // Fix test case - Right 27° should be 'Right' not 'Left' (typo in test)
+  tests[11] = { input: 'Right 27°', expected: 'Right' };
+
+  let passed = 0;
+  let failed = 0;
+
+  console.log('\\n🧪 TESTING cleanForSpeech()\\n');
+
+  tests.forEach((test, i) => {
+    const result = cleanForSpeech(test.input);
+    const pass = result === test.expected;
+
+    if (pass) {
+      passed++;
+      console.log(`✅ PASS: "${test.input}" → "${result}"`);
+    } else {
+      failed++;
+      console.log(`❌ FAIL: "${test.input}"`);
+      console.log(`   Expected: "${test.expected}"`);
+      console.log(`   Got:      "${result}"`);
+    }
+  });
+
+  console.log(`\\n📊 Results: ${passed} passed, ${failed} failed\\n`);
+  return { passed, failed };
+}
+
+// Export test function to window for console access
+if (typeof window !== 'undefined') {
+  window.testCleanForSpeech = testCleanForSpeech;
 }
 
 // Global unlock state - shared across hook instances
