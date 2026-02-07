@@ -218,8 +218,15 @@ export default function App() {
     if (!isRunning || !position || !routeData?.coordinates) {
       return
     }
-    
-    // In demo mode, use simulationProgress
+
+    // FIX ROOT CAUSE: During simulation, distance is set by handleSimulatorPosition
+    // directly from the simulator's distanceAlongRoute. Do NOT recalculate from lat/lng
+    // as this creates the dual-system conflict (two different distance values fighting).
+    if (isSimulating) {
+      return
+    }
+
+    // In demo mode (legacy), use simulationProgress
     if (isDemoMode) {
       const totalDist = routeData.distance || 15000
       setUserDistanceAlongRoute(useStore.getState().simulationProgress * totalDist)
@@ -282,7 +289,7 @@ export default function App() {
 
     setUserDistanceAlongRoute(distanceAlong)
 
-  }, [isRunning, position, routeData, isDemoMode])
+  }, [isRunning, position, routeData, isDemoMode, isSimulating])
 
   // Detect mode from zones using calculated distance
   useEffect(() => {
@@ -344,9 +351,9 @@ export default function App() {
     // FIX #4: Detect when seeking ends (isSeeking transitions from true to false)
     const currentlySeeking = simulatorRef.current?.isSeeking || false
     if (wasSeekingRef.current && !currentlySeeking) {
-      // Just finished seeking - suppress seek detection for next 3 ticks
-      justSeekedRef.current = 3
-      console.log('🔇 Seek ended - suppressing seek detection for 3 ticks')
+      // Just finished seeking - suppress seek detection for next 5 ticks
+      justSeekedRef.current = 5
+      console.log('🔇 Seek ended - suppressing seek detection for 5 ticks')
     }
     wasSeekingRef.current = currentlySeeking
 
@@ -375,7 +382,7 @@ export default function App() {
     // FIX #4: Decrement justSeekedRef counter and skip seek detection if still positive
     if (justSeekedRef.current > 0) {
       justSeekedRef.current--
-      console.log(`🔇 Post-seek tick ${3 - justSeekedRef.current}/3 - skipping seek detection`)
+      console.log(`🔇 Post-seek tick ${5 - justSeekedRef.current}/5 - skipping seek detection`)
       // Process normally but skip seek detection below
       prevDistanceRef.current = userDist
       // Fall through to normal callout processing, but skip the seek jump handling
@@ -386,9 +393,11 @@ export default function App() {
     const tickIntervalMs = 1000 // simulator tick interval
     const currentSpeedMps = (currentSpeed || 30) * 0.44704 // mph to m/s
     const expectedTickMovement = currentSpeedMps * (tickIntervalMs / 1000)
-    // FIX #4: Raised minimum to 500m, and use 10x speed for high speeds
-    // At 60mph: 500m minimum, at 180mph: 804m (180 * 0.44704 * 10 = 804m)
-    const seekThreshold = Math.max(500, currentSpeedMps * 10)
+    // FIX ROUND 4: Raised minimum to 800m with 15x speed multiplier
+    // At 60mph: max(800, 27*15=405) = 800m
+    // At 120mph: max(800, 54*15=810) = 810m
+    // At 180mph: max(800, 80*15=1200) = 1200m - only real scrubs will exceed this
+    const seekThreshold = Math.max(800, currentSpeedMps * 15)
 
     const jumpDistance = userDist - prevDist
     const isSeekJump = jumpDistance > seekThreshold && justSeekedRef.current === 0
@@ -638,8 +647,9 @@ export default function App() {
     if (distSinceLastCheck < 50) return
     lastChatterCheckRef.current = currentDist
 
-    // Respect minimum gap after last spoken callout (10 seconds)
-    if (now - lastCalloutRef.current < 10000) return
+    // FIX ROUND 4: Respect minimum gap after last spoken callout (15 seconds)
+    // Chatter should not interrupt curve callouts or fire too close after them
+    if (now - lastCalloutRef.current < 15000) return
 
     // getChatter handles zone checking and threshold crossing internally
     const chatter = getChatter()

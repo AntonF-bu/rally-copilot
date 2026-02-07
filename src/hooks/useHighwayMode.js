@@ -178,21 +178,24 @@ export function useHighwayMode() {
     // Chatter fires in TRANSIT zones (which map to HIGHWAY mode) or when mode is highway
     const isInHighwayZone = currentZone?.character === 'transit'
 
-    // BUG FIX #4: Use threshold crossing instead of proximity window
-    // Fire when car CROSSES the trigger point (within MAX_OVERSHOOT)
-    // This matches how callouts work and prevents missing triggers
+    // FIX ROUND 4: Use lookahead-style triggering (like curated callouts)
+    // Fire when within LOOKAHEAD meters AHEAD of trigger, or crossed but not too far past
+    // This prevents chatter from being missed when car is moving fast
+    const CHATTER_LOOKAHEAD = 200 // fire when within 200m ahead
     const MAX_OVERSHOOT = 500 // meters - same as callouts
 
-    // Find unannounced chatter items we've crossed
+    // Find unannounced chatter items we're approaching or have crossed
     for (const item of timeline) {
       if (announcedChatterRef.current.has(item.id)) continue
 
       const triggerMile = item.triggerMile || item.mile || 0
       const triggerDist = triggerMile * 1609.34
       const overshoot = currentDist - triggerDist
+      // overshoot < 0 means we're approaching (ahead of trigger)
+      // overshoot >= 0 means we've crossed it
 
-      // Fire if: we've passed it (overshoot >= 0) but not too far past
-      if (overshoot >= 0 && overshoot < MAX_OVERSHOOT) {
+      // Fire if: within lookahead ahead (-200 to 0) OR crossed but not too far past (0 to 500)
+      if (overshoot >= -CHATTER_LOOKAHEAD && overshoot < MAX_OVERSHOOT) {
         // BUG FIX #2: Use direct zone lookup for accurate highway detection
         // Chatter fires when in transit zone (which IS the highway)
         if (!isInHighwayZone) {
@@ -212,7 +215,8 @@ export function useHighwayMode() {
           text = variants[Math.floor(Math.random() * variants.length)]
         }
 
-        console.log(`💬 CHATTER TRIGGER: car at ${Math.round(currentDist)}m, trigger at ${Math.round(triggerDist)}m, overshoot=${Math.round(overshoot)}m, zone=${currentZone?.character}`)
+        const distAway = triggerDist - currentDist // positive = ahead, negative = passed
+        console.log(`💬 CHATTER TRIGGER: car at ${Math.round(currentDist)}m, trigger at ${Math.round(triggerDist)}m, distAway=${Math.round(distAway)}m, zone=${currentZone?.character}`)
         console.log(`🎤 CHATTER FIRED: "${text}" @ mile ${triggerMile.toFixed(1)}`)
         return text
       }

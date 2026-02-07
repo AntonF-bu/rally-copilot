@@ -317,8 +317,35 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
   wakeUps.forEach(w => wakeUpMiles.set(w.mile.toFixed(2), w))
   
   // Add zone transition callouts
+  // FIX ROUND 4: Only emit "Technical section ahead" for:
+  // 1. The FIRST technical zone in the route, OR
+  // 2. Technical zones longer than 1000m
+  // This prevents duplicate warnings for short technical zones (< 1km)
+  let hasAnnouncedTechnical = false
+
   transitions.forEach(t => {
     if (t.toZone === 'technical') {
+      // Find this technical zone to check its length
+      const techZone = zoneLookup?.zones?.find(z => {
+        const startMile = (z.startDistance || 0) / 1609.34
+        const endMile = (z.endDistance || 0) / 1609.34
+        return z.character === 'technical' &&
+               t.mile >= startMile - 0.1 &&
+               t.mile <= endMile + 0.1
+      })
+
+      const zoneLength = techZone
+        ? (techZone.endDistance - techZone.startDistance)
+        : 0
+
+      // Only announce if: first technical zone OR zone is longer than 1000m
+      if (hasAnnouncedTechnical && zoneLength < 1000) {
+        console.log(`🔇 Skipping duplicate "Technical section ahead" - zone only ${Math.round(zoneLength)}m`)
+        return // Skip this short subsequent technical zone
+      }
+
+      hasAnnouncedTechnical = true
+
       callouts.push({
         id: `transition-${t.mile.toFixed(2)}`,
         mile: t.mile - 0.3,
