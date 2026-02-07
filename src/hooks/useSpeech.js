@@ -14,6 +14,65 @@ const ELEVENLABS_VOICE_ID = 'puLAe8o1npIDg374vYZp'
 const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
+// ================================
+// BUG FIX #5: Clean text for natural speech
+// Transforms raw callout text into TTS-friendly format
+// ================================
+function cleanForSpeech(text) {
+  if (!text) return text
+
+  let clean = text
+
+  // Remove "CAUTION - " prefix (voice tone conveys urgency)
+  clean = clean.replace(/^CAUTION\s*[-–—]\s*/i, '')
+
+  // Convert degree numbers to descriptive words for severity
+  // "Right 67°" → "Sharp right" (67° is sharp)
+  // "Left 30°" → "Slight left" (30° is mild)
+  // "Hard left 120°" → "Hard left" (already descriptive)
+  clean = clean.replace(/(\w+)\s+(\d+)°/gi, (match, direction, degrees) => {
+    const deg = parseInt(degrees)
+    const dir = direction.toLowerCase()
+
+    // If already has severity modifier (hard/hairpin), keep direction only
+    if (dir === 'hard' || dir === 'hairpin') {
+      return direction
+    }
+
+    // Add severity based on angle
+    if (deg >= 90) {
+      return `hard ${dir}`
+    } else if (deg >= 60) {
+      return `sharp ${dir}`
+    } else if (deg <= 25) {
+      return `slight ${dir}`
+    }
+    // 26-59° just use direction
+    return dir
+  })
+
+  // Remove remaining degree symbols
+  clean = clean.replace(/°/g, '')
+
+  // Clean up "HARD" prefix casing for natural speech
+  clean = clean.replace(/\bHARD\b/g, 'hard')
+  clean = clean.replace(/\bHAIRPIN\b/g, 'hairpin')
+
+  // Remove DANGER prefix (already urgent from voice)
+  clean = clean.replace(/^DANGER\s*[-–—]?\s*/i, '')
+
+  // Remove raw standalone numbers (leftover degree values)
+  clean = clean.replace(/\s+\d+\s+/g, ' ')
+
+  // Clean up multiple spaces
+  clean = clean.replace(/\s+/g, ' ').trim()
+
+  // Capitalize first letter
+  clean = clean.charAt(0).toUpperCase() + clean.slice(1)
+
+  return clean
+}
+
 // Global unlock state - shared across hook instances
 let globalAudioElement = null
 let globalUnlocked = false
@@ -293,15 +352,19 @@ export function useSpeech() {
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
-    console.log(`🔊 Speaking: "${text}" (${priority})`)
+    // BUG FIX #5: Clean text for natural TTS pronunciation
+    // "CAUTION - Right 67°" → "Sharp right"
+    // "HARD LEFT 120°" → "Hard left"
+    const spokenText = cleanForSpeech(text)
+    console.log(`🔊 Speaking: "${spokenText}" (original: "${text}", ${priority})`)
 
     // Try ElevenLabs first
-    const success = await speakElevenLabs(text)
+    const success = await speakElevenLabs(spokenText)
     if (success) return true
 
     // Fall back to native
     console.log('🔊 Falling back to native')
-    return speakNative(text)
+    return speakNative(spokenText)
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {

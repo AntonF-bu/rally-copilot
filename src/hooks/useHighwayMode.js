@@ -145,7 +145,7 @@ export function useHighwayMode() {
   // ================================
   // GET CHATTER - Uses PRE-GENERATED timeline!
   // This is the key iOS fix - NO computation, just lookup
-  // BUG FIX #4: Added debug logging and relaxed zone requirement
+  // BUG FIX #2: Direct zone lookup instead of cached inHighwayZone
   // ================================
   const getChatter = useCallback(() => {
     if (!mountedRef.current) return null
@@ -170,6 +170,14 @@ export function useHighwayMode() {
 
     const currentDist = getCurrentDistance()
 
+    // BUG FIX #2: Direct zone lookup instead of using cached inHighwayZone
+    // This ensures accurate zone detection after seeking/scrubbing
+    const currentZone = routeZones?.find(z =>
+      currentDist >= z.startDistance && currentDist <= z.endDistance
+    )
+    // Chatter fires in TRANSIT zones (which map to HIGHWAY mode) or when mode is highway
+    const isInHighwayZone = currentZone?.character === 'transit'
+
     // BUG FIX #4: Use threshold crossing instead of proximity window
     // Fire when car CROSSES the trigger point (within MAX_OVERSHOOT)
     // This matches how callouts work and prevents missing triggers
@@ -185,10 +193,10 @@ export function useHighwayMode() {
 
       // Fire if: we've passed it (overshoot >= 0) but not too far past
       if (overshoot >= 0 && overshoot < MAX_OVERSHOOT) {
-        // BUG FIX #4: Check zone requirement - chatter should only fire in transit zones
-        // (but we still need to mark it as announced to avoid re-checking)
-        if (!inHighwayZone) {
-          console.log(`💬 CHATTER SKIPPED (not in highway zone): "${(item.text || '').substring(0, 30)}..."`)
+        // BUG FIX #2: Use direct zone lookup for accurate highway detection
+        // Chatter fires when in transit zone (which IS the highway)
+        if (!isInHighwayZone) {
+          console.log(`💬 CHATTER SKIPPED (zone=${currentZone?.character || 'unknown'}, not transit): "${(item.text || '').substring(0, 30)}..."`)
           announcedChatterRef.current.add(item.id)
           continue
         }
@@ -204,14 +212,14 @@ export function useHighwayMode() {
           text = variants[Math.floor(Math.random() * variants.length)]
         }
 
-        console.log(`💬 CHATTER TRIGGER: car at ${Math.round(currentDist)}m, trigger at ${Math.round(triggerDist)}m, overshoot=${Math.round(overshoot)}m`)
+        console.log(`💬 CHATTER TRIGGER: car at ${Math.round(currentDist)}m, trigger at ${Math.round(triggerDist)}m, overshoot=${Math.round(overshoot)}m, zone=${currentZone?.character}`)
         console.log(`🎤 CHATTER FIRED: "${text}" @ mile ${triggerMile.toFixed(1)}`)
         return text
       }
     }
 
     return null
-  }, [isRunning, inHighwayZone, highwayFeatures?.chatter, lastChatterTime, chatterTimeline, speed, recordChatterTime, getCurrentDistance])
+  }, [isRunning, routeZones, highwayFeatures?.chatter, lastChatterTime, chatterTimeline, speed, recordChatterTime, getCurrentDistance])
 
   // ================================
   // RETURN VALUES
