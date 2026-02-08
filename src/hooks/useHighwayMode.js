@@ -154,9 +154,9 @@ export function useHighwayMode() {
     // Check if chatter is enabled
     if (highwayFeatures?.chatter === false) return null
 
-    // Check cooldown (30 seconds between chatter)
+    // Check cooldown (10 seconds between chatter — timeline spacing handles the rest)
     const now = Date.now()
-    if (now - lastChatterTime < 30000) {
+    if (now - lastChatterTime < 10000) {
       return null
     }
 

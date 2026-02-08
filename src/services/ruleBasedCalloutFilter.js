@@ -558,4 +558,120 @@ export function generateFallbackCallouts(events, routeInfo, zones) {
   return filterEventsToCallouts(events, routeInfo, zones)
 }
 
-export default { filterEventsToCallouts, generateFallbackCallouts }
+/**
+ * Merge close callouts in technical zones into chained sequences.
+ * Real co-drivers chain curves that are close together:
+ * "Left 3 into right 5 into hairpin left" instead of 3 separate callouts.
+ *
+ * Call this AFTER filterEventsToCallouts and AFTER LLM polish.
+ *
+ * @param {Array} callouts - Sorted callouts array
+ * @param {Array} zones - Route zones for zone type lookup
+ * @returns {Array} - Callouts with close technical ones merged
+ */
+export function mergeCloseCallouts(callouts, zones = []) {
+  if (!callouts?.length || callouts.length < 2) return callouts
+
+  const MERGE_DISTANCE_M = 250  // Max gap between triggers to merge
+  const MAX_CHAIN = 3           // Max curves in one merged callout
+  const EXTRA_LEAD_PER_CURVE = 50  // Fire earlier per additional curve in chain
+
+  const getZoneAt = (distanceM) => {
+    if (!zones?.length) return 'transit'
+    for (const z of zones) {
+      if (distanceM >= (z.startDistance || 0) && distanceM <= (z.endDistance || 0)) {
+        return z.character || 'transit'
+      }
+    }
+    return 'transit'
+  }
+
+  // Helper: is this a curve callout (not a zone announcement or chatter)?
+  const isCurveCallout = (c) => {
+    if (!c) return false
+    const t = c.type || ''
+    const txt = (c.text || '').toLowerCase()
+    // Exclude zone announcements, chatter, wake-up without angle data
+    if (t === 'zone_transition' || t === 'chatter') return false
+    if (txt.includes('section') || txt.includes('open road') || txt.includes('clear.') || txt.includes('urban')) return false
+    // Must have some curve-related content
+    return txt.match(/left|right|hairpin|chicane|esses/i) !== null
+  }
+
+  const sorted = [...callouts].sort((a, b) => {
+    const dA = a.triggerDistance ?? (a.triggerMile * 1609.34)
+    const dB = b.triggerDistance ?? (b.triggerMile * 1609.34)
+    return dA - dB
+  })
+
+  const merged = []
+  let i = 0
+
+  while (i < sorted.length) {
+    const current = sorted[i]
+    const currentDist = current.triggerDistance ?? ((current.triggerMile || 0) * 1609.34)
+    const currentZone = current.zone || getZoneAt(currentDist)
+
+    // Only merge in technical zones, and only curve callouts
+    if (currentZone !== 'technical' || !isCurveCallout(current)) {
+      merged.push(current)
+      i++
+      continue
+    }
+
+    // Try to build a chain of close callouts
+    const chain = [current]
+    let j = i + 1
+
+    while (j < sorted.length && chain.length < MAX_CHAIN) {
+      const next = sorted[j]
+      const nextDist = next.triggerDistance ?? ((next.triggerMile || 0) * 1609.34)
+      const prevDist = chain[chain.length - 1].triggerDistance ??
+                       ((chain[chain.length - 1].triggerMile || 0) * 1609.34)
+      const gap = nextDist - prevDist
+
+      const nextZone = next.zone || getZoneAt(nextDist)
+
+      if (gap <= MERGE_DISTANCE_M && nextZone === 'technical' && isCurveCallout(next)) {
+        chain.push(next)
+        j++
+      } else {
+        break
+      }
+    }
+
+    if (chain.length === 1) {
+      merged.push(current)
+      i++
+    } else {
+      // Build merged callout
+      const leadOffset = (chain.length - 1) * EXTRA_LEAD_PER_CURVE
+      const firstDist = chain[0].triggerDistance ?? ((chain[0].triggerMile || 0) * 1609.34)
+
+      // Join texts with ", " — cleanForSpeech will convert to "into" connectors
+      const mergedText = chain.map(c => c.text).join(', ')
+
+      const mergedCallout = {
+        ...chain[0],
+        id: `merged-${chain[0].id}`,
+        triggerDistance: Math.max(0, firstDist - leadOffset),
+        triggerMile: Math.max(0, (firstDist - leadOffset) / 1609.34),
+        text: mergedText,
+        type: chain.some(c => c.type === 'danger') ? 'danger' : 'significant',
+        priority: 'high',
+        mergedFrom: chain.map(c => c.id),
+        mergedCount: chain.length,
+        zone: 'technical'
+      }
+
+      console.log(`🔗 MERGED ${chain.length} callouts: "${mergedText}"`)
+      merged.push(mergedCallout)
+      i = j  // Skip all items consumed by the chain
+    }
+  }
+
+  console.log(`🔗 Merge: ${callouts.length} callouts → ${merged.length} (${callouts.length - merged.length} merged)`)
+  return merged
+}
+
+export default { filterEventsToCallouts, generateFallbackCallouts, mergeCloseCallouts }

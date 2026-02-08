@@ -11,7 +11,7 @@ import {
   reassignEventZones,
   extractCurvesFromEvents
 } from '../../../services/simpleZoneClassifier'
-import { filterEventsToCallouts } from '../../../services/ruleBasedCalloutFilter'
+import { filterEventsToCallouts, mergeCloseCallouts } from '../../../services/ruleBasedCalloutFilter'
 import { polishCalloutsWithLLM } from '../../../services/llmCalloutPolish'
 import { generateGroupedCalloutSets } from '../../../services/calloutGroupingService'
 import { generateChatterTimeline } from '../../../services/highwayChatterService'
@@ -73,75 +73,7 @@ function generateZoneAnnouncements(zones) {
   return announcements
 }
 
-function mergeCloseCallouts(sortedCallouts, zones) {
-  if (!sortedCallouts?.length || !zones?.length) return sortedCallouts
-
-  const MERGE_DISTANCE = 250 // meters - if next curve is within 250m, merge
-  const MAX_CHAIN = 3 // max curves per merged callout
-
-  const merged = []
-  let i = 0
-
-  while (i < sortedCallouts.length) {
-    const current = sortedCallouts[i]
-    const currentDist = current.triggerDistance ?? (current.triggerMile ?? current.mile ?? 0) * 1609.34
-
-    // Check if we're in a technical zone
-    const currentZone = getZoneAtDistance(currentDist, zones)
-    if (currentZone !== 'technical') {
-      merged.push(current)
-      i++
-      continue
-    }
-
-    // Start a chain
-    let chain = [current]
-    let j = i + 1
-
-    while (j < sortedCallouts.length && chain.length < MAX_CHAIN) {
-      const next = sortedCallouts[j]
-      const nextDist = next.triggerDistance ?? (next.triggerMile ?? next.mile ?? 0) * 1609.34
-      const prevDist = chain[chain.length - 1].triggerDistance ??
-                       (chain[chain.length - 1].triggerMile ?? chain[chain.length - 1].mile ?? 0) * 1609.34
-      const gap = nextDist - prevDist
-
-      // Also check next is in technical zone
-      const nextZone = getZoneAtDistance(nextDist, zones)
-      if (nextZone !== 'technical') break
-
-      if (gap <= MERGE_DISTANCE && gap > 0) {
-        chain.push(next)
-        j++
-      } else {
-        break
-      }
-    }
-
-    if (chain.length === 1) {
-      // No merge needed
-      merged.push(current)
-    } else {
-      // Create merged callout
-      const mergedText = chain.map(c => c.text).join(', ')
-      const mergedCallout = {
-        ...current,
-        text: mergedText,
-        mergedFrom: chain,
-        isMerged: true,
-        mergedCount: chain.length,
-      }
-      merged.push(mergedCallout)
-      console.log(`🔗 MERGED ${chain.length} callouts: "${mergedText.substring(0, 60)}..."`)
-
-      // Don't add the subsequent callouts (they're merged)
-    }
-
-    i = j
-  }
-
-  console.log(`📋 Merging: ${sortedCallouts.length} callouts → ${merged.length} (${sortedCallouts.length - merged.length} merged)`)
-  return merged
-}
+// mergeCloseCallouts is now imported from ruleBasedCalloutFilter.js
 
 /**
  * Hook to run the full route analysis pipeline
