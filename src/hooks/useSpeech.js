@@ -15,41 +15,20 @@ const BLOB_CACHE = new Map()
 const getCacheKey = (text) => text.toLowerCase().trim()
 
 // ================================
-// ROUND 5: Rally 1-6 Scale
+// ROUND 7: Rally 1-6 Scale (integrated into cleanForSpeech)
 // Converts degrees to professional rally co-driver pace notes
 // Scale: 1 = hairpin (tightest), 6 = barely a bend (flat out)
 // ================================
 
-function degreesToRallyScale(deg) {
-  // Based on test case mappings:
-  // 180° → Hairpin (special), 120° → 1, 108° → 2, 88° → 2, 72° → 3, 67° → 3, 59° → 4, 57° → 4, 30° → 5, 12° → 6
-  if (deg >= 120) return 1;  // Tight corner (120°+) - scale 1
-  if (deg >= 80)  return 2;  // Hard, needs heavy braking (80-119°)
-  if (deg >= 60)  return 3;  // Moderate, lift and brake (60-79°)
-  if (deg >= 40)  return 4;  // Easy curve, slight lift (40-59°)
-  if (deg >= 20)  return 5;  // Gentle, maintain speed (20-39°)
-  return 6;                   // Barely a bend, flat out (<20°)
-}
-
 function cleanForSpeech(text) {
   if (!text) return text;
 
-  // Remove "CAUTION - " prefix
-  let clean = text.replace(/^CAUTION\s*[-–—]\s*/i, '');
+  let cleaned = text;
 
-  // Remove "DANGER - " prefix
-  clean = clean.replace(/^DANGER\s*[-–—]\s*/i, '');
-
-  // Check for modifiers BEFORE stripping degrees
-  const hasTightens = /tightens/i.test(clean);
-  const hasOpens = /opens/i.test(clean);
-  const hasLong = /\blong\b/i.test(clean);
-  const hasDontCut = /don'?t\s*cut/i.test(clean);
-
-  // Handle "Technical section" and other non-curve announcements
-  if (/technical section|urban section|open road|highway|clear\./i.test(clean)) {
+  // Handle "Technical section" and other non-curve announcements first
+  if (/technical section|urban section|open road|highway|clear\./i.test(cleaned)) {
     // Replace dashes with periods and ensure proper capitalization after periods
-    let result = clean.replace(/\s*-\s*/g, '. ')
+    let result = cleaned.replace(/\s*-\s*/g, '. ')
     // Capitalize first letter after each period
     result = result.replace(/\.\s+([a-z])/g, (match, letter) => `. ${letter.toUpperCase()}`)
     result = result.trim()
@@ -58,109 +37,133 @@ function cleanForSpeech(text) {
     return result;
   }
 
-  // Handle HAIRPIN specially - keep the word
-  if (/hairpin/i.test(clean)) {
-    // "Right into HAIRPIN LEFT" → "Right into hairpin left"
-    // "HAIRPIN LEFT" → "Hairpin left"
-    clean = clean.toLowerCase();
-    clean = clean.replace(/\s*\d+°?\s*/g, ' '); // strip any degrees
-    clean = clean.replace(/\s+/g, ' ').trim();
-    return clean.charAt(0).toUpperCase() + clean.slice(1);
-  }
-
-  // Track if we have compound patterns (for "into" insertion)
-  let hasCompound = false;
+  // Check for modifiers BEFORE any processing
+  const hasTightens = /tightens/i.test(cleaned);
+  const hasOpens = /opens/i.test(cleaned);
+  const hasLong = /\blong\b/i.test(cleaned);
+  const hasDontCut = /don'?t\s*cut/i.test(cleaned);
 
   // Strip modifier words from the text before conversion (we'll add them back later)
-  clean = clean.replace(/,?\s*(tightens|opens|long|don'?t\s*cut)/gi, '');
+  cleaned = cleaned.replace(/,?\s*(tightens|opens|long|don'?t\s*cut)/gi, '');
 
-  // Convert each "Direction Degrees°" to rally scale
-  // Match patterns like "Hard left 120°", "Left 74°", "Right 31°"
-  clean = clean.replace(/(Hard\s+)?(left|right)\s+(\d+)°?/gi, (match, hardPrefix, direction, degrees) => {
-    const deg = parseInt(degrees);
-    const dir = direction.toLowerCase();
-    const scale = degreesToRallyScale(deg);
+  // ============================================
+  // RALLY SCALE CONVERSION — handles all patterns including merged chains
+  // FIX 2 ROUND 7: Convert ALL degrees FIRST, before any other processing
+  // ============================================
 
-    // Only say "Hairpin" for 180°+ turns (true hairpins)
-    if (deg >= 180) return `hairpin ${dir}`;
-    // Scale 1 (120-179°) uses numeric form
-    if (scale === 1) return `${dir} 1`;
-    if (scale === 6) return `${dir} 6`;  // modifier added later
-    return `${dir} ${scale}`;
-  });
-
-  // Convert comma-separated curves to "into" notation
-  // "left 5, right 5" → "left 5 into right 5"
-  // Also handles "left 5, left 3" etc
-  clean = clean.replace(/(\d)(,?\s+)(left|right)/gi, (match, num, sep, dir) => {
-    hasCompound = true;
-    return `${num} into ${dir}`;
-  });
-
-  // Also handle "direction into direction" that's already there (e.g., "right into hairpin left")
-  if (/\binto\b/i.test(clean)) {
-    hasCompound = true;
+  // Helper: convert a degree value to rally scale 1-6
+  const degreesToRally = (deg) => {
+    const d = parseFloat(deg)
+    if (isNaN(d)) return ''
+    if (d >= 180) return 'hairpin'
+    if (d >= 120) return '1'
+    if (d >= 80) return '2'
+    if (d >= 60) return '3'
+    if (d >= 40) return '4'
+    if (d >= 20) return '5'
+    return '6'
   }
 
-  // Strip remaining degree symbols and "Hard" prefix artifacts
-  clean = clean.replace(/°/g, '');
+  // Step 1: Convert ALL "N°" patterns to rally scale numbers FIRST
+  // This handles degrees anywhere in the string, including inside merged chains
+  // Patterns: "Left 29°" → "Left 5", "HARD RIGHT 88°" → "HARD RIGHT 2", "max 32°" → "max 5"
+  cleaned = cleaned.replace(/(\d+(?:\.\d+)?)\s*°/g, (match, degrees) => {
+    return degreesToRally(degrees)
+  })
 
-  // Normalize case
-  clean = clean.replace(/\bHARD\b/gi, '');
-  clean = clean.replace(/\bINTO\b/g, 'into');
+  // Step 2: Strip severity prefixes (CAUTION, DANGER, HARD, SHARP, EASY, SLIGHT)
+  // Do this AFTER degree conversion so "HARD LEFT 88°" → "HARD LEFT 2" → "left 2"
+  cleaned = cleaned.replace(/^CAUTION\s*[-–—]\s*/i, '')
+  cleaned = cleaned.replace(/^DANGER\s*[-–—]\s*/i, '')
+  cleaned = cleaned.replace(/\bCAUTION\s*[-–—]?\s*/gi, '')
+  cleaned = cleaned.replace(/\bHARD\s+/gi, '')
+  cleaned = cleaned.replace(/\bSHARP\s+/gi, '')
+  cleaned = cleaned.replace(/\bEASY\s+/gi, '')
+  cleaned = cleaned.replace(/\bSLIGHT\s+/gi, '')
 
-  // Build modifiers list
+  // Step 3: Handle "max N" in esses/sequence callouts
+  // After degree conversion, "max 32°" became "max 5" which is meaningful
+  // Convert to "tightest N" for clarity
+  cleaned = cleaned.replace(/\bmax\s+(\d)\b/gi, (match, num) => {
+    return `tightest ${num}`
+  })
+
+  // Step 4: Handle HAIRPIN - normalize to lowercase
+  // "HAIRPIN LEFT" → "hairpin left", "Right into HAIRPIN LEFT" → "right into hairpin left"
+  cleaned = cleaned.replace(/\bHAIRPIN\b/gi, 'hairpin')
+
+  // Step 5: Normalize case — lowercase everything first
+  cleaned = cleaned.toLowerCase()
+
+  // Step 6: Handle merged chain formatting
+  // Split on commas, clean up each segment, rejoin with "into" connectors where appropriate
+  const segments = cleaned.split(/,\s*/).map(s => s.trim()).filter(Boolean)
+
+  // Track if this is a compound callout (for flat out logic)
+  let hasCompound = segments.length >= 2
+
+  if (segments.length >= 2) {
+    // Pattern to detect curve callouts (with or without numbers)
+    const curvePattern = /(?:hairpin\s+)?(?:left|right)(?:\s+\d)?/i
+    const isCurveSegment = (s) => curvePattern.test(s)
+
+    // Rebuild with proper connectors
+    let result = segments[0]
+    for (let k = 1; k < segments.length; k++) {
+      const seg = segments[k]
+      const prevIsCurve = isCurveSegment(segments[k - 1])
+      const thisIsCurve = isCurveSegment(seg)
+
+      if (prevIsCurve && thisIsCurve && !seg.startsWith('into ')) {
+        // Two consecutive curve segments — connect with "into"
+        result += ', into ' + seg
+      } else {
+        // Non-curve segment or already has connector — just comma
+        result += ', ' + seg
+      }
+    }
+    cleaned = result
+  }
+
+  // Also check for existing "into" patterns
+  if (/\binto\b/i.test(cleaned)) {
+    hasCompound = true
+  }
+
+  // Step 7: Clean up any double spaces, trailing/leading whitespace
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim()
+
+  // Step 8: Remove any leftover degree symbols that slipped through
+  cleaned = cleaned.replace(/°/g, '')
+
+  // Step 9: Build modifiers list and add to end
   let modifiers = [];
   if (hasTightens) modifiers.push('tightens');
   if (hasOpens) modifiers.push('opens');
   if (hasLong) modifiers.push('long');
   if (hasDontCut) modifiers.push("don't cut");
 
-  // Add modifiers to the end of the phrase
   if (modifiers.length > 0) {
-    clean = clean + ', ' + modifiers.join(', ');
+    cleaned = cleaned + ', ' + modifiers.join(', ');
   }
 
-  // Add "flat out" for severity 6 curves (if not already modified and not compound)
-  if (/\b6\b/.test(clean) && modifiers.length === 0 && !hasCompound) {
-    clean = clean + ', flat out';
+  // Step 10: Add "flat out" for severity 6 curves (if not already modified and not compound)
+  if (/\b6\b/.test(cleaned) && modifiers.length === 0 && !hasCompound) {
+    cleaned = cleaned + ', flat out';
   }
 
-  // Handle merged callout chains
-  // After rally conversion, text might be: "Right 4, Right 5 into left 6"
-  // or "Right into hairpin left, Right 5 into left 6"
-  // We want: "Right 4, into right 5 into left 6"
-  // Split on ", " and check if segments are rally-style callouts
-  const rallyPattern = /^((?:hairpin\s+)?(?:left|right)\s*\d?|(?:left|right)\s+into\s+)/i
-  const segments = clean.split(/,\s+/).map(s => s.trim()).filter(Boolean)
-  if (segments.length >= 2 && segments.every(s => rallyPattern.test(s))) {
-    // Chain them with "into" connectors
-    clean = segments[0]
-    for (let k = 1; k < segments.length; k++) {
-      // If the segment already starts with a connector word, just add comma
-      if (segments[k].toLowerCase().startsWith('into ')) {
-        clean += ', ' + segments[k].toLowerCase()
-      } else {
-        clean += ', into ' + segments[k].toLowerCase()
-      }
-    }
+  // Step 11: Capitalize first letter
+  if (cleaned.length > 0) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   }
 
-  // Clean whitespace
-  clean = clean.replace(/\s+/g, ' ').trim();
-
-  // Capitalize first letter
-  if (clean.length > 0) {
-    clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-  }
-
-  return clean;
+  return cleaned;
 }
 
 // ================================
 // UNIT TEST for cleanForSpeech
 // Run in console: window.testCleanForSpeech()
-// ROUND 5: Rally 1-6 scale tests
+// ROUND 7: Updated for merged chain handling and max N° pattern
 // ================================
 function testCleanForSpeech() {
   const tests = [
@@ -184,8 +187,14 @@ function testCleanForSpeech() {
     { input: 'Left 27°', expected: 'Left 5' },
 
     // Compound callouts - "into" notation
-    { input: 'Left 32°, Right 31°', expected: 'Left 5 into right 5' },
+    { input: 'Left 32°, Right 31°', expected: 'Left 5, into right 5' },
     { input: 'HARD LEFT 108° into HARD RIGHT 82°', expected: 'Left 2 into right 2' },
+
+    // FIX 2 ROUND 7: Merged chain callouts with multiple degrees
+    { input: 'Left 29°, Right into HAIRPIN LEFT, CAUTION - Right 63°', expected: 'Left 5, into right into hairpin left, into right 3' },
+    { input: 'Right into HARD LEFT 88°', expected: 'Right into left 2' },
+    { input: 'Left 15°, Esses, 3 curves, max 32°', expected: 'Left 6, esses, 3 curves, tightest 5' },
+    { input: 'HARD RIGHT 45° into HARD LEFT 64°', expected: 'Right 4 into left 3' },
 
     // Special patterns
     { input: 'Right into HAIRPIN LEFT', expected: 'Right into hairpin left' },
@@ -200,7 +209,7 @@ function testCleanForSpeech() {
   let passed = 0;
   let failed = 0;
 
-  console.log('\n🧪 TESTING cleanForSpeech() - Rally 1-6 Scale\n');
+  console.log('\n🧪 TESTING cleanForSpeech() - Rally 1-6 Scale + Merged Chains\n');
 
   tests.forEach((test, i) => {
     const result = cleanForSpeech(test.input);
