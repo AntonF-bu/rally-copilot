@@ -126,6 +126,26 @@ function cleanForSpeech(text) {
     clean = clean + ', flat out';
   }
 
+  // Handle merged callout chains
+  // After rally conversion, text might be: "Right 4, Right 5 into left 6"
+  // or "Right into hairpin left, Right 5 into left 6"
+  // We want: "Right 4, into right 5 into left 6"
+  // Split on ", " and check if segments are rally-style callouts
+  const rallyPattern = /^((?:hairpin\s+)?(?:left|right)\s*\d?|(?:left|right)\s+into\s+)/i
+  const segments = clean.split(/,\s+/).map(s => s.trim()).filter(Boolean)
+  if (segments.length >= 2 && segments.every(s => rallyPattern.test(s))) {
+    // Chain them with "into" connectors
+    clean = segments[0]
+    for (let k = 1; k < segments.length; k++) {
+      // If the segment already starts with a connector word, just add comma
+      if (segments[k].toLowerCase().startsWith('into ')) {
+        clean += ', ' + segments[k].toLowerCase()
+      } else {
+        clean += ', into ' + segments[k].toLowerCase()
+      }
+    }
+  }
+
   // Clean whitespace
   clean = clean.replace(/\s+/g, ' ').trim();
 
@@ -221,6 +241,15 @@ export function useSpeech() {
 
   // ROUND 5 CHANGE 5: Track currently playing audio for priority-based interruption
   const currentlyPlayingRef = useRef(null) // { text, priority }
+
+  // FIX 3 ROUND 6: Priority tracking for speech interrupts
+  const currentPriorityRef = useRef(-1)  // -1 = nothing playing
+
+  const PRIORITY_VALUES = {
+    'low': 0,      // chatter
+    'normal': 1,   // zone announcements
+    'high': 2      // curve callouts
+  }
 
   // Initialize
   useEffect(() => {
@@ -336,15 +365,17 @@ export function useSpeech() {
       utterance.pitch = 1.0
       utterance.volume = settings.volume || 1.0
 
-      // ROUND 5 CHANGE 5: Clear currentlyPlayingRef on audio end
+      // FIX 3 ROUND 6: Reset priority when playback ends
       utterance.onend = () => {
         isPlayingRef.current = false
+        currentPriorityRef.current = -1
         currentlyPlayingRef.current = null
         setSpeaking(false, '')
       }
 
       utterance.onerror = () => {
         isPlayingRef.current = false
+        currentPriorityRef.current = -1
         currentlyPlayingRef.current = null
         setSpeaking(false, '')
       }
@@ -423,9 +454,10 @@ export function useSpeech() {
       globalAudioElement.currentTime = 0
       
       // Set up event handlers
-      // ROUND 5 CHANGE 5: Clear currentlyPlayingRef on audio end
+      // FIX 3 ROUND 6: Reset priority when playback ends
       const onEnded = () => {
         isPlayingRef.current = false
+        currentPriorityRef.current = -1
         currentlyPlayingRef.current = null
         setSpeaking(false, '')
         globalAudioElement.removeEventListener('ended', onEnded)
@@ -434,6 +466,7 @@ export function useSpeech() {
       const onError = (e) => {
         console.log('🔊 Playback error:', e)
         isPlayingRef.current = false
+        currentPriorityRef.current = -1
         currentlyPlayingRef.current = null
         setSpeaking(false, '')
         globalAudioElement.removeEventListener('ended', onEnded)
@@ -456,6 +489,7 @@ export function useSpeech() {
     } catch (err) {
       console.log('🔊 Play error:', err?.message)
       isPlayingRef.current = false
+      currentPriorityRef.current = -1  // FIX 3 ROUND 6
       setSpeaking(false, '')
       return false
     }
@@ -479,29 +513,30 @@ export function useSpeech() {
       return false
     }
 
-    // ROUND 5 CHANGE 5: Priority-based interruption logic
-    const priorityRank = { low: 0, normal: 1, high: 2 }
-    const newRank = priorityRank[priority] ?? 1
+    const priorityValue = PRIORITY_VALUES[priority] ?? 1
 
-    if (isPlayingRef.current && currentlyPlayingRef.current) {
-      const currentRank = priorityRank[currentlyPlayingRef.current.priority] ?? 1
-
-      // Lower priority items cannot interrupt higher priority items
-      if (newRank < currentRank) {
-        console.log(`🔇 SKIPPED (lower priority): "${text.substring(0, 30)}..." (${priority}) while "${currentlyPlayingRef.current.text.substring(0, 20)}..." (${currentlyPlayingRef.current.priority}) playing`)
+    // FIX 3 ROUND 6: SPEECH INTERRUPT LOGIC
+    if (isPlayingRef.current) {
+      if (priorityValue >= currentPriorityRef.current) {
+        // New callout is equal or higher priority — interrupt current playback
+        console.log(`⏹️ INTERRUPTED: playing="${lastSpokenRef.current}" (pri=${currentPriorityRef.current}) → new="${text}" (pri=${priorityValue})`)
+        if (globalAudioElement) {
+          globalAudioElement.pause()
+          globalAudioElement.currentTime = 0
+        }
+        synthRef.current?.cancel()
+        isPlayingRef.current = false
+        currentlyPlayingRef.current = null
+        setSpeaking(false, '')
+      } else {
+        // New callout is lower priority — skip it entirely
+        console.log(`⏭️ SKIPPED (low pri): "${text}" (pri=${priorityValue}), playing="${lastSpokenRef.current}" (pri=${currentPriorityRef.current})`)
         return false
       }
-
-      // Same or higher priority - interrupt
-      console.log(`⏹️ INTERRUPTED: "${currentlyPlayingRef.current.text.substring(0, 20)}..." replaced by "${text.substring(0, 30)}..."`)
-      globalAudioElement?.pause()
-      if (globalAudioElement) {
-        globalAudioElement.currentTime = 0
-      }
-      synthRef.current?.cancel()
-      isPlayingRef.current = false
-      currentlyPlayingRef.current = null
     }
+
+    // Set current priority
+    currentPriorityRef.current = priorityValue
 
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
@@ -527,7 +562,8 @@ export function useSpeech() {
     globalAudioElement?.pause()
     synthRef.current?.cancel()
     isPlayingRef.current = false
-    currentlyPlayingRef.current = null  // ROUND 5 CHANGE 5
+    currentPriorityRef.current = -1  // FIX 3 ROUND 6
+    currentlyPlayingRef.current = null
     setSpeaking(false, '')
   }, [setSpeaking])
 

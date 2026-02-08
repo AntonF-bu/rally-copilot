@@ -131,6 +131,10 @@ export default function App() {
   // Track distance where last audio (curated or chatter) was spoken
   const lastSpeakDistanceRef = useRef(0)
 
+  // FIX 1 ROUND 6: Track distances for curated callouts and chatter separately
+  const lastCuratedSpeakDistRef = useRef(0)
+  const lastChatterSpeakDistRef = useRef(0)
+
   // FIX #2: Distance tracking ref that NEVER resets during navigation
   // This survives React re-renders and effect re-runs
   const distanceStateRef = useRef({
@@ -177,6 +181,8 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set() // NEW
     lastCalloutRef.current = 0
     lastZoneAnnouncedRef.current = null
+    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
     setUserDistanceAlongRoute(0)
     distanceStateRef.current = {
       prevDist: 0,
@@ -197,6 +203,8 @@ export default function App() {
       announcedCuratedCalloutsRef.current = new Set() // NEW
       lastCalloutRef.current = Date.now() - 5000
       lastZoneAnnouncedRef.current = null
+      lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
+      lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
 
       // FIX #2: Initialize distance tracker for this navigation session
       if (!distanceStateRef.current.initialized) {
@@ -448,6 +456,7 @@ export default function App() {
         announcedCuratedCalloutsRef.current.add(toFire.id)
         lastCalloutRef.current = now
         lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
+        lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
 
         if (toFire.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate([150])
@@ -578,6 +587,7 @@ export default function App() {
       announcedCuratedCalloutsRef.current.add(upcomingCallout.id)
       lastCalloutRef.current = now
       lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
+      lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
 
       if (upcomingCallout.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
         navigator.vibrate([150])
@@ -602,6 +612,7 @@ export default function App() {
     announcedCuratedCalloutsRef.current.add(calloutToSpeak.id)
     lastCalloutRef.current = now
     lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
+    lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
 
     if (calloutToSpeak.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
       navigator.vibrate([150])
@@ -611,77 +622,43 @@ export default function App() {
 
   // ================================
   // HIGHWAY COMPANION CHATTER
-  // FIXED: Distance-based triggers instead of setInterval
-  // Uses pre-generated chatter timeline from RoutePreview
-  // BUG FIX #4: Added debug logging and better integration
+  // FIXED v2: Check every 100m, use App.jsx's own mode detection
+  // FIXED v2: Distance-based silence guard instead of relying on useHighwayMode's zone tracker
   // ================================
   const lastChatterCheckRef = useRef(0)
-  const lastChatterLogRef = useRef(0)
-
-  // Get chatter timeline from store
-  const chatterTimeline = useStore(state => state.chatterTimeline)
 
   useEffect(() => {
     if (!isRunning || !settings.voiceEnabled) return
 
     const currentDist = userDistanceAlongRoute
-    const now = Date.now()
 
-    // Debug log chatter status every 2 seconds (reduced frequency)
-    // FIX #5: Use direct zone lookup for accurate inHighway detection
-    if (DEBUG_CALLOUTS && now - lastChatterLogRef.current > 2000) {
-      lastChatterLogRef.current = now
-
-      // FIX #5: Direct zone lookup (same as getChatter uses) for accurate display
-      const directZone = routeZones?.find(z =>
-        currentDist >= z.startDistance && currentDist <= z.endDistance
-      )
-      // FIX #5: Check for 'transit' character (which maps to highway mode)
-      const directInHighway = directZone?.character === 'transit'
-
-      const timeline = chatterTimeline || window.__chatterTimeline
-      if (timeline?.length > 0) {
-        const nextChatter = timeline.find(c => {
-          const triggerDist = (c.triggerMile || c.mile || 0) * 1609.34
-          return triggerDist > currentDist
-        })
-        if (nextChatter) {
-          const nextDist = (nextChatter.triggerMile || nextChatter.mile || 0) * 1609.34
-          console.log(`💬 CHATTER: next at ${Math.round(nextDist)}m (${((nextChatter.triggerMile || nextChatter.mile || 0)).toFixed(1)}mi), car at ${Math.round(currentDist)}m, distAway=${Math.round(nextDist - currentDist)}m, inHighway=${directInHighway}, zone=${directZone?.character || 'none'}`)
-        }
-      } else {
-        console.log(`💬 CHATTER: no timeline available, inHighway=${directInHighway}, zone=${directZone?.character || 'none'}`)
-      }
-    }
-
-    // Check chatter every 50m for more responsive triggering
-    const distSinceLastCheck = Math.abs(currentDist - lastChatterCheckRef.current)
-    if (distSinceLastCheck < 50) return
+    // Check every 100m of travel (was 500m — too coarse, missed trigger windows)
+    if (Math.abs(currentDist - lastChatterCheckRef.current) < 100) return
     lastChatterCheckRef.current = currentDist
 
-    // ROUND 5 CHANGE 4: Distance-based silence check (400m minimum)
-    // This scales with speed automatically - faster = more distance covered
-    const MIN_SILENCE_DISTANCE = 400  // meters
-    const distSinceLastSpeak = currentDist - lastSpeakDistanceRef.current
+    // Use App.jsx's own mode detection (currentMode) instead of useHighwayMode's inHighwayZone
+    // This is more reliable because it updates on every zone boundary crossing
+    if (currentMode !== DRIVING_MODE.HIGHWAY) return
 
-    if (distSinceLastSpeak < MIN_SILENCE_DISTANCE) {
-      if (DEBUG_CALLOUTS && now - lastChatterLogRef.current > 2000) {
-        console.log(`💬 CHATTER SKIPPED (too close): ${Math.round(distSinceLastSpeak)}m since last speak (min ${MIN_SILENCE_DISTANCE}m)`)
-      }
-      return
-    }
+    // Don't play chatter within 400m of a curated callout (avoid stepping on important info)
+    if (currentDist - lastCuratedSpeakDistRef.current < 400) return
 
-    // Also respect time-based minimum (backup)
-    if (now - lastCalloutRef.current < 10000) return
+    // Don't play chatter if a curated callout is coming within 300m
+    const nextCurated = curatedHighwayCallouts?.find(c => {
+      if (announcedCuratedCalloutsRef.current.has(c.id)) return false
+      const d = (c.triggerDistance ?? (c.triggerMile * 1609.34)) - currentDist
+      return d > 0 && d < 300
+    })
+    if (nextCurated) return
 
-    // getChatter handles zone checking and threshold crossing internally
+    // getChatter uses pre-generated timeline (no computation)
     const chatter = getChatter()
     if (chatter) {
-      console.log(`🎤 CHATTER FIRED: "${chatter}" (${Math.round(distSinceLastSpeak)}m since last speak)`)
+      console.log(`🎙️ CHATTER FIRED: "${chatter}" @ ${Math.round(currentDist)}m`)
       speak(chatter, 'low')
-      lastSpeakDistanceRef.current = currentDist  // ROUND 5 CHANGE 4
+      lastChatterSpeakDistRef.current = currentDist
     }
-  }, [isRunning, settings.voiceEnabled, inHighwayZone, userDistanceAlongRoute, getChatter, speak, chatterTimeline])
+  }, [isRunning, settings.voiceEnabled, userDistanceAlongRoute, currentMode, getChatter, speak, curatedHighwayCallouts])
 
   // ================================
   // LEGACY CURVE CALLOUTS (fallback when no curated callouts)
@@ -846,6 +823,8 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
+    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
     resetHighwayTrip()
 
     // Log all callout trigger distances at nav start
@@ -911,6 +890,8 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
+    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
     resetHighwayTrip()
 
     // Log all callout trigger distances at simulation start
