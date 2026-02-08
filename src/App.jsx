@@ -329,15 +329,9 @@ export default function App() {
         setCurrentMode(newMode)
         runtimeRef.current.zones.push(newMode)  // FIX 3 ROUND 7B
 
-        // FIX 2 ROUND 7B: Zone briefings with context-aware detail
-        if (lastZoneAnnouncedRef.current !== zone.id) {
-          const briefing = buildZoneBriefing(zone, sortedZones, curatedHighwayCallouts, userDistanceAlongRoute)
-          if (briefing) {
-            console.log(`📢 ZONE BRIEFING: "${briefing}"`)
-            speak(briefing, 'normal')
-          }
-          lastZoneAnnouncedRef.current = zone.id
-        }
+        lastZoneAnnouncedRef.current = zone.id
+        // Zone announcements handled by curated callout system (type: 'transition')
+        // Do NOT speak here — it doubles up with curated zone callouts
       }
     }
   }, [isRunning, routeZones, userDistanceAlongRoute, currentMode, speak])
@@ -606,6 +600,14 @@ export default function App() {
     // Check every 100m (was 500m — too coarse for ±200m trigger windows)
     if (Math.abs(currentDist - lastChatterCheckRef.current) < 100) return
     lastChatterCheckRef.current = currentDist
+
+    // TEMP DIAGNOSTIC — remove after chatter confirmed working
+    if (currentMode === DRIVING_MODE.HIGHWAY) {
+      const timeline = useStore.getState().chatterTimeline || window.__chatterTimeline
+      if (!timeline?.length) {
+        console.log(`⚠️ CHATTER DIAGNOSTIC: No timeline! store=${!!useStore.getState().chatterTimeline} window=${!!window.__chatterTimeline}`)
+      }
+    }
 
     // Use App.jsx's own currentMode — NOT useHighwayMode's inHighwayZone
     if (currentMode !== DRIVING_MODE.HIGHWAY) return
@@ -1070,83 +1072,5 @@ export default function App() {
   )
 }
 
-/**
- * FIX 2 ROUND 7B: Build a context-aware zone briefing based on upcoming callouts.
- * Highway = verbose (we have time). Technical = surgical. Urban = brief.
- */
-function buildZoneBriefing(enteringZone, allZones, callouts, currentDistance) {
-  const character = enteringZone.character
-  const zoneLengthMi = ((enteringZone.endDistance - enteringZone.startDistance) / 1609.34).toFixed(1)
-
-  // Get callouts in this zone
-  const zoneCallouts = (callouts || []).filter(c => {
-    const dist = c.triggerDistance ?? (c.triggerMile * 1609.34)
-    return dist >= enteringZone.startDistance && dist <= enteringZone.endDistance
-  })
-
-  // Get curve callouts only (not zone transitions, not chatter)
-  const curveCallouts = zoneCallouts.filter(c => {
-    const txt = (c.text || '').toLowerCase()
-    return txt.match(/left|right|hairpin|chicane|esses|sweeper/i) &&
-           !txt.includes('section') && !txt.includes('urban') && !txt.includes('open road')
-  })
-
-  // Find the next zone after this one
-  const nextZone = allZones.find(z => z.startDistance > enteringZone.endDistance)
-
-  if (character === 'transit') {
-    // HIGHWAY — verbose briefing, we have time
-    const parts = ['Open road.']
-
-    if (parseFloat(zoneLengthMi) > 0.5) {
-      parts.push(`${zoneLengthMi} miles.`)
-    }
-
-    if (curveCallouts.length === 0) {
-      parts.push('Straight ahead.')
-    } else if (curveCallouts.length <= 3) {
-      // Name the upcoming curves
-      const curveDescs = curveCallouts.slice(0, 3).map(c => {
-        // Extract just the direction and number from text
-        const shortText = (c.text || '').replace(/CAUTION\s*[-–—]?\s*/gi, '').replace(/HARD\s+/gi, '').replace(/SHARP\s+/gi, '').toLowerCase().trim()
-        return shortText
-      })
-      parts.push(curveDescs.join(', then ') + '.')
-    } else {
-      parts.push(`${curveCallouts.length} curves ahead.`)
-      // Preview first curve
-      const first = curveCallouts[0]
-      const firstDist = first.triggerDistance ?? (first.triggerMile * 1609.34)
-      const miAhead = ((firstDist - currentDistance) / 1609.34).toFixed(1)
-      if (parseFloat(miAhead) > 0.3) {
-        parts.push(`First in ${miAhead} miles.`)
-      }
-    }
-
-    // Preview what's after this highway section
-    if (nextZone?.character === 'technical') {
-      const distToTech = ((nextZone.startDistance - currentDistance) / 1609.34).toFixed(1)
-      parts.push(`Technical section in ${distToTech} miles.`)
-    }
-
-    return parts.join(' ')
-  }
-
-  if (character === 'technical') {
-    // TECHNICAL — short and focused
-    const parts = ['Technical section.']
-
-    if (curveCallouts.length > 0) {
-      parts.push(`${curveCallouts.length} curves in ${zoneLengthMi} miles.`)
-    }
-
-    parts.push('Stay sharp.')
-    return parts.join(' ')
-  }
-
-  if (character === 'urban') {
-    return 'Urban zone. Watch for traffic.'
-  }
-
-  return null
-}
+// buildZoneBriefing removed in Round 7C — zone announcements now handled
+// solely by curated callout system (type: 'transition') from ruleBasedCalloutFilter.js

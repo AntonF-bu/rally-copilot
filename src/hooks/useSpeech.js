@@ -26,7 +26,7 @@ function cleanForSpeech(text) {
   let cleaned = text;
 
   // Handle "Technical section" and other non-curve announcements first
-  if (/technical section|urban section|open road|highway|clear\./i.test(cleaned)) {
+  if (/technical section|urban section|urban zone|open road|highway|clear\./i.test(cleaned)) {
     // Replace dashes with periods and ensure proper capitalization after periods
     let result = cleaned.replace(/\s*-\s*/g, '. ')
     // Capitalize first letter after each period

@@ -211,33 +211,38 @@ function createDangerWithContext(group, danger, zoneType) {
   const lastMile = group[group.length - 1].triggerMile ?? group[group.length - 1].mile ?? 0
   
   let text = ''
-  
+
   // Build contextual callout
+  // FIX Round 7C: Include angle on ALL curves in compound text so cleanForSpeech can convert to rally scale
   if (before.length > 0 && after.length > 0) {
     // Danger in the middle
     const beforeDir = before[0].direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right'
+    const beforeAngle = before[0].angle || 20
     const afterDir = after[0].direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right'
-    
+    const afterAngle = after[0].angle || 20
+
     if (angle >= 90) {
-      text = `${capitalizeFirst(beforeDir)} tightens, HAIRPIN ${dir.toUpperCase()}, ${afterDir} out`
+      text = `${capitalizeFirst(beforeDir)} ${beforeAngle}° tightens, HAIRPIN ${dir.toUpperCase()}, ${afterDir} ${afterAngle}° out`
     } else {
-      text = `${capitalizeFirst(beforeDir)}, then HARD ${dir.toUpperCase()} ${angle}°, ${afterDir}`
+      text = `${capitalizeFirst(beforeDir)} ${beforeAngle}°, then HARD ${dir.toUpperCase()} ${angle}°, ${afterDir} ${afterAngle}°`
     }
   } else if (before.length > 0) {
     // Danger at end
     const beforeDir = before[0].direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right'
+    const beforeAngle = before[0].angle || 20
     if (angle >= 90) {
-      text = `${capitalizeFirst(beforeDir)} into HAIRPIN ${dir.toUpperCase()}`
+      text = `${capitalizeFirst(beforeDir)} ${beforeAngle}° into HAIRPIN ${dir.toUpperCase()}`
     } else {
-      text = `${capitalizeFirst(beforeDir)} into HARD ${dir.toUpperCase()} ${angle}°`
+      text = `${capitalizeFirst(beforeDir)} ${beforeAngle}° into HARD ${dir.toUpperCase()} ${angle}°`
     }
   } else if (after.length > 0) {
     // Danger at start
     const afterDir = after[0].direction?.[0]?.toUpperCase() === 'L' ? 'left' : 'right'
+    const afterAngle = after[0].angle || 20
     if (angle >= 90) {
-      text = `HAIRPIN ${dir.toUpperCase()}, exits ${afterDir}`
+      text = `HAIRPIN ${dir.toUpperCase()}, exits ${afterDir} ${afterAngle}°`
     } else {
-      text = `HARD ${dir.toUpperCase()} ${angle}°, exits ${afterDir}`
+      text = `HARD ${dir.toUpperCase()} ${angle}°, exits ${afterDir} ${afterAngle}°`
     }
   } else {
     // Just danger (shouldn't happen but handle it)
