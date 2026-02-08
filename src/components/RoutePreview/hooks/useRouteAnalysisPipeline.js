@@ -19,6 +19,62 @@ import { dumpHighwayData } from '../../../services/highwayDataDebug'
 import { getLLMApiKey, hasLLMApiKey } from '../../../services/llmZoneService'
 
 // ================================
+// FIX 5 ROUND 7: Route Preview Summary
+// Logs a compact debug summary after route analysis completes
+// ================================
+function logPreviewSummary(callouts, zones, chatterTimeline) {
+  const zoneStr = (zones || []).map(z => {
+    const startMi = z.startDistance != null ? (z.startDistance / 1609.34).toFixed(1) : '?'
+    const endMi = z.endDistance != null ? (z.endDistance / 1609.34).toFixed(1) : '?'
+    return `${z.character || z.type || '?'}(${startMi}-${endMi}mi)`
+  }).join(' → ')
+
+  const byZone = {}
+  const byType = {}
+  ;(callouts || []).forEach(c => {
+    const z = c.zone || 'unknown'
+    const t = c.type || 'unknown'
+    byZone[z] = (byZone[z] || 0) + 1
+    byType[t] = (byType[t] || 0) + 1
+  })
+
+  const mergedCount = (callouts || []).filter(c => c.mergedFrom || c.mergedCount).length
+  const totalMergedCurves = (callouts || []).reduce((sum, c) => sum + (c.mergedCount || 0), 0)
+
+  console.log(`\n${'='.repeat(60)}`)
+  console.log(`📋 ROUTE PREVIEW SUMMARY`)
+  console.log(`${'='.repeat(60)}`)
+  console.log(`🗺️  Zones: ${zoneStr}`)
+  console.log(`📍 Callouts: ${(callouts || []).length} total`)
+  console.log(`   By zone: ${Object.entries(byZone).map(([k,v]) => `${k}=${v}`).join(', ') || 'none'}`)
+  console.log(`   By type: ${Object.entries(byType).map(([k,v]) => `${k}=${v}`).join(', ') || 'none'}`)
+  if (mergedCount > 0) {
+    console.log(`🔗 Merged: ${mergedCount} chains (${totalMergedCurves} curves combined)`)
+  }
+  console.log(`💬 Chatter: ${chatterTimeline?.length || 0} items queued`)
+
+  // Show first 5 callouts as sample
+  console.log(`\n📝 First 5 callouts:`)
+  ;(callouts || []).slice(0, 5).forEach((c, i) => {
+    const dist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+    const mi = (dist / 1609.34).toFixed(2)
+    console.log(`   ${i+1}. [${c.zone || '?'}] "${c.text}" @ ${mi}mi (${c.type}, pri=${c.priority || 'normal'})`)
+  })
+
+  // Show last 5 callouts
+  if ((callouts || []).length > 5) {
+    console.log(`\n📝 Last 5 callouts:`)
+    ;(callouts || []).slice(-5).forEach((c, i) => {
+      const dist = c.triggerDistance ?? (c.triggerMile * 1609.34)
+      const mi = (dist / 1609.34).toFixed(2)
+      const idx = (callouts || []).length - 5 + i + 1
+      console.log(`   ${idx}. [${c.zone || '?'}] "${c.text}" @ ${mi}mi (${c.type}, pri=${c.priority || 'normal'})`)
+    })
+  }
+  console.log(`${'='.repeat(60)}\n`)
+}
+
+// ================================
 // ROUND 5 CHANGE 2: Merge close callouts in technical zones
 // A real rally co-driver chains close curves together
 // ================================
@@ -160,7 +216,13 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
       updateStage('zones', 'loading')
       const censusAnalysis = await analyzeRouteCharacter(coordinates, curves)
       const censusSegments = censusAnalysis.segments || []
-      console.log('📊 Census zones:', censusSegments.map(s => `${s.character}(${((s.end - s.start) / 1609.34).toFixed(1)}mi)`).join(' → '))
+      // FIX 4 ROUND 7: Handle both start/end and startDistance/endDistance property names
+      console.log('📊 Census zones:', censusSegments.map(s => {
+        const start = s.start ?? s.startDistance ?? 0
+        const end = s.end ?? s.endDistance ?? 0
+        const distMi = (end - start) / 1609.34
+        return `${s.character}(${isNaN(distMi) ? '?' : distMi.toFixed(1)}mi)`
+      }).join(' → '))
 
       // ========================================
       // Step 2: Extract road refs
@@ -386,6 +448,12 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               useStore.getState().setCuratedHighwayCallouts(displayCallouts)
               useStore.getState().setGroupedCalloutSets?.(groupedSets)
               window.__hybridCallouts = finalResult
+
+              // ================================
+              // FIX 5 ROUND 7: Route Preview Summary
+              // ================================
+              const chatterTimeline = useStore.getState().chatterTimeline || window.__chatterTimeline || []
+              logPreviewSummary(displayCallouts, activeZones, chatterTimeline)
             }
 
           } catch (hybridErr) {

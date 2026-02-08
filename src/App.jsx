@@ -148,6 +148,15 @@ export default function App() {
   const justSeekedRef = useRef(0)
   const wasSeekingRef = useRef(false)
 
+  // FIX 5 ROUND 7: Navigation Runtime Summary tracking
+  const navSummaryRef = useRef({
+    lastLogTime: 0,
+    calloutsSpoken: [],
+    chatterSpoken: [],
+    zonesEntered: [],
+  })
+  const prevRunningRef = useRef(false)
+
   // Debug flag for callout logging
   const DEBUG_CALLOUTS = true
 
@@ -183,6 +192,7 @@ export default function App() {
     lastZoneAnnouncedRef.current = null
     lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
     lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     setUserDistanceAlongRoute(0)
     distanceStateRef.current = {
       prevDist: 0,
@@ -205,6 +215,7 @@ export default function App() {
       lastZoneAnnouncedRef.current = null
       lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
       lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
+      lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
 
       // FIX #2: Initialize distance tracker for this navigation session
       if (!distanceStateRef.current.initialized) {
@@ -332,6 +343,7 @@ export default function App() {
         )
         console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
         setCurrentMode(newMode)
+        navSummaryRef.current.zonesEntered.push(newMode)  // FIX 5 ROUND 7
 
         // ROUND 5 CHANGE 3: Zone announcements are now in curated callouts
         // Only speak inline announcement if we don't have curated callouts
@@ -583,6 +595,7 @@ export default function App() {
         console.log(`✅ FIRED (lookahead): "${calloutText}" | trigger=${Math.round(calloutDist)}m, carAt=${Math.round(userDist)}m, distAhead=${Math.round(calloutDist - userDist)}m`)
       }
       speak(calloutText, priority)
+      navSummaryRef.current.calloutsSpoken.push(calloutText.substring(0, 40))  // FIX 5 ROUND 7
 
       announcedCuratedCalloutsRef.current.add(upcomingCallout.id)
       lastCalloutRef.current = now
@@ -608,6 +621,7 @@ export default function App() {
       console.log(`✅ FIRED (crossed): "${calloutText}" | trigger=${Math.round(calloutDist)}m, carAt=${Math.round(userDist)}m, overshoot=${Math.round(overshoot)}m`)
     }
     speak(calloutText, priority)
+    navSummaryRef.current.calloutsSpoken.push(calloutText.substring(0, 40))  // FIX 5 ROUND 7
 
     announcedCuratedCalloutsRef.current.add(calloutToSpeak.id)
     lastCalloutRef.current = now
@@ -657,6 +671,7 @@ export default function App() {
       console.log(`🎙️ CHATTER FIRED: "${chatter}" @ ${Math.round(currentDist)}m`)
       speak(chatter, 'low')
       lastChatterSpeakDistRef.current = currentDist
+      navSummaryRef.current.chatterSpoken.push(chatter.substring(0, 40))  // FIX 5 ROUND 7
     }
   }, [isRunning, settings.voiceEnabled, userDistanceAlongRoute, currentMode, getChatter, speak, curatedHighwayCallouts])
 
@@ -811,6 +826,73 @@ export default function App() {
     })
   }, [isRunning, upcomingCurves])
 
+  // ================================
+  // FIX 5 ROUND 7: Navigation Runtime Summary (every 60s)
+  // ================================
+  useEffect(() => {
+    if (!isRunning) {
+      // Reset on stop
+      navSummaryRef.current = {
+        lastLogTime: Date.now(),
+        calloutsSpoken: [],
+        chatterSpoken: [],
+        zonesEntered: [],
+      }
+      return
+    }
+
+    const now = Date.now()
+    const summary = navSummaryRef.current
+
+    // Log every 60 seconds
+    if (now - summary.lastLogTime < 60000) return
+    summary.lastLogTime = now
+
+    const dist = userDistanceAlongRoute
+    const mi = (dist / 1609.34).toFixed(2)
+    const spd = currentSpeed || 0
+
+    console.log(`\n${'—'.repeat(50)}`)
+    console.log(`⏱️  NAV SUMMARY @ ${mi}mi | ${Math.round(spd)}mph | mode=${currentMode}`)
+    console.log(`${'—'.repeat(50)}`)
+    console.log(`🔊 Callouts spoken: ${summary.calloutsSpoken.length}${summary.calloutsSpoken.length > 0 ? ' — last: "' + summary.calloutsSpoken[summary.calloutsSpoken.length - 1] + '"' : ''}`)
+    console.log(`💬 Chatter spoken: ${summary.chatterSpoken.length}`)
+    console.log(`🚧 Zone changes: ${summary.zonesEntered.length}${summary.zonesEntered.length > 0 ? ' — ' + summary.zonesEntered.join(', ') : ''}`)
+
+    // Count remaining callouts
+    const remaining = (curatedHighwayCallouts || []).filter(c =>
+      !announcedCuratedCalloutsRef.current.has(c.id) &&
+      ((c.triggerDistance ?? (c.triggerMile * 1609.34)) > dist)
+    ).length
+    console.log(`📍 Remaining callouts: ${remaining}`)
+    console.log(`${'—'.repeat(50)}\n`)
+
+    // Reset counters for next interval
+    summary.calloutsSpoken = []
+    summary.chatterSpoken = []
+    summary.zonesEntered = []
+
+  }, [isRunning, userDistanceAlongRoute, currentSpeed, currentMode, curatedHighwayCallouts])
+
+  // ================================
+  // FIX 5 ROUND 7: Navigation End Summary
+  // ================================
+  useEffect(() => {
+    if (prevRunningRef.current && !isRunning) {
+      // Navigation just stopped — log final summary
+      const totalCallouts = announcedCuratedCalloutsRef.current.size
+      const dist = userDistanceAlongRoute
+      const mi = (dist / 1609.34).toFixed(2)
+      console.log(`\n${'='.repeat(60)}`)
+      console.log(`🏁 NAVIGATION COMPLETE`)
+      console.log(`${'='.repeat(60)}`)
+      console.log(`📏 Distance: ${mi}mi`)
+      console.log(`🔊 Total callouts delivered: ${totalCallouts}`)
+      console.log(`${'='.repeat(60)}\n`)
+    }
+    prevRunningRef.current = isRunning
+  }, [isRunning, userDistanceAlongRoute])
+
   // Navigation handlers
   const handleStartNavigation = async () => {
     // CRITICAL: Unlock audio on iOS before navigation starts
@@ -825,6 +907,7 @@ export default function App() {
     lastCalloutRef.current = Date.now() - 5000
     lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
     lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     resetHighwayTrip()
 
     // Log all callout trigger distances at nav start
@@ -892,6 +975,7 @@ export default function App() {
     lastCalloutRef.current = Date.now() - 5000
     lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
     lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
+    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     resetHighwayTrip()
 
     // Log all callout trigger distances at simulation start
