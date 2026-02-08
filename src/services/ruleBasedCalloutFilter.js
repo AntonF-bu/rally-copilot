@@ -204,21 +204,20 @@ function createSequence(events) {
 function detectZoneTransitions(events) {
   const transitions = []
   let currentZone = null
-  
+
   events.forEach(event => {
     if (event.zoneType !== currentZone) {
-      if (currentZone !== null) {
-        transitions.push({
-          mile: event.apexMile,
-          fromZone: currentZone,
-          toZone: event.zoneType,
-          position: event.position
-        })
-      }
+      // Include initial zone (fromZone=null) so first zone gets a briefing
+      transitions.push({
+        mile: currentZone === null ? 0 : event.apexMile,
+        fromZone: currentZone,
+        toZone: event.zoneType,
+        position: event.position
+      })
       currentZone = event.zoneType
     }
   })
-  
+
   return transitions
 }
 
@@ -318,47 +317,53 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
   const wakeUpMiles = new Map()
   wakeUps.forEach(w => wakeUpMiles.set(w.mile.toFixed(2), w))
   
-  // Add zone transition callouts
-  // FIX ROUND 4: Only emit "Technical section ahead" for:
-  // 1. The FIRST technical zone in the route, OR
-  // 2. Technical zones longer than 1000m
-  // This prevents duplicate warnings for short technical zones (< 1km)
-  let hasAnnouncedTechnical = false
-
+  // Add zone transition BRIEFING callouts
+  // Round 7C: Generates briefings for ALL zone types (technical, transit, urban)
+  // This is the SOLE source of zone announcements — App.jsx does NOT announce zones
   transitions.forEach(t => {
+    // Count curves in the zone we're entering
+    const enteringZoneEnd = (() => {
+      const nextTransition = transitions.find(nt => nt.mile > t.mile)
+      return nextTransition ? nextTransition.mile : (filteredEvents.length > 0 ? filteredEvents[filteredEvents.length - 1].apexMile + 1 : t.mile + 5)
+    })()
+    const zoneLengthMi = (enteringZoneEnd - t.mile).toFixed(1)
+
+    // Count curve events in this zone
+    const curvesInZone = filteredEvents.filter(e =>
+      e.apexMile >= t.mile && e.apexMile <= enteringZoneEnd &&
+      (e.type === 'standard' || e.type === 'significant' || e.type === 'danger')
+    ).length
+
+    let briefingText = ''
+
     if (t.toZone === 'technical') {
-      // Find this technical zone to check its length
-      const techZone = zoneLookup?.zones?.find(z => {
-        const startMile = (z.startDistance || 0) / 1609.34
-        const endMile = (z.endDistance || 0) / 1609.34
-        return z.character === 'technical' &&
-               t.mile >= startMile - 0.1 &&
-               t.mile <= endMile + 0.1
-      })
-
-      const zoneLength = techZone
-        ? (techZone.endDistance - techZone.startDistance)
-        : 0
-
-      // Only announce if: first technical zone OR zone is longer than 1000m
-      if (hasAnnouncedTechnical && zoneLength < 1000) {
-        if (window.__TRAMO_VERBOSE) console.log(`🔇 Skipping duplicate "Technical section ahead" - zone only ${Math.round(zoneLength)}m`)
-        return // Skip this short subsequent technical zone
+      if (curvesInZone > 0) {
+        briefingText = `Technical section. ${curvesInZone} curves in ${zoneLengthMi} miles. Stay sharp.`
+      } else {
+        briefingText = `Technical section ahead. Stay sharp.`
       }
+    } else if (t.toZone === 'transit') {
+      if (curvesInZone === 0) {
+        briefingText = `Open road. ${zoneLengthMi} miles. Straight ahead.`
+      } else {
+        briefingText = `Open road. ${zoneLengthMi} miles. ${curvesInZone} curves ahead.`
+      }
+    } else if (t.toZone === 'urban') {
+      briefingText = `Urban zone. Watch for traffic.`
+    }
 
-      hasAnnouncedTechnical = true
-
+    if (briefingText) {
       callouts.push({
-        id: `transition-${t.mile.toFixed(2)}`,
-        mile: t.mile - 0.3,
-        triggerMile: Math.max(t.mile - 0.5, 0),
-        triggerDistance: Math.max(t.mile - 0.5, 0) * 1609.34,
+        id: `briefing-${t.mile.toFixed(2)}`,
+        mile: t.mile,
+        triggerMile: Math.max(t.mile - 0.05, 0),
+        triggerDistance: Math.max(t.mile - 0.05, 0) * 1609.34,
         type: 'transition',
-        text: 'Technical section ahead - stay sharp',
-        reason: `Entering technical zone at mile ${t.mile.toFixed(1)}`,
-        zone: t.fromZone,
+        text: briefingText,
+        reason: `Zone briefing: entering ${t.toZone} at mile ${t.mile.toFixed(1)}`,
+        zone: t.fromZone || t.toZone,
         position: t.position,
-        priority: 'high'
+        priority: 'normal'
       })
     }
   })
