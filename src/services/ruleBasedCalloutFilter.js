@@ -20,41 +20,43 @@
  * @returns {Object} - Filtered callouts with analysis
  */
 export function filterEventsToCallouts(events, routeInfo, zones = []) {
-  console.log('📋 Rule-Based Callout Filter v1.2')
-  console.log(`   Input events: ${events.length}`)
-  
+  if (window.__TRAMO_VERBOSE) {
+    console.log('📋 Rule-Based Callout Filter v1.2')
+    console.log(`   Input events: ${events.length}`)
+  }
+
   const totalMiles = routeInfo?.totalMiles || 0
-  
+
   // Build zone lookup for exit detection
   const zoneLookup = buildZoneLookup(zones, totalMiles)
-  
+
   // Step 1: Apply zone-based thresholds
   const filteredEvents = events.filter(event => shouldCallout(event, events))
-  
-  console.log(`   After threshold filter: ${filteredEvents.length}`)
-  
+
+  if (window.__TRAMO_VERBOSE) console.log(`   After threshold filter: ${filteredEvents.length}`)
+
   // Step 2: Detect sequences (curves within 0.3mi of each other)
   // FIX #2: Pass danger check to exclude danger curves from sequences
   const sequences = detectSequences(filteredEvents)
-  
-  console.log(`   Sequences detected: ${sequences.length}`)
-  
+
+  if (window.__TRAMO_VERBOSE) console.log(`   Sequences detected: ${sequences.length}`)
+
   // Step 3: Detect zone transitions
   const transitions = detectZoneTransitions(events)
-  
-  console.log(`   Zone transitions: ${transitions.length}`)
-  
+
+  if (window.__TRAMO_VERBOSE) console.log(`   Zone transitions: ${transitions.length}`)
+
   // Step 4: Detect wake-up opportunities (first curve after long straight)
   // FIX #5: Improved wake-up detection
   const wakeUps = detectWakeUpCalls(events, filteredEvents)
-  
-  console.log(`   Wake-up calls: ${wakeUps.length}`)
-  
+
+  if (window.__TRAMO_VERBOSE) console.log(`   Wake-up calls: ${wakeUps.length}`)
+
   // Step 5: Generate callouts with text
   // FIX #4: Pass zoneLookup for exit detection
   const callouts = generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneLookup)
-  
-  console.log(`   Final callouts: ${callouts.length}`)
+
+  if (window.__TRAMO_VERBOSE) console.log(`   Final callouts: ${callouts.length}`)
   
   // Analysis summary
   const analysis = generateAnalysis(events, callouts, routeInfo)
@@ -340,7 +342,7 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
 
       // Only announce if: first technical zone OR zone is longer than 1000m
       if (hasAnnouncedTechnical && zoneLength < 1000) {
-        console.log(`🔇 Skipping duplicate "Technical section ahead" - zone only ${Math.round(zoneLength)}m`)
+        if (window.__TRAMO_VERBOSE) console.log(`🔇 Skipping duplicate "Technical section ahead" - zone only ${Math.round(zoneLength)}m`)
         return // Skip this short subsequent technical zone
       }
 
