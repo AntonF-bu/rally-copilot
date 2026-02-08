@@ -58,6 +58,10 @@ Your app will be live at `your-project.vercel.app`
 - **Web Speech API** - Voice callouts
 - **Supabase** - Backend and auth
 
+## Documentation
+
+See [CLAUDE.md](./CLAUDE.md) for detailed architecture documentation.
+
 ## License
 
 MIT
