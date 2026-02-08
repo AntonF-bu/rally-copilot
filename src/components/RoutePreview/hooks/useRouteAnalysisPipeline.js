@@ -217,40 +217,44 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
       const censusAnalysis = await analyzeRouteCharacter(coordinates, curves)
       const censusSegments = censusAnalysis.segments || []
       // FIX 4 ROUND 7: Handle both start/end and startDistance/endDistance property names
-      console.log('📊 Census zones:', censusSegments.map(s => {
-        const start = s.start ?? s.startDistance ?? 0
-        const end = s.end ?? s.endDistance ?? 0
-        const distMi = (end - start) / 1609.34
-        return `${s.character}(${isNaN(distMi) ? '?' : distMi.toFixed(1)}mi)`
-      }).join(' → '))
+      if (window.__TRAMO_VERBOSE) {
+        console.log('📊 Census zones:', censusSegments.map(s => {
+          const start = s.start ?? s.startDistance ?? 0
+          const end = s.end ?? s.endDistance ?? 0
+          const distMi = (end - start) / 1609.34
+          return `${s.character}(${isNaN(distMi) ? '?' : distMi.toFixed(1)}mi)`
+        }).join(' → '))
+      }
 
       // ========================================
       // Step 2: Extract road refs
       // ========================================
       let roadSegments = []
       if (routeData?.legs && routeData.legs.length > 0) {
-        console.log('\n🛣️ Extracting road refs...')
+        if (window.__TRAMO_VERBOSE) console.log('\n🛣️ Extracting road refs...')
         roadSegments = await extractRoadRefs(routeData.legs, routeData.distance, routeData.coordinates)
 
-        const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
-        const usHighways = roadSegments.filter(s => s.roadClass === 'us_highway')
-        const stateRoutes = roadSegments.filter(s => s.roadClass === 'state_route')
-        const localRoads = roadSegments.filter(s => s.roadClass === 'local')
-        console.log(`   Road coverage: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local`)
+        if (window.__TRAMO_VERBOSE) {
+          const interstates = roadSegments.filter(s => s.roadClass === 'interstate')
+          const usHighways = roadSegments.filter(s => s.roadClass === 'us_highway')
+          const stateRoutes = roadSegments.filter(s => s.roadClass === 'state_route')
+          const localRoads = roadSegments.filter(s => s.roadClass === 'local')
+          console.log(`   Road coverage: ${interstates.length} interstate, ${usHighways.length} US hwy, ${stateRoutes.length} state, ${localRoads.length} local`)
+        }
       }
 
       // ========================================
       // Step 3: Road Flow Analysis
       // ========================================
       const uniformZones = [{ start: 0, end: routeData.distance, character: 'transit' }]
-      console.log('\n🌊 Running Road Flow Analyzer...')
+      if (window.__TRAMO_VERBOSE) console.log('\n🌊 Running Road Flow Analyzer...')
       const flowResult = analyzeRoadFlow(coordinates, uniformZones, routeData.distance)
       window.__roadFlowData = flowResult
 
       // ========================================
       // Step 4: Zone Classification
       // ========================================
-      console.log('\n🛣️ Classifying zones...')
+      if (window.__TRAMO_VERBOSE) console.log('\n🛣️ Classifying zones...')
       const totalMiles = routeData.distance / 1609.34
       const curvesForAnalysis = extractCurvesFromEvents(flowResult.events)
 
@@ -274,7 +278,7 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
         updateStage('highway', 'loading')
 
         const rawBends = analyzeHighwayBends(coordinates, activeZones)
-        console.log(`🛣️ Found ${rawBends.length} raw highway bends`)
+        if (window.__TRAMO_VERBOSE) console.log(`🛣️ Found ${rawBends.length} raw highway bends`)
         setHighwayBends(rawBends)
         if (setHighwayBendsStore) {
           setHighwayBendsStore(rawBends)
@@ -289,7 +293,7 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
         // ========================================
         if (flowResult.events.length > 0) {
           updateStage('callouts', 'loading')
-          console.log('📋 Running Hybrid Callout System...')
+          if (window.__TRAMO_VERBOSE) console.log('📋 Running Hybrid Callout System...')
 
           const eventsWithCorrectZones = reassignEventZones(flowResult.events, activeZones)
           flowResult.events = eventsWithCorrectZones
@@ -297,40 +301,42 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
 
           try {
             // Rule-based filtering
-            console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
+            if (window.__TRAMO_VERBOSE) console.log('\n📋 STAGE 1: Rule-Based Callout Filter')
             const ruleBasedResult = filterEventsToCallouts(
               eventsWithCorrectZones,
               { totalMiles: routeData.distance / 1609.34 },
               activeZones
             )
 
-            console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
+            if (window.__TRAMO_VERBOSE) console.log(`📋 Rule-based: ${ruleBasedResult.callouts.length} callouts`)
             window.__ruleBasedCallouts = ruleBasedResult
 
             // LLM Polish (optional)
             let finalResult = ruleBasedResult
 
             // BUG FIX #2: Log triggerDistance after rule-based filter
-            console.log('\n📍 TRIGGER DISTANCE CHECK (after rule filter):')
-            const zeroTriggers = ruleBasedResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
-            if (zeroTriggers.length > 0) {
-              console.warn(`⚠️ ${zeroTriggers.length} callouts with triggerDistance=0:`)
-              zeroTriggers.slice(0, 5).forEach(c => {
-                console.warn(`   "${(c.text || '').substring(0, 30)}" mile=${c.mile}, triggerMile=${c.triggerMile}, triggerDist=${c.triggerDistance}`)
-              })
-            } else {
-              console.log('   ✅ All callouts have valid triggerDistance')
+            if (window.__TRAMO_VERBOSE) {
+              console.log('\n📍 TRIGGER DISTANCE CHECK (after rule filter):')
+              const zeroTriggers = ruleBasedResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
+              if (zeroTriggers.length > 0) {
+                console.warn(`⚠️ ${zeroTriggers.length} callouts with triggerDistance=0:`)
+                zeroTriggers.slice(0, 5).forEach(c => {
+                  console.warn(`   "${(c.text || '').substring(0, 30)}" mile=${c.mile}, triggerMile=${c.triggerMile}, triggerDist=${c.triggerDistance}`)
+                })
+              } else {
+                console.log('   ✅ All callouts have valid triggerDistance')
+              }
             }
 
             if (hasLLMApiKey()) {
-              console.log('\n✨ STAGE 2: LLM Polish')
+              if (window.__TRAMO_VERBOSE) console.log('\n✨ STAGE 2: LLM Polish')
               try {
                 finalResult = await polishCalloutsWithLLM(
                   ruleBasedResult,
                   { totalMiles: routeData.distance / 1609.34 },
                   getLLMApiKey()
                 )
-                if (finalResult.llmPolished) {
+                if (window.__TRAMO_VERBOSE && finalResult.llmPolished) {
                   console.log('✨ LLM polish applied')
                 }
               } catch (polishErr) {
@@ -338,18 +344,20 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               }
 
               // BUG FIX #2: Log triggerDistance after LLM polish
-              console.log('\n📍 TRIGGER DISTANCE CHECK (after LLM polish):')
-              const zeroTriggersAfterPolish = finalResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
-              if (zeroTriggersAfterPolish.length > 0) {
-                console.warn(`⚠️ ${zeroTriggersAfterPolish.length} callouts with triggerDistance=0 after polish`)
-              } else {
-                console.log('   ✅ All callouts still have valid triggerDistance')
+              if (window.__TRAMO_VERBOSE) {
+                console.log('\n📍 TRIGGER DISTANCE CHECK (after LLM polish):')
+                const zeroTriggersAfterPolish = finalResult.callouts.filter(c => !c.triggerDistance || c.triggerDistance === 0)
+                if (zeroTriggersAfterPolish.length > 0) {
+                  console.warn(`⚠️ ${zeroTriggersAfterPolish.length} callouts with triggerDistance=0 after polish`)
+                } else {
+                  console.log('   ✅ All callouts still have valid triggerDistance')
+                }
               }
             }
 
             // Format and store callouts
             if (finalResult.callouts.length > 0) {
-              console.log(`\n✅ HYBRID SYSTEM: ${finalResult.callouts.length} callouts`)
+              if (window.__TRAMO_VERBOSE) console.log(`\n✅ HYBRID SYSTEM: ${finalResult.callouts.length} callouts`)
 
               const formattedCallouts = finalResult.callouts.map(c => ({
                 id: c.id,
@@ -369,35 +377,37 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               }))
 
               // Speed-based grouping
-              console.log('\n🎯 STAGE 3: Speed-Based Grouping')
+              if (window.__TRAMO_VERBOSE) console.log('\n🎯 STAGE 3: Speed-Based Grouping')
               const groupedSets = generateGroupedCalloutSets(
                 formattedCallouts,
                 { totalMiles: routeData.distance / 1609.34 }
               )
 
-              console.log(`   Fast: ${groupedSets.fast.length}, Standard: ${groupedSets.standard.length}`)
+              if (window.__TRAMO_VERBOSE) console.log(`   Fast: ${groupedSets.fast.length}, Standard: ${groupedSets.standard.length}`)
               window.__groupedCallouts = groupedSets
 
               // BUG FIX #2: Log triggerDistance after grouping
-              console.log('\n📍 TRIGGER DISTANCE CHECK (after grouping):')
-              const zeroTriggersAfterGroup = groupedSets.standard.filter(c => {
-                const td = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
-                return td === 0 || td === undefined || td === null
-              })
-              if (zeroTriggersAfterGroup.length > 0) {
-                console.warn(`⚠️ ${zeroTriggersAfterGroup.length} callouts with triggerDistance=0 after grouping:`)
-                zeroTriggersAfterGroup.forEach(c => {
-                  console.warn(`   "${(c.text || '').substring(0, 30)}" triggerMile=${c.triggerMile}, mile=${c.mile}, triggerDist=${c.triggerDistance}`)
+              if (window.__TRAMO_VERBOSE) {
+                console.log('\n📍 TRIGGER DISTANCE CHECK (after grouping):')
+                const zeroTriggersAfterGroup = groupedSets.standard.filter(c => {
+                  const td = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
+                  return td === 0 || td === undefined || td === null
                 })
-              } else {
-                console.log('   ✅ All callouts have valid triggerDistance')
-              }
+                if (zeroTriggersAfterGroup.length > 0) {
+                  console.warn(`⚠️ ${zeroTriggersAfterGroup.length} callouts with triggerDistance=0 after grouping:`)
+                  zeroTriggersAfterGroup.forEach(c => {
+                    console.warn(`   "${(c.text || '').substring(0, 30)}" triggerMile=${c.triggerMile}, mile=${c.mile}, triggerDist=${c.triggerDistance}`)
+                  })
+                } else {
+                  console.log('   ✅ All callouts have valid triggerDistance')
+                }
 
-              // Log the actual callout text for debugging
-              console.log('\n🎯 FINAL CALLOUTS:')
-              groupedSets.standard.forEach((c, i) => {
-                console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | ${c.zone || 'unknown'} | "${c.text}"`)
-              })
+                // Log the actual callout text for debugging
+                console.log('\n🎯 FINAL CALLOUTS:')
+                groupedSets.standard.forEach((c, i) => {
+                  console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | ${c.zone || 'unknown'} | "${c.text}"`)
+                })
+              }
 
               // BUG FIX #1: Sort callouts by triggerDistance (ascending)
               // This ensures the "find next unplayed callout" logic works correctly
@@ -409,20 +419,22 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
               })
 
               // Log sorted list for verification
-              console.log('\n📋 SORTED CALLOUT TRIGGERS:')
-              sortedCallouts.forEach((c, i) => {
-                const trigDist = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
-                console.log(`  ${i + 1}. ${Math.round(trigDist)}m (${(trigDist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
-              })
+              if (window.__TRAMO_VERBOSE) {
+                console.log('\n📋 SORTED CALLOUT TRIGGERS:')
+                sortedCallouts.forEach((c, i) => {
+                  const trigDist = c.triggerDistance ?? (c.triggerMile ?? c.mile ?? 0) * 1609.34
+                  console.log(`  ${i + 1}. ${Math.round(trigDist)}m (${(trigDist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
+                })
+              }
 
               // ROUND 5 CHANGE 2: Merge close callouts in technical zones
-              console.log('\n🔗 STAGE 4: Merging close callouts in technical zones')
+              if (window.__TRAMO_VERBOSE) console.log('\n🔗 STAGE 4: Merging close callouts in technical zones')
               const mergedCallouts = mergeCloseCallouts(sortedCallouts, activeZones)
 
               // ROUND 5 CHANGE 3: Add zone transition announcements
-              console.log('\n📍 STAGE 5: Adding zone transition announcements')
+              if (window.__TRAMO_VERBOSE) console.log('\n📍 STAGE 5: Adding zone transition announcements')
               const zoneAnnouncements = generateZoneAnnouncements(activeZones)
-              console.log(`   Generated ${zoneAnnouncements.length} zone announcements`)
+              if (window.__TRAMO_VERBOSE) console.log(`   Generated ${zoneAnnouncements.length} zone announcements`)
 
               // Combine callouts with zone announcements and re-sort
               const allCallouts = [...mergedCallouts, ...zoneAnnouncements]
@@ -470,7 +482,7 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
           // ========================================
           if (selectedMode === HIGHWAY_MODE.COMPANION && hasLLMApiKey()) {
             updateStage('chatter', 'loading')
-            console.log('\n🎙️ STAGE 4: Highway Companion Chatter (Companion Mode)')
+            if (window.__TRAMO_VERBOSE) console.log('\n🎙️ STAGE 4: Highway Companion Chatter (Companion Mode)')
 
             try {
               const chatterResult = await generateChatterTimeline(
@@ -480,20 +492,22 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
                   routeData
                 },
                 (progress) => {
-                  console.log(`🎙️ Chatter progress: ${progress}%`)
+                  if (window.__TRAMO_VERBOSE) console.log(`🎙️ Chatter progress: ${progress}%`)
                 }
               )
 
-              console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
-              console.log(`   Method: ${chatterResult.method}`)
+              if (window.__TRAMO_VERBOSE) {
+                console.log(`🎙️ Generated ${chatterResult.chatterTimeline.length} chatter items`)
+                console.log(`   Method: ${chatterResult.method}`)
 
-              // Log the actual chatter text for debugging
-              if (chatterResult.chatterTimeline.length > 0) {
-                console.log('\n🎙️ CHATTER ITEMS:')
-                chatterResult.chatterTimeline.forEach((c, i) => {
-                  const text = c.text || c.variants?.cruise?.[0] || c.message || 'no text'
-                  console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | "${text}"`)
-                })
+                // Log the actual chatter text for debugging
+                if (chatterResult.chatterTimeline.length > 0) {
+                  console.log('\n🎙️ CHATTER ITEMS:')
+                  chatterResult.chatterTimeline.forEach((c, i) => {
+                    const text = c.text || c.variants?.cruise?.[0] || c.message || 'no text'
+                    console.log(`  ${i + 1}. Mile ${(c.triggerMile || c.mile || 0).toFixed(1)} | "${text}"`)
+                  })
+                }
               }
 
               useStore.getState().setChatterTimeline?.(chatterResult.chatterTimeline)
@@ -505,7 +519,7 @@ export function useRouteAnalysisPipeline(routeData, selectedMode, enabled = true
 
             updateStage('chatter', 'complete')
           } else if (selectedMode === HIGHWAY_MODE.BASIC) {
-            console.log('ℹ️ Basic mode - skipping chatter generation')
+            if (window.__TRAMO_VERBOSE) console.log('ℹ️ Basic mode - skipping chatter generation')
             updateStage('chatter', 'complete')
           }
         }

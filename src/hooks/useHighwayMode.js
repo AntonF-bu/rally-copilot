@@ -149,14 +149,15 @@ export function useHighwayMode() {
   // ================================
   const getChatter = useCallback(() => {
     if (!mountedRef.current) return null
+    // FIX 1 ROUND 7B: Removed inHighwayZone gate — App.jsx now handles zone check with currentMode
     if (!isRunning) return null
 
-    // Check if chatter is enabled
-    if (highwayFeatures?.chatter === false) return null
+    // Chatter plays if timeline exists — mode setting no longer gates this
+    // (App.jsx checks currentMode === HIGHWAY before calling getChatter)
 
-    // Check cooldown (10 seconds between chatter — timeline spacing handles the rest)
+    // Check cooldown (8 seconds between chatter — timeline spacing handles the rest)
     const now = Date.now()
-    if (now - lastChatterTime < 10000) {
+    if (now - lastChatterTime < 8000) {
       return null
     }
 
@@ -223,7 +224,7 @@ export function useHighwayMode() {
     }
 
     return null
-  }, [isRunning, routeZones, highwayFeatures?.chatter, lastChatterTime, chatterTimeline, speed, recordChatterTime, getCurrentDistance])
+  }, [isRunning, routeZones, lastChatterTime, chatterTimeline, speed, recordChatterTime, getCurrentDistance])
 
   // ================================
   // RETURN VALUES

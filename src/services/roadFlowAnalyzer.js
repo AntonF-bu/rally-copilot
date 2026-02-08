@@ -64,10 +64,12 @@ export function analyzeRoadFlow(coordinates, zones, totalDistance) {
   // Step 2: Detect patterns/events from samples
   const events = detectEvents(samples, zones)
   console.log(`   Detected ${events.length} events`)
-  
-  // Step 3: Debug output
-  dumpFlowData(samples, events, totalDistance)
-  
+
+  // Step 3: Debug output (gated behind verbose flag)
+  if (window.__TRAMO_VERBOSE) {
+    dumpFlowData(samples, events, totalDistance)
+  }
+
   return { samples, events }
 }
 

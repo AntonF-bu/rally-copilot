@@ -341,24 +341,26 @@ export function convertToStandardFormat(zones, totalDistanceMeters) {
  */
 export function reassignEventZones(events, zones) {
   if (!zones || zones.length === 0) {
-    console.log('📍 reassignEventZones: No zones provided')
+    if (window.__TRAMO_VERBOSE) console.log('📍 reassignEventZones: No zones provided')
     return events
   }
   if (!events || events.length === 0) {
-    console.log('📍 reassignEventZones: No events provided')
+    if (window.__TRAMO_VERBOSE) console.log('📍 reassignEventZones: No events provided')
     return events
   }
-  
-  // Debug: log zone ranges
-  console.log('📍 reassignEventZones: Zone ranges (meters):')
-  zones.forEach((z, i) => {
-    console.log(`   ${i + 1}. ${z.character}: ${z.start?.toFixed(0) || 'N/A'}-${z.end?.toFixed(0) || 'N/A'}m (${z.startMile?.toFixed(1)}-${z.endMile?.toFixed(1)}mi)`)
-  })
-  
-  // Debug: log sample event to see its structure
-  const sampleEvent = events[Math.floor(events.length / 2)]
-  console.log(`📍 Sample event keys: ${Object.keys(sampleEvent).join(', ')}`)
-  console.log(`📍 Sample event: mile=${sampleEvent.mile}, apexMile=${sampleEvent.apexMile}, distance=${sampleEvent.distance}`)
+
+  // Debug: log zone ranges (gated behind verbose flag)
+  if (window.__TRAMO_VERBOSE) {
+    console.log('📍 reassignEventZones: Zone ranges (meters):')
+    zones.forEach((z, i) => {
+      console.log(`   ${i + 1}. ${z.character}: ${z.start?.toFixed(0) || 'N/A'}-${z.end?.toFixed(0) || 'N/A'}m (${z.startMile?.toFixed(1)}-${z.endMile?.toFixed(1)}mi)`)
+    })
+
+    // Debug: log sample event to see its structure
+    const sampleEvent = events[Math.floor(events.length / 2)]
+    console.log(`📍 Sample event keys: ${Object.keys(sampleEvent).join(', ')}`)
+    console.log(`📍 Sample event: mile=${sampleEvent.mile}, apexMile=${sampleEvent.apexMile}, distance=${sampleEvent.distance}`)
+  }
   
   let reassigned = 0
   let notFound = 0
