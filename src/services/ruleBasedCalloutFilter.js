@@ -317,55 +317,22 @@ function generateCallouts(filteredEvents, sequences, transitions, wakeUps, zoneL
   const wakeUpMiles = new Map()
   wakeUps.forEach(w => wakeUpMiles.set(w.mile.toFixed(2), w))
   
-  // Add zone transition BRIEFING callouts
-  // Round 7C: Generates briefings for ALL zone types (technical, transit, urban)
-  // This is the SOLE source of zone announcements — App.jsx does NOT announce zones
+  // Add zone transition markers
+  // Round 8: Text is a simple marker — useSpeechPlanner builds dynamic briefings
+  // at runtime based on speech budget and upcoming events
   transitions.forEach(t => {
-    // Count curves in the zone we're entering
-    const enteringZoneEnd = (() => {
-      const nextTransition = transitions.find(nt => nt.mile > t.mile)
-      return nextTransition ? nextTransition.mile : (filteredEvents.length > 0 ? filteredEvents[filteredEvents.length - 1].apexMile + 1 : t.mile + 5)
-    })()
-    const zoneLengthMi = (enteringZoneEnd - t.mile).toFixed(1)
-
-    // Count curve events in this zone
-    const curvesInZone = filteredEvents.filter(e =>
-      e.apexMile >= t.mile && e.apexMile <= enteringZoneEnd &&
-      (e.type === 'standard' || e.type === 'significant' || e.type === 'danger')
-    ).length
-
-    let briefingText = ''
-
-    if (t.toZone === 'technical') {
-      if (curvesInZone > 0) {
-        briefingText = `Technical section. ${curvesInZone} curves in ${zoneLengthMi} miles. Stay sharp.`
-      } else {
-        briefingText = `Technical section ahead. Stay sharp.`
-      }
-    } else if (t.toZone === 'transit') {
-      if (curvesInZone === 0) {
-        briefingText = `Open road. ${zoneLengthMi} miles. Straight ahead.`
-      } else {
-        briefingText = `Open road. ${zoneLengthMi} miles. ${curvesInZone} curves ahead.`
-      }
-    } else if (t.toZone === 'urban') {
-      briefingText = `Urban zone. Watch for traffic.`
-    }
-
-    if (briefingText) {
-      callouts.push({
-        id: `briefing-${t.mile.toFixed(2)}`,
-        mile: t.mile,
-        triggerMile: Math.max(t.mile - 0.05, 0),
-        triggerDistance: Math.max(t.mile - 0.05, 0) * 1609.34,
-        type: 'transition',
-        text: briefingText,
-        reason: `Zone briefing: entering ${t.toZone} at mile ${t.mile.toFixed(1)}`,
-        zone: t.fromZone || t.toZone,
-        position: t.position,
-        priority: 'normal'
-      })
-    }
+    callouts.push({
+      id: `transition-${t.mile.toFixed(2)}`,
+      mile: t.mile,
+      triggerMile: Math.max(t.mile - 0.05, 0),
+      triggerDistance: Math.max(t.mile - 0.05, 0) * 1609.34,
+      type: 'transition',
+      text: `Entering ${t.toZone} zone`,
+      reason: `Zone transition at mile ${t.mile.toFixed(1)}`,
+      zone: t.fromZone || t.toZone,
+      position: t.position,
+      priority: 'normal'
+    })
   })
   
   // Process filtered events
