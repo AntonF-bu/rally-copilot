@@ -336,7 +336,7 @@ function detectHighwayBends(coordinates, segmentStartDistance) {
           angle: angle,
           length: Math.round(bendLength),
           distanceFromStart: Math.round(segmentStartDistance + points[bendStart].distance),
-          position: points[Math.floor((bendStart + bendEnd) / 2)].coord,
+          position: points[bendStart].coord,  // Marker at curve START for earlier driver awareness
           entryPosition: points[bendStart].coord,
           exitPosition: points[Math.min(bendEnd + 1, points.length - 1)].coord,
           startIndex: bendStart,
@@ -416,7 +416,7 @@ function consolidateBendClusters(bends, clusterDistance = 400) {
         maxAngle: Math.round(maxAngle),
         length: Math.round(sectionLength),
         distanceFromStart: firstBend.distanceFromStart,
-        position: firstBend.position,  // Mark at start of section
+        position: firstBend.entryPosition,  // Mark at curve START of section
         entryPosition: firstBend.entryPosition,
         exitPosition: lastBend.exitPosition,
         character: character,
