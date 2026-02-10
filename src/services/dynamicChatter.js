@@ -36,6 +36,9 @@ const state = {
 
   // Category dedup for data callouts
   lastDataCategory: null,
+
+  // Total technical-related callout counter (countdown + eta-technical combined, max 2)
+  technicalMentionCount: 0,
 }
 
 /**
@@ -56,6 +59,7 @@ export function resetDynamicChatter() {
   state.curveSpeedsInTechnical = []
   state.personalityFired = false
   state.lastDataCategory = null
+  state.technicalMentionCount = 0
 }
 
 /**
@@ -154,11 +158,11 @@ export function getDataCallout({
   // Build pool of candidate callouts, pick the most relevant one
   const candidates = []
 
-  // Speed check (after at least 3 miles of driving)
+  // Speed check (after at least 3 miles of driving) — weighted UP, most interesting data
   if (avgSpeed && currentDist > 4828) {
     candidates.push({
       text: `Averaging ${avgSpeed} through this stretch.`,
-      weight: 2,
+      weight: 4,
       category: 'speed',
     })
 
@@ -168,7 +172,7 @@ export function getDataCallout({
       if (avgSpeed > avgSpeedLong) {
         candidates.push({
           text: `Picked up the pace. ${avgSpeed} in the last 5 miles, up from ${avgSpeedLong} average.`,
-          weight: 3,
+          weight: 4,
           category: 'speed',
         })
       }
@@ -178,7 +182,7 @@ export function getDataCallout({
     if (state.topSpeed > avgSpeed + 15 && state.topSpeed > 70) {
       candidates.push({
         text: `Top speed so far, ${Math.round(state.topSpeed)}. Averaging ${avgSpeed}.`,
-        weight: 1,
+        weight: 3,
         category: 'speed',
       })
     }
@@ -197,14 +201,14 @@ export function getDataCallout({
     }
   }
 
-  // ETA to technical (the exciting one)
-  if (distToTechnical && distToTechnical > 3000 && avgSpeed && avgSpeed > 20) {
+  // ETA to technical — weighted DOWN, capped at 2 total technical mentions
+  if (distToTechnical && distToTechnical > 3000 && avgSpeed && avgSpeed > 20 && state.technicalMentionCount < 2) {
     const etaMins = Math.round((distToTechnical / 1609.34) / avgSpeed * 60)
     if (etaMins > 3 && etaMins < 120) {
       const etaDate = new Date(Date.now() + etaMins * 60000)
       candidates.push({
         text: `Technical section in about ${etaMins} minutes at this pace. Should hit the twisties around ${formatClockTime(etaDate)}.`,
-        weight: 4, // High weight — this is what the driver cares about
+        weight: 1, // Low weight — countdown milestones handle this; avoid repetitive countdown feel
         category: 'eta-technical',
       })
     }
@@ -256,6 +260,12 @@ export function getDataCallout({
 
   state.lastDataCalloutDist = currentDist
   state.lastDataCategory = selected.category
+
+  // Track technical mentions toward the global cap of 2
+  if (selected.category === 'eta-technical') {
+    state.technicalMentionCount++
+  }
+
   return { text: selected.text, category: 'data' }
 }
 
@@ -298,9 +308,13 @@ export function getProgressCallout({ currentDist, totalDist, currentSpeed }) {
 export function getCountdownCallout({ distToTechnical, technicalCurveCount, currentSpeed, currentDist }) {
   if (!distToTechnical || distToTechnical < 0) return null
 
+  // Hard cap: max 2 total technical-related callouts (countdown + eta-technical combined)
+  if (state.technicalMentionCount >= 2) return null
+
   const miToTech = distToTechnical / 1609.34
   const avgSpeed = getAvgSpeed(3)
 
+  // Only 2 milestones: early heads-up (10mi) and final warning (5mi)
   const milestones = [
     { miles: 10, getText: () => {
       if (avgSpeed) {
@@ -310,8 +324,6 @@ export function getCountdownCallout({ distToTechnical, technicalCurveCount, curr
       return `10 miles to the technical section. ${technicalCurveCount} curves waiting.`
     }},
     { miles: 5, getText: () => `5 miles out. ${technicalCurveCount} curves in the technical section.` },
-    { miles: 2, getText: () => `2 miles to technical. Time to wake up.` },
-    { miles: 1, getText: () => `Next mile. Here we go.` },
   ]
 
   for (const m of milestones) {
@@ -321,6 +333,7 @@ export function getCountdownCallout({ distToTechnical, technicalCurveCount, curr
 
       state.countdownMilestones.add(m.miles)
       state.lastCountdownDist = currentDist
+      state.technicalMentionCount++
       return { text: m.getText(), category: 'countdown' }
     }
   }
