@@ -6,7 +6,7 @@ import useStore from '../store'
 // Added try-catch guards and delayed initialization
 // ================================
 
-export function useGeolocation(enabled = false) {
+export function useGeolocation(enabled = false, onDiagnostic = null) {
   const {
     setPosition,
     setHeading,
@@ -138,7 +138,9 @@ export function useGeolocation(enabled = false) {
         const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length
         const minGap = Math.min(...gaps)
         const maxGap = Math.max(...gaps)
-        console.log(`📡 GPS: ${(1000 / avgGap).toFixed(1)}Hz avg | gaps: ${minGap}ms - ${maxGap}ms`)
+        const msg = `${(1000 / avgGap).toFixed(1)}Hz avg | gaps: ${minGap}ms - ${maxGap}ms`
+        if (onDiagnostic) onDiagnostic('gps', msg)
+        else console.log(`📡 GPS: ${msg}`)
         gpsUpdateTimesRef.current = []
       }
 
