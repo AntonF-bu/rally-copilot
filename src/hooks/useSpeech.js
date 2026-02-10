@@ -8,7 +8,7 @@ import useStore from '../store'
 // This avoids pool exhaustion issues
 // ================================
 
-const ELEVENLABS_VOICE_ID = 'IRHApOXLvnW57QJPQH2P'
+const ELEVENLABS_VOICE_ID = 'EzWMVohFTGmiquywcrin'
 
 // Cache blob URLs — keyed by "profile:text" to separate voice settings
 const BLOB_CACHE = new Map()
