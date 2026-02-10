@@ -186,6 +186,7 @@ export function useSpeechPlanner({
   // ================================
   // ZONE BRIEFING BUILDER
   // Builds dynamic text sized to the speech budget
+  // Uses actual curve descriptions instead of abstract counts
   // ================================
   const buildZoneBriefing = useCallback((zone, upcoming, budget) => {
     if (!zone) return null
@@ -193,61 +194,139 @@ export function useSpeechPlanner({
     const character = zone.character
     const zoneLengthMi = ((zone.endDistance - zone.startDistance) / 1609.34).toFixed(1)
 
-    // Count curve events in this zone
+    // Get curve events in this zone, sorted by distance
     const curvesInZone = upcoming.filter(e =>
       e.source === SOURCE.CURVE &&
       e.distance >= zone.startDistance &&
       e.distance <= zone.endDistance
-    )
+    ).sort((a, b) => a.distance - b.distance)
 
+    // Helper: convert curve text to clean spoken form
+    // "CAUTION - Right 45°" → "right 4"
+    // "Right 30° into HARD LEFT 88°" → "right 5 into left 2"
+    // Matches cleanForSpeech rally scale: 180+=hairpin, 120+=1, 80+=2, 60+=3, 40+=4, 20+=5, <20=6
+    const cleanCurve = (text) => {
+      if (!text) return null
+      let clean = text.replace(/^CAUTION\s*-\s*/i, '')
+      clean = clean.replace(/(\d+)°/g, (match, deg) => {
+        const d = parseFloat(deg)
+        if (d >= 180) return 'hairpin'
+        if (d >= 120) return '1'
+        if (d >= 80) return '2'
+        if (d >= 60) return '3'
+        if (d >= 40) return '4'
+        if (d >= 20) return '5'
+        return '6'
+      })
+      clean = clean.replace(/HARD\s+/gi, '')
+      return clean.toLowerCase().trim()
+    }
+
+    // Helper: distance from zone start to a curve, as readable string
+    const distFromStart = (curve) => {
+      const mi = ((curve.distance - zone.startDistance) / 1609.34).toFixed(1)
+      return `${mi} miles`
+    }
+
+    // Find next zone after this one
+    const nextZone = (routeZones || []).find(z =>
+      z.startDistance > zone.startDistance && z.character !== zone.character
+    )
+    const nextZoneDistMi = nextZone
+      ? ((nextZone.startDistance - zone.startDistance) / 1609.34).toFixed(0)
+      : null
+
+    // ═══════════════════════════════════
+    // HIGHWAY BRIEFING (verbose, preview curves)
+    // ═══════════════════════════════════
     if (character === 'transit') {
-      // HIGHWAY — scale verbosity to budget
-      if (budget.budgetSeconds > 20) {
-        // Full briefing
-        const parts = [`Open road. ${zoneLengthMi} miles.`]
-        if (curvesInZone.length === 0) {
-          parts.push('Straight ahead.')
-        } else {
-          parts.push(`${curvesInZone.length} curves ahead.`)
-        }
-        // Preview first curve
-        if (curvesInZone.length > 0) {
-          const firstDist = curvesInZone[0].distance - zone.startDistance
-          const firstMi = (firstDist / 1609.34).toFixed(1)
-          if (parseFloat(firstMi) > 0.3) {
-            parts.push(`First in ${firstMi} miles.`)
+      const parts = ['Open road.']
+
+      if (budget.budgetSeconds > 20 && curvesInZone.length > 0) {
+        // FULL BRIEFING: name the first 2-3 curves
+        const previewCount = Math.min(curvesInZone.length, 3)
+
+        // First curve with distance
+        const first = curvesInZone[0]
+        const firstName = cleanCurve(first.text)
+        parts.push(`${firstName} in ${distFromStart(first)}.`)
+
+        // Second curve
+        if (previewCount >= 2) {
+          const second = curvesInZone[1]
+          const secondName = cleanCurve(second.text)
+          const gapMi = ((second.distance - first.distance) / 1609.34).toFixed(1)
+          if (parseFloat(gapMi) < 1) {
+            parts.push(`Then ${secondName}.`)
+          } else {
+            parts.push(`Then ${secondName} in ${gapMi} miles.`)
           }
         }
-        // Preview what's after highway
-        const nextTechZone = (routeZones || []).find(z =>
-          z.startDistance > zone.startDistance && z.character === 'technical'
-        )
-        if (nextTechZone) {
-          const distToTech = ((nextTechZone.startDistance - zone.startDistance) / 1609.34).toFixed(0)
-          parts.push(`Technical in ${distToTech} miles.`)
+
+        // Third curve (only if budget allows)
+        if (previewCount >= 3 && budget.budgetSeconds > 30) {
+          const third = curvesInZone[2]
+          const thirdName = cleanCurve(third.text)
+          parts.push(`Then ${thirdName}.`)
         }
-        return parts.join(' ')
-      } else if (budget.budgetSeconds > 10) {
-        // Medium briefing
-        const parts = [`Open road. ${zoneLengthMi} miles.`]
-        if (curvesInZone.length > 0) {
-          parts.push(`${curvesInZone.length} curves.`)
+
+        // After the curves: describe what follows
+        if (curvesInZone.length <= 3) {
+          const lastCurve = curvesInZone[curvesInZone.length - 1]
+          const remainingMi = ((zone.endDistance - lastCurve.distance) / 1609.34).toFixed(0)
+          if (parseFloat(remainingMi) > 3) {
+            parts.push('Long straight after.')
+          }
+        } else {
+          parts.push(`${curvesInZone.length} curves total.`)
         }
-        return parts.join(' ')
+
+      } else if (budget.budgetSeconds > 10 && curvesInZone.length > 0) {
+        // MEDIUM BRIEFING: just name the first curve
+        const first = curvesInZone[0]
+        const firstName = cleanCurve(first.text)
+        parts.push(`${zoneLengthMi} miles. ${firstName} in ${distFromStart(first)}.`)
+
+      } else if (curvesInZone.length === 0) {
+        // No curves in zone
+        parts.push(`${zoneLengthMi} miles. Straight ahead.`)
+
       } else {
-        // Short
-        return 'Open road.'
+        // SHORT BRIEFING
+        parts.push(`${zoneLengthMi} miles.`)
       }
+
+      // Next zone preview
+      if (nextZone && nextZoneDistMi && budget.budgetSeconds > 15) {
+        if (nextZone.character === 'technical') {
+          parts.push(`Technical in ${nextZoneDistMi} miles.`)
+        } else if (nextZone.character === 'urban') {
+          parts.push(`Urban in ${nextZoneDistMi} miles.`)
+        }
+      }
+
+      return parts.join(' ')
     }
 
+    // ═══════════════════════════════════
+    // TECHNICAL BRIEFING (surgical, curve count + first curve)
+    // ═══════════════════════════════════
     if (character === 'technical') {
-      if (budget.budgetSeconds > 10) {
-        return `Technical section. ${curvesInZone.length} curves in ${zoneLengthMi} miles. Stay sharp.`
+      if (budget.budgetSeconds > 10 && curvesInZone.length > 0) {
+        const first = curvesInZone[0]
+        const firstName = cleanCurve(first.text)
+        const firstDist = distFromStart(first)
+        return `Technical section. ${curvesInZone.length} curves in ${zoneLengthMi} miles. First up, ${firstName} in ${firstDist}. Stay sharp.`
+      } else if (curvesInZone.length > 0) {
+        return `Technical. ${curvesInZone.length} curves. Stay sharp.`
       } else {
-        return 'Technical. Stay sharp.'
+        return 'Technical section. Stay sharp.'
       }
     }
 
+    // ═══════════════════════════════════
+    // URBAN BRIEFING (minimal)
+    // ═══════════════════════════════════
     if (character === 'urban') {
       return 'Urban zone. Watch for traffic.'
     }
