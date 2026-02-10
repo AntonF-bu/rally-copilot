@@ -8,11 +8,43 @@ import useStore from '../store'
 // This avoids pool exhaustion issues
 // ================================
 
-const ELEVENLABS_VOICE_ID = 'lh03wW2cCRf05ksqPizq'
+const ELEVENLABS_VOICE_ID = 'IRHApOXLvnW57QJPQH2P'
 
-// Cache blob URLs
+// Cache blob URLs — keyed by "profile:text" to separate voice settings
 const BLOB_CACHE = new Map()
-const getCacheKey = (text) => text.toLowerCase().trim()
+const getCacheKey = (text, profile = 'default') => `${profile}:${text.toLowerCase().trim()}`
+
+// Voice profiles per speech source type
+const VOICE_PROFILES = {
+  // Curve callouts: punchy, consistent, slight speed boost
+  curve: {
+    stability: 0.85,
+    similarity_boost: 0.75,
+    style: 0.1,
+    speed: 1.1,
+  },
+  // Zone briefings: calm, authoritative, natural pace
+  briefing: {
+    stability: 0.65,
+    similarity_boost: 0.70,
+    style: 0.3,
+    speed: 1.0,
+  },
+  // Chatter: expressive, varied, lets the humor land
+  chatter: {
+    stability: 0.35,
+    similarity_boost: 0.65,
+    style: 0.6,
+    speed: 0.95,
+  },
+  // Default fallback
+  default: {
+    stability: 0.65,
+    similarity_boost: 0.75,
+    style: 0.2,
+    speed: 1.0,
+  },
+}
 
 // ================================
 // ROUND 7: Rally 1-6 Scale (integrated into cleanForSpeech)
@@ -402,12 +434,14 @@ export function useSpeech() {
   // ================================
   // ELEVENLABS TTS - Using global audio element
   // ================================
-  const speakElevenLabs = useCallback(async (text) => {
-    const cacheKey = getCacheKey(text)
-    
+  const speakElevenLabs = useCallback(async (text, options = {}) => {
+    const profileName = options?.voiceProfile || 'default'
+    const profile = VOICE_PROFILES[profileName] || VOICE_PROFILES.default
+    const cacheKey = getCacheKey(text, profileName)
+
     // Get blob URL from cache or fetch new
     let audioUrl = BLOB_CACHE.get(cacheKey)
-    
+
     if (!audioUrl) {
       if (!navigator.onLine) {
         console.log('🔊 Offline')
@@ -415,18 +449,18 @@ export function useSpeech() {
       }
 
       try {
-        console.log(`🔊 Fetching: "${text}"`)
-        
+        console.log(`🔊 Fetching [${profileName}]: "${text}"`)
+
         const response = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            text, 
+          body: JSON.stringify({
+            text,
             voiceId: ELEVENLABS_VOICE_ID,
             voiceSettings: {
-              stability: 0.90,
-              similarity_boost: 0.80,
-              style: 0.05,
+              stability: profile.stability,
+              similarity_boost: profile.similarity_boost,
+              style: profile.style,
               use_speaker_boost: true
             }
           }),
@@ -461,9 +495,8 @@ export function useSpeech() {
       // Stop current playback
       globalAudioElement.pause()
       globalAudioElement.currentTime = 0
-      
+
       // Set up event handlers
-      // FIX 3 ROUND 6: Reset priority when playback ends
       const onEnded = () => {
         isPlayingRef.current = false
         currentPriorityRef.current = -1
@@ -481,24 +514,25 @@ export function useSpeech() {
         globalAudioElement.removeEventListener('ended', onEnded)
         globalAudioElement.removeEventListener('error', onError)
       }
-      
+
       globalAudioElement.addEventListener('ended', onEnded)
       globalAudioElement.addEventListener('error', onError)
-      
-      // Set source and play
+
+      // Set source, volume, and playback speed from profile
       globalAudioElement.src = audioUrl
       globalAudioElement.volume = settings.volume || 1.0
-      
+      globalAudioElement.playbackRate = profile.speed || 1.0
+
       isPlayingRef.current = true
       setSpeaking(true, text)
-      
+
       await globalAudioElement.play()
-      console.log(`🔊 Playing: "${text}"`)
+      console.log(`🔊 Playing [${profileName}]: "${text}"`)
       return true
     } catch (err) {
       console.log('🔊 Play error:', err?.message)
       isPlayingRef.current = false
-      currentPriorityRef.current = -1  // FIX 3 ROUND 6
+      currentPriorityRef.current = -1
       setSpeaking(false, '')
       return false
     }
@@ -510,7 +544,7 @@ export function useSpeech() {
   // Higher priority can interrupt lower priority, same priority can interrupt same
   // low < normal < high
   // ================================
-  const speak = useCallback(async (text, priority = 'normal') => {
+  const speak = useCallback(async (text, priority = 'normal', options = {}) => {
     if (!settings.voiceEnabled || !text) {
       return false
     }
@@ -558,8 +592,8 @@ export function useSpeech() {
     const spokenText = cleanForSpeech(text)
     console.log(`🔊 Speaking: "${spokenText}" (original: "${text}", ${priority})`)
 
-    // Try ElevenLabs first
-    const success = await speakElevenLabs(spokenText)
+    // Try ElevenLabs first (pass voice profile options)
+    const success = await speakElevenLabs(spokenText, options)
     if (success) return true
 
     // Fall back to native
@@ -610,20 +644,27 @@ export async function preloadCopilotVoices(curves, segments, onProgress) {
   
   for (const text of essentialCallouts) {
     try {
+      // Preload with curve profile (most common callout type)
+      const profile = VOICE_PROFILES.curve
       const response = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text, 
+        body: JSON.stringify({
+          text,
           voiceId: ELEVENLABS_VOICE_ID,
-          voiceSettings: { stability: 0.90, similarity_boost: 0.80, style: 0.05, use_speaker_boost: true }
+          voiceSettings: {
+            stability: profile.stability,
+            similarity_boost: profile.similarity_boost,
+            style: profile.style,
+            use_speaker_boost: true
+          }
         }),
       })
-      
+
       if (response.ok) {
         const blob = await response.blob()
         if (blob.size > 500) {
-          BLOB_CACHE.set(getCacheKey(text), URL.createObjectURL(blob))
+          BLOB_CACHE.set(getCacheKey(text, 'curve'), URL.createObjectURL(blob))
           cached++
         }
       }

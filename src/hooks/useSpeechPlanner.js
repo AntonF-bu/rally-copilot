@@ -292,7 +292,13 @@ export function useSpeechPlanner({
                 : '🔈'
     console.log(`${emoji} [${mi}mi] [${source}] "${text}"`)
 
-    speak(text, speakPriority)
+    // Map source to voice profile for dynamic TTS settings
+    const voiceProfile = source === SOURCE.CURVE ? 'curve'
+                       : source === SOURCE.CHATTER ? 'chatter'
+                       : source === SOURCE.BRIEFING ? 'briefing'
+                       : 'default'
+
+    speak(text, speakPriority, { voiceProfile })
 
     // Update tracking
     lastSpokenRef.current = { text, source, time: now, distance: dist }
