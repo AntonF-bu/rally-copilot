@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import { DRIVING_MODE } from '../services/calloutEngine'
+import { getDynamicChatter, resetDynamicChatter, getCurveScoreCallout, recordCurveSpeed, enterTechnical, getTechnicalRecap } from '../services/dynamicChatter'
 
 // ================================
 // Speech Planner v1.0
@@ -70,6 +71,7 @@ export function useSpeechPlanner({
   routeZones,
   announcedCalloutsRef,
   speak,
+  routeData,
 }) {
   // ================================
   // INTERNAL STATE
@@ -89,6 +91,12 @@ export function useSpeechPlanner({
   // Chatter tracking
   const announcedChatterRef = useRef(new Set())
 
+  // Curve scoring (deferred to next cycle after curve fires)
+  const pendingScoreRef = useRef(null)
+
+  // Previous zone tracking (for technical recap on exit)
+  const lastZoneRef = useRef(null)
+
   // Stats for runtime summary
   const statsRef = useRef({ spoken: 0, chatter: 0, dropped: 0, briefings: 0 })
   const lastSummaryRef = useRef(0)
@@ -101,11 +109,14 @@ export function useSpeechPlanner({
   // ================================
   useEffect(() => {
     if (isRunning) {
+      resetDynamicChatter()
       lastPlanDistRef.current = 0
       lastPlanTimeRef.current = Date.now()
       lastSpokenRef.current = { text: '', source: '', time: 0, distance: 0 }
       lastZoneIdRef.current = null
       currentZoneRef.current = null
+      lastZoneRef.current = null
+      pendingScoreRef.current = null
       announcedChatterRef.current = new Set()
       statsRef.current = { spoken: 0, chatter: 0, dropped: 0, briefings: 0 }
       lastSummaryRef.current = Date.now()
@@ -419,6 +430,17 @@ export function useSpeechPlanner({
     lastPlanDistRef.current = dist
     lastPlanTimeRef.current = now
 
+    // ── STEP 0: Pending curve score ──
+    if (pendingScoreRef.current) {
+      const ps = pendingScoreRef.current
+      pendingScoreRef.current = null
+
+      const score = getCurveScoreCallout(ps.mile, ps.severity, ps.speed)
+      if (score) {
+        submitSpeech(score.text, SOURCE.CHATTER, PRIORITY[SOURCE.CHATTER], `score-${ps.mile}`)
+      }
+    }
+
     // --- STEP 1: Where am I? ---
     const zone = findCurrentZone(dist)
     const zoneConfig = ZONE_DENSITY[currentMode] || ZONE_DENSITY[DRIVING_MODE.HIGHWAY]
@@ -443,8 +465,35 @@ export function useSpeechPlanner({
     const zoneChanged = zoneId && zoneId !== lastZoneIdRef.current
 
     if (zoneChanged) {
+      const previousZone = lastZoneRef.current
+      lastZoneRef.current = zone
       lastZoneIdRef.current = zoneId
       currentZoneRef.current = zone
+
+      // Technical recap: fire when LEAVING technical
+      if (previousZone?.character === 'technical' && zone.character !== 'technical') {
+        const curvesCompleted = (curatedHighwayCallouts || []).filter(c =>
+          announcedCalloutsRef.current.has(c.id)
+        ).length
+
+        const recap = getTechnicalRecap({
+          curvesCompletedTotal: curvesCompleted,
+          currentZone: zone.character,
+        })
+
+        if (recap) {
+          submitSpeech(recap.text, SOURCE.CHATTER, PRIORITY[SOURCE.CHATTER], `recap-${dist}`)
+          // Don't return — still fire zone briefing after recap
+        }
+      }
+
+      // Track technical entry for recap
+      if (zone.character === 'technical') {
+        const curvesCompleted = (curatedHighwayCallouts || []).filter(c =>
+          announcedCalloutsRef.current.has(c.id)
+        ).length
+        enterTechnical(curvesCompleted)
+      }
 
       // Check if crossfade already covered this zone transition
       // (crossfade marks the transition callout as announced)
@@ -607,36 +656,83 @@ export function useSpeechPlanner({
         }
 
         submitSpeech(speechText, SOURCE.CURVE, PRIORITY[SOURCE.CURVE], curve.id)
+
+        // ── CURVE SCORING (technical only) ──
+        if (currentMode === DRIVING_MODE.TECHNICAL && curve.source === SOURCE.CURVE) {
+          const angleMatch = (curve.text || '').match(/(\d+)°/)
+          const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
+          const severity = angle >= 90 ? 2 : angle >= 70 ? 3 : angle >= 50 ? 4 : angle >= 30 ? 5 : 6
+
+          // Record for recap
+          recordCurveSpeed((dist / 1609.34), severity, currentSpeed)
+
+          // Get immediate curve score callout (only for hard curves)
+          // Deferred to NEXT planning cycle so the curve callout plays first
+          if (severity <= 4 && budget.budgetSeconds > 8) {
+            pendingScoreRef.current = { mile: dist / 1609.34, severity, speed: currentSpeed }
+          }
+        }
+
         // Only speak one curve per cycle (next cycle handles the next one)
         break
       }
     }
 
-    // --- STEP 6: Chatter ---
-    if (zoneConfig.chatterAllowed && chatters.length > 0) {
-      for (const chat of chatters) {
-        if (announcedChatterRef.current.has(chat.id)) continue
+    // ─── STEP 6: Dynamic chatter ───
+    // Only in highway zones, only when there's speech budget
+    if (currentMode === DRIVING_MODE.HIGHWAY && budget.budgetSeconds > 15) {
+      // Don't fire within 600m of last spoken item
+      const distSinceLastSpeak = dist - lastSpokenRef.current.distance
+      if (distSinceLastSpeak > 600 || lastSpokenRef.current.distance === 0) {
 
-        // Chatter triggers at +/-200m of the trigger point
-        if (chat.ahead > -200 && chat.ahead < 200) {
-          // Only speak if we have enough budget (no curve coming soon)
-          if (budget.budgetSeconds > 15) {
-            // Also check: don't fire within 400m of last spoken item
-            const distSinceLastSpeak = dist - lastSpokenRef.current.distance
-            if (distSinceLastSpeak > 400 || lastSpokenRef.current.distance === 0) {
+        // Calculate data for dynamic chatter
+        const curvesCompleted = (curatedHighwayCallouts || []).filter(c =>
+          announcedCalloutsRef.current.has(c.id)
+        ).length
+
+        // Find distance to next technical zone
+        const nextTechnical = (routeZones || []).find(z =>
+          z.startDistance > dist && z.character === 'technical'
+        )
+        const distToTechnical = nextTechnical
+          ? nextTechnical.startDistance - dist
+          : null
+
+        // Count curves in that technical zone
+        const technicalCurveCount = nextTechnical
+          ? (curatedHighwayCallouts || []).filter(c => {
+              const d = c.triggerDistance > 0 ? c.triggerDistance : ((c.triggerMile || 0) * 1609.34)
+              return d >= nextTechnical.startDistance && d <= nextTechnical.endDistance &&
+                     /left|right|hairpin/i.test(c.text || '')
+            }).length
+          : 0
+
+        // Get nearest curve for "clear ahead" callouts
+        const nearestCurveClean = nearestCurve ? cleanCurveForBriefing(nearestCurve.text) : null
+
+        const result = getDynamicChatter({
+          currentDist: dist,
+          currentSpeed,
+          totalDist: routeData?.distance || dist + 10000,
+          distToNextCurve: nearestCurve ? nearestCurve.ahead : 99999,
+          nextCurveText: nearestCurveClean,
+          distToTechnical,
+          technicalCurveCount,
+          currentZone: 'transit',
+          curvesCompletedTotal: curvesCompleted,
+        })
+
+        if (result) {
+          submitSpeech(result.text, SOURCE.CHATTER, PRIORITY[SOURCE.CHATTER], `dynamic-${result.category}-${dist}`)
+        } else {
+          // Fall back to pre-generated chatter timeline
+          for (const chat of chatters) {
+            if (announcedChatterRef.current.has(chat.id)) continue
+            if (chat.ahead > -200 && chat.ahead < 200) {
               submitSpeech(chat.text, SOURCE.CHATTER, PRIORITY[SOURCE.CHATTER], chat.id)
-            } else {
-              console.log(`🚫 DROP [chatter] "${chat.text.slice(0, 30)}..." — too close to last speech (${Math.round(distSinceLastSpeak)}m)`)
-              statsRef.current.dropped++
-              // Mark as announced so we don't retry every cycle
-              announcedChatterRef.current.add(chat.id)
+              break
             }
-          } else {
-            console.log(`🚫 DROP [chatter] "${chat.text.slice(0, 30)}..." — curve coming in ${budget.budgetSeconds.toFixed(0)}s`)
-            statsRef.current.dropped++
-            announcedChatterRef.current.add(chat.id)
           }
-          break
         }
       }
     }
@@ -673,7 +769,7 @@ export function useSpeechPlanner({
     }
 
   }, [isRunning, userDistanceAlongRoute, currentMode, currentSpeed,
-      curatedHighwayCallouts, routeZones, findCurrentZone, getUpcoming,
+      curatedHighwayCallouts, routeZones, routeData, findCurrentZone, getUpcoming,
       calculateBudget, buildZoneBriefing, submitSpeech, announcedCalloutsRef])
 
   // ================================

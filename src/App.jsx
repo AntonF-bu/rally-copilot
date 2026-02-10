@@ -163,6 +163,7 @@ export default function App() {
     routeZones,
     announcedCalloutsRef: announcedCuratedCalloutsRef,
     speak,
+    routeData,
   })
 
   // Reset on route/navigation change
