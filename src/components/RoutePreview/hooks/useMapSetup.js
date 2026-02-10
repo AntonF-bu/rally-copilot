@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import { CHARACTER_COLORS } from '../../../services/zoneService'
 import { MAP_STYLES } from '../constants'
 import { buildZoneSegments } from '../../../utils/routeGeometry'
+import { createCalloutMarkerElement } from '../../../utils/calloutMarkers'
 
 // Zone colors for shared utility (must match CHARACTER_COLORS primary values)
 const ZONE_COLORS = {
@@ -135,37 +136,6 @@ export function useMapSetup({
   }, [buildSleeveSegments])
 
   // ================================
-  // GET SHORT LABEL FOR CALLOUT
-  // ================================
-  const getShortLabel = (callout) => {
-    const text = callout.text || ''
-    const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
-
-    if (isGrouped) {
-      if (text.toLowerCase().includes('hairpin')) return text.includes('DOUBLE') ? '2xHP' : 'HP'
-      if (text.toLowerCase().includes('chicane')) return 'CHI'
-      if (text.toLowerCase().includes('esses')) return 'ESS'
-      if (text.includes('HARD')) {
-        const match = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
-        return match ? `H${match[1][0]}${match[2]}` : 'HRD'
-      }
-      return `G${callout.groupedFrom.length}`
-    }
-
-    if (callout.type === 'wake_up') return '!'
-    if (callout.type === 'sequence') return 'SEQ'
-
-    const dirMatch = text.match(/\b(left|right|L|R)\b/i)
-    const angleMatch = text.match(/(\d+)/)
-
-    if (dirMatch && angleMatch) return `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}`
-    if (angleMatch) return angleMatch[1]
-    if (dirMatch) return dirMatch[1][0].toUpperCase()
-
-    return callout.type?.[0]?.toUpperCase() || '•'
-  }
-
-  // ================================
   // ADD CALLOUT MARKERS
   // ================================
   const addCalloutMarkers = useCallback((map, calloutsToShow) => {
@@ -178,29 +148,7 @@ export function useMapSetup({
     calloutsToShow.forEach(callout => {
       if (!callout.position) return
 
-      const el = document.createElement('div')
-      el.style.cursor = 'pointer'
-
-      const shortLabel = getShortLabel(callout)
-      const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
-
-      // Determine color
-      let color
-      if (callout.zone === 'transit' || callout.zone === 'highway') {
-        color = '#3b82f6'
-      } else {
-        const angle = parseInt(callout.text?.match(/\d+/)?.[0]) || 0
-        if (angle >= 70 || callout.text?.toLowerCase().includes('hairpin')) color = '#ef4444'
-        else if (angle >= 45 || callout.text?.toLowerCase().includes('chicane')) color = '#E8622C'
-        else color = '#22c55e'
-      }
-
-      const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
-      el.innerHTML = `
-        <div style="background: ${isHighway ? color + '30' : color}; padding: ${isGrouped ? '4px 12px' : '4px 10px'}; border-radius: ${isGrouped ? '12px' : '6px'}; border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color}; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">
-          <span style="font-size:${isGrouped ? '12px' : '11px'}; font-weight:${isGrouped ? '700' : '600'}; color:${isHighway ? color : '#fff'};">${shortLabel}</span>
-        </div>
-      `
+      const el = createCalloutMarkerElement(callout)
 
       el.onclick = () => {
         if (onCalloutClick) {
