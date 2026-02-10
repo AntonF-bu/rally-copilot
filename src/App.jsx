@@ -152,6 +152,14 @@ export default function App() {
   const offRouteCountRef = useRef(0)
   const offRouteWarningFiredRef = useRef(false)
 
+  // Route lock — grace period at navigation start for off-route starts (parking lots, etc.)
+  const routeLockRef = useRef({
+    locked: false,
+    startTime: 0,
+    consecutiveGoodUpdates: 0,
+    lastMatchedDist: 0,
+  })
+
   // Round 9B: Throttle distance calc to ~1Hz to ignore RAF interpolated positions
   const lastDistCalcTimeRef = useRef(0)
 
@@ -230,6 +238,7 @@ export default function App() {
     wasMovingRecently,
     flushDriveStats: flushStats,
     onNavigationEnd: handleAutoEnd,
+    routeLockedRef: routeLockRef,
   })
 
   // Reset on route/navigation change
@@ -370,10 +379,43 @@ export default function App() {
       currentSpeed
     )
 
-    // ── OFF-ROUTE DETECTION ──
+    // ── SAFEGUARD: NEVER EXCEED ROUTE LENGTH ──
+    const totalRouteDist = routeData?.distance || Infinity
+    const clampedDistance = Math.min(distanceAlong, totalRouteDist)
+
+    // ── ROUTE LOCK GRACE PERIOD ──
+    // At navigation start, GPS may be off-route (parking lot). Give 60s or 0.5mi
+    // for the matcher to lock on before firing warnings or sanity checks.
+    const lock = routeLockRef.current
+    const inGracePeriod = !lock.locked && (now - lock.startTime < 60000) && clampedDistance < 805
+
+    if (!lock.locked) {
+      const distAdvance = clampedDistance - lock.lastMatchedDist
+      if (distAdvance > 5 && clampedDistance > 0) {
+        lock.consecutiveGoodUpdates++
+        lock.lastMatchedDist = clampedDistance
+      } else if (distAdvance <= 0 && currentSpeed > 10) {
+        lock.consecutiveGoodUpdates = 0
+      }
+
+      if (lock.consecutiveGoodUpdates >= 3) {
+        lock.locked = true
+        logDiagnostic('startup', 'Route locked')
+        console.log('🔒 Route locked after', lock.consecutiveGoodUpdates, 'good updates')
+      } else if (now - lock.startTime > 60000) {
+        // Grace period expired — force lock
+        lock.locked = true
+        logDiagnostic('startup', 'Route lock forced (grace period expired)')
+        console.log('🔒 Route lock forced after 60s grace period')
+      } else if (currentSpeed > 10 && distAdvance <= 0) {
+        logDiagnostic('startup', `Waiting for route lock... (dist=${Math.round(clampedDistance)}m, speed=${Math.round(currentSpeed)}mph)`)
+      }
+    }
+
+    // ── OFF-ROUTE DETECTION (suppressed during grace period) ──
     if (distFromRoute > 50) {
       offRouteCountRef.current++
-      if (offRouteCountRef.current >= 10 && !offRouteWarningFiredRef.current) {
+      if (offRouteCountRef.current >= 10 && !offRouteWarningFiredRef.current && !inGracePeriod) {
         speak("Looks like we're off route.", 'normal')
         offRouteWarningFiredRef.current = true
         logDiagnostic('warning', `OFF ROUTE: ${distFromRoute.toFixed(0)}m from route for ${offRouteCountRef.current} updates`)
@@ -388,11 +430,7 @@ export default function App() {
       return
     }
 
-    // ── SAFEGUARD: NEVER EXCEED ROUTE LENGTH ──
-    const totalRouteDist = routeData?.distance || Infinity
-    const clampedDistance = Math.min(distanceAlong, totalRouteDist)
-
-    // ── ROUND 9C: SPEED-INTEGRATION SANITY CHECK (every 10s) ──
+    // ── ROUND 9C: SPEED-INTEGRATION SANITY CHECK (every 10s, suppressed during grace) ──
     const si = speedIntegrationRef.current
     const dt = (now - si.lastTime) / 1000
 
@@ -401,7 +439,7 @@ export default function App() {
       si.estimatedDist += speedMps * dt
       si.lastTime = now
 
-      if (now - lastSanityLogRef.current > 10000 && si.estimatedDist > 100) {
+      if (!inGracePeriod && now - lastSanityLogRef.current > 10000 && si.estimatedDist > 100) {
         lastSanityLogRef.current = now
         const ratio = clampedDistance / Math.max(si.estimatedDist, 1)
         const status = (ratio > 1.3 || ratio < 0.7) ? 'warning' : 'sanity'
@@ -741,6 +779,7 @@ export default function App() {
     lastDriveLogRef.current = 0
     diagnosticLogRef.current = []
     diagnosticToastRef.current = false
+    routeLockRef.current = { locked: false, startTime: Date.now(), consecutiveGoodUpdates: 0, lastMatchedDist: 0 }
     resetHighwayTrip()
 
     goToDriving()
@@ -805,6 +844,7 @@ export default function App() {
     speedIntegrationRef.current = { lastTime: Date.now(), estimatedDist: 0 }
     lastSanityLogRef.current = 0
     lastDriveLogRef.current = 0
+    routeLockRef.current = { locked: true, startTime: Date.now(), consecutiveGoodUpdates: 3, lastMatchedDist: 0 } // Simulation: pre-locked
     resetHighwayTrip()
 
     // Set simulation flag BEFORE starting navigation
