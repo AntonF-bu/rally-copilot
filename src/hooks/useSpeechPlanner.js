@@ -681,9 +681,10 @@ export function useSpeechPlanner({
     // ─── STEP 6: Dynamic chatter ───
     // Only in highway zones, only when there's speech budget
     if (currentMode === DRIVING_MODE.HIGHWAY && budget.budgetSeconds > 15) {
-      // Don't fire within 600m of last spoken item
+      // Don't fire within 5000m (~3 miles) of last spoken chatter
+      // This single gap controls all chatter spacing so dynamic and pre-gen don't pile up
       const distSinceLastSpeak = dist - lastSpokenRef.current.distance
-      if (distSinceLastSpeak > 600 || lastSpokenRef.current.distance === 0) {
+      if (distSinceLastSpeak > 5000 || lastSpokenRef.current.distance === 0) {
 
         // Calculate data for dynamic chatter
         const curvesCompleted = (curatedHighwayCallouts || []).filter(c =>
