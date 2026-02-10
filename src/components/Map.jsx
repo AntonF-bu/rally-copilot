@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { buildZoneSegments as buildZoneSegmentsShared } from '../utils/routeGeometry'
+import { createCalloutMarkerElement } from '../utils/calloutMarkers'
 
 // ================================
 // Map Component - v24
@@ -21,16 +22,6 @@ const ZONE_COLORS = {
   technical: '#00E68A',
   transit: '#66B3FF',
   urban: '#FF668C',
-}
-
-// Callout marker colors
-const CALLOUT_COLORS = {
-  danger:      '#ef4444',
-  significant: '#f59e0b',
-  sweeper:     '#3b82f6',
-  wake_up:     '#10b981',
-  section:     '#8b5cf6',
-  sequence:    '#ec4899',
 }
 
 export default function Map() {
@@ -236,66 +227,7 @@ export default function Map() {
     curatedHighwayCallouts.forEach((callout) => {
       if (!callout.position) return
 
-      const el = document.createElement('div')
-      el.style.cursor = 'pointer'
-
-      const text = callout.text || ''
-      const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
-      const isHighway = callout.zone === 'transit' || callout.zone === 'highway'
-
-      // Simple color logic matching Preview
-      let color
-      if (isHighway) {
-        color = '#3b82f6'  // Always blue for highway
-      } else {
-        const angle = parseInt(text.match(/\d+/)?.[0]) || 0
-        if (angle >= 70 || text.toLowerCase().includes('hairpin')) {
-          color = '#ef4444'  // Red
-        } else if (angle >= 45 || text.toLowerCase().includes('chicane')) {
-          color = '#E8622C'  // Tramo orange
-        } else {
-          color = '#22c55e'  // Green
-        }
-      }
-
-      // Get short label matching Preview format
-      const getShortLabel = () => {
-        // Grouped callouts - match Preview format
-        if (isGrouped) {
-          if (text.toLowerCase().includes('hairpin')) return text.includes('DOUBLE') ? '2xHP' : 'HP'
-          if (text.toLowerCase().includes('chicane')) return 'CHI'
-          if (text.toLowerCase().includes('esses')) return 'ESS'
-          if (text.includes('HARD')) {
-            const match = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
-            return match ? `H${match[1][0]}${match[2]}` : 'HRD'
-          }
-          return `G${callout.groupedFrom.length}`
-        }
-
-        // Special types
-        if (callout.type === 'wake_up') return '!'
-        if (callout.type === 'sequence') return 'SEQ'
-        if (callout.type === 'transition') return '→'
-
-        // Direction + angle from text
-        const dirMatch = text.match(/\b(left|right|L|R)\b/i)
-        const angleMatch = text.match(/(\d+)/)
-
-        if (dirMatch && angleMatch) return `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}`
-        if (angleMatch) return angleMatch[1]
-        if (dirMatch) return dirMatch[1][0].toUpperCase()
-
-        return callout.type?.[0]?.toUpperCase() || '•'
-      }
-
-      const shortLabel = getShortLabel()
-
-      // Create marker matching Preview styling
-      el.innerHTML = `
-        <div style="background: ${isHighway ? color + '30' : color}; padding: ${isGrouped ? '4px 12px' : '4px 10px'}; border-radius: ${isGrouped ? '12px' : '6px'}; border: ${isGrouped ? '3px solid #fff' : '2px solid ' + color}; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">
-          <span style="font-size:${isGrouped ? '12px' : '11px'}; font-weight:${isGrouped ? '700' : '600'}; color:${isHighway ? color : '#fff'};">${shortLabel}</span>
-        </div>
-      `
+      const el = createCalloutMarkerElement(callout)
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat(callout.position)
