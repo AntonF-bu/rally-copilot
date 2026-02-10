@@ -83,6 +83,10 @@ const useStore = create(
       
       // LLM-generated callout variants (not persisted - computed in Preview)
       calloutVariants: {},
+
+      // Drive stats (not persisted - populated by useDriveStats hook, consumed by TripSummary)
+      driveStats: null,
+      setDriveStats: (stats) => set({ driveStats: stats }),
       
       // Route editor state
       showRouteEditor: false,
@@ -317,14 +321,15 @@ const useStore = create(
       },
       
       goToDriving: () => {
-        set({ 
-          showRouteSelector: false, 
+        set({
+          showRouteSelector: false,
           showRoutePreview: false,
           showTripSummary: false,
           showRouteEditor: false,
           isRunning: true,
           simulationProgress: 0,
           lastAnnouncedCurveId: null,
+          driveStats: null,
           tripStats: {
             startTime: Date.now(),
             endTime: null,  // NEW: Reset end time for new trip
