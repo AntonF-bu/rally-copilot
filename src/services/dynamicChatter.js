@@ -33,6 +33,9 @@ const state = {
 
   // Personality
   personalityFired: false,
+
+  // Category dedup for data callouts
+  lastDataCategory: null,
 }
 
 /**
@@ -52,6 +55,7 @@ export function resetDynamicChatter() {
   state.technicalSpeedSamples = []
   state.curveSpeedsInTechnical = []
   state.personalityFired = false
+  state.lastDataCategory = null
 }
 
 /**
@@ -155,6 +159,7 @@ export function getDataCallout({
     candidates.push({
       text: `Averaging ${avgSpeed} through this stretch.`,
       weight: 2,
+      category: 'speed',
     })
 
     // Speed comparison to previous stretch
@@ -164,6 +169,7 @@ export function getDataCallout({
         candidates.push({
           text: `Picked up the pace. ${avgSpeed} in the last 5 miles, up from ${avgSpeedLong} average.`,
           weight: 3,
+          category: 'speed',
         })
       }
     }
@@ -173,6 +179,7 @@ export function getDataCallout({
       candidates.push({
         text: `Top speed so far, ${Math.round(state.topSpeed)}. Averaging ${avgSpeed}.`,
         weight: 1,
+        category: 'speed',
       })
     }
   }
@@ -185,6 +192,7 @@ export function getDataCallout({
       candidates.push({
         text: `About ${etaMinutes} minutes to go. Should arrive around ${formatClockTime(etaDate)}.`,
         weight: 2,
+        category: 'eta',
       })
     }
   }
@@ -197,6 +205,7 @@ export function getDataCallout({
       candidates.push({
         text: `Technical section in about ${etaMins} minutes at this pace. Should hit the twisties around ${formatClockTime(etaDate)}.`,
         weight: 4, // High weight — this is what the driver cares about
+        category: 'eta-technical',
       })
     }
   }
@@ -207,6 +216,7 @@ export function getDataCallout({
     candidates.push({
       text: `Clear for the next ${clearMi} miles. Next up, ${nextCurveText}.`,
       weight: 3,
+      category: 'clear',
     })
   }
 
@@ -215,6 +225,7 @@ export function getDataCallout({
     candidates.push({
       text: `${formatTime(elapsed)} in. ${remainingMi} miles to go.`,
       weight: 1,
+      category: 'elapsed',
     })
   }
 
@@ -224,21 +235,27 @@ export function getDataCallout({
     candidates.push({
       text: `${elapsedStr} on the road. ${remainingMi} miles remaining.`,
       weight: 1,
+      category: 'elapsed',
     })
   }
 
   if (candidates.length === 0) return null
 
+  // Filter out candidates matching the last category to avoid repeats
+  let filtered = candidates.filter(c => c.category !== state.lastDataCategory)
+  if (filtered.length === 0) filtered = candidates // fallback if all filtered out
+
   // Weighted random selection — higher weight = more likely
-  const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0)
+  const totalWeight = filtered.reduce((sum, c) => sum + c.weight, 0)
   let rand = Math.random() * totalWeight
-  let selected = candidates[0]
-  for (const c of candidates) {
+  let selected = filtered[0]
+  for (const c of filtered) {
     rand -= c.weight
     if (rand <= 0) { selected = c; break }
   }
 
   state.lastDataCalloutDist = currentDist
+  state.lastDataCategory = selected.category
   return { text: selected.text, category: 'data' }
 }
 
