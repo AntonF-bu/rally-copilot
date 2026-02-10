@@ -148,6 +148,12 @@ export default function App() {
   const offRouteCountRef = useRef(0)
   const offRouteWarningFiredRef = useRef(false)
 
+  // Round 9B: Throttle distance calc to ~1Hz to ignore RAF interpolated positions
+  const lastDistCalcTimeRef = useRef(0)
+
+  // Round 9B: Cumulative sanity check — speed-integrated distance vs route-matched distance
+  const sanityCheckRef = useRef({ lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 })
+
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
 
@@ -247,6 +253,7 @@ export default function App() {
 
   // Calculate user's distance along route from position
   // Round 9: Windowed route matching — constrains GPS snap to nearby segments
+  // Round 9B: Throttled to ~1Hz to prevent interpolation-induced drift on curves
   useEffect(() => {
     if (!isRunning || !position || !routeData?.coordinates) {
       return
@@ -263,6 +270,17 @@ export default function App() {
       setUserDistanceAlongRoute(useStore.getState().simulationProgress * totalDist)
       return
     }
+
+    // ── ROUND 9B: THROTTLE TO ~1Hz ──
+    // GPS fires at ~1Hz but RAF interpolation fires at ~60fps.
+    // Both write to the same Zustand `position`. Running distance matching
+    // on interpolated positions causes cumulative forward drift on curves
+    // (interpolation cuts corners → projection bias → 322% bug).
+    // Only process distance at most once per 900ms to catch real GPS updates only.
+    const now = Date.now()
+    const timeSinceLastCalc = now - lastDistCalcTimeRef.current
+    if (timeSinceLastCalc < 900) return
+    lastDistCalcTimeRef.current = now
 
     // ── PRE-COMPUTE CUMULATIVE DISTANCES (once per route) ──
     const coords = routeData.coordinates
@@ -305,11 +323,41 @@ export default function App() {
       return
     }
 
-    // Update distance state
-    distanceStateRef.current.lastValidDist = distanceAlong
-    distanceStateRef.current.prevDist = distanceAlong
+    // ── ROUND 9B SAFEGUARD: NEVER EXCEED ROUTE LENGTH ──
+    const totalRouteDist = routeData?.distance || Infinity
+    const clampedDistance = Math.min(distanceAlong, totalRouteDist)
 
-    setUserDistanceAlongRoute(distanceAlong)
+    // ── ROUND 9B SAFEGUARD: CUMULATIVE SANITY CHECK (every 10s) ──
+    const sc = sanityCheckRef.current
+    sc.speedSamples.push(currentSpeed * 0.44704) // mph → m/s
+    if (sc.speedSamples.length > 20) sc.speedSamples.shift()
+
+    if (now - sc.lastCheckTime > 10000 && sc.lastCheckTime > 0) {
+      const avgSpeedMps = sc.speedSamples.reduce((a, b) => a + b, 0) / sc.speedSamples.length
+      const elapsedSec = (now - sc.lastCheckTime) / 1000
+      const expectedDist = avgSpeedMps * elapsedSec
+      const actualDist = clampedDistance - sc.lastCheckDist
+      const ratio = actualDist / Math.max(expectedDist, 1)
+
+      if (ratio > 1.5 || ratio < 0.5) {
+        console.warn(`📐 Distance sanity FAILED: tracked ${actualDist.toFixed(0)}m but speed suggests ${expectedDist.toFixed(0)}m (ratio: ${ratio.toFixed(2)})`)
+      } else if (window.__TRAMO_VERBOSE) {
+        console.log(`📐 Distance sanity OK: tracked ${actualDist.toFixed(0)}m, speed suggests ${expectedDist.toFixed(0)}m (ratio: ${ratio.toFixed(2)})`)
+      }
+
+      sc.lastCheckTime = now
+      sc.lastCheckDist = clampedDistance
+      sc.speedSamples = []
+    } else if (sc.lastCheckTime === 0) {
+      sc.lastCheckTime = now
+      sc.lastCheckDist = clampedDistance
+    }
+
+    // Update distance state
+    distanceStateRef.current.lastValidDist = clampedDistance
+    distanceStateRef.current.prevDist = clampedDistance
+
+    setUserDistanceAlongRoute(clampedDistance)
 
   }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, speak])
 
@@ -610,6 +658,8 @@ export default function App() {
     lastCalloutRef.current = Date.now() - 5000
     offRouteCountRef.current = 0
     offRouteWarningFiredRef.current = false
+    lastDistCalcTimeRef.current = 0
+    sanityCheckRef.current = { lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 }
     resetHighwayTrip()
 
     goToDriving()
@@ -667,6 +717,8 @@ export default function App() {
     lastCalloutRef.current = Date.now() - 5000
     offRouteCountRef.current = 0
     offRouteWarningFiredRef.current = false
+    lastDistCalcTimeRef.current = 0
+    sanityCheckRef.current = { lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 }
     resetHighwayTrip()
 
     // Set simulation flag BEFORE starting navigation

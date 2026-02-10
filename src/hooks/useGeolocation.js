@@ -26,6 +26,9 @@ export function useGeolocation(enabled = false) {
   const currentDisplayPositionRef = useRef(null)
   const mountedRef = useRef(true)
 
+  // Round 9B: GPS update rate diagnostic
+  const gpsUpdateTimesRef = useRef([])
+
   // Interpolate position between GPS updates based on velocity
   const interpolatePosition = useCallback(() => {
     // Safety check - don't run if unmounted or stopped
@@ -125,6 +128,17 @@ export function useGeolocation(enabled = false) {
     try {
       const { latitude, longitude, accuracy, speed: gpsSpeed, heading: gpsHeading, altitude } = position.coords
       const now = Date.now()
+
+      // Round 9B: Log GPS update rate (first 10 updates, then every 50th)
+      gpsUpdateTimesRef.current.push(now)
+      if (gpsUpdateTimesRef.current.length === 10) {
+        const times = gpsUpdateTimesRef.current
+        const gaps = []
+        for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1])
+        const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length
+        console.log(`📡 GPS update rate: avg ${avgGap.toFixed(0)}ms between updates (${(1000 / avgGap).toFixed(1)} Hz)`)
+        gpsUpdateTimesRef.current = []
+      }
 
       // VERY LENIENT: Accept almost all GPS readings
       const maxAccuracy = 500
