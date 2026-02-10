@@ -34,6 +34,7 @@ import {
 // Highway mode imports
 import { useHighwayMode } from './hooks/useHighwayMode'
 import useHighwayStore from './services/highwayStore'
+import { useSpeechPlanner } from './hooks/useSpeechPlanner'
 
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
@@ -47,8 +48,9 @@ import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
 
 // ================================
-// Tramo App - v22
-// NEW: Unified curated callout system - matches Preview exactly
+// Tramo App - v23
+// Round 8: Speech Planner replaces independent speech useEffects
+// All speech decisions now flow through useSpeechPlanner
 // ================================
 
 const CHARACTER_TO_MODE = {
@@ -122,38 +124,20 @@ export default function App() {
   // LEGACY: Track announced highway bends (fallback only)
   const announcedHighwayBendsRef = useRef(new Set())
 
-  // Debug: track previous distance for threshold crossing detection
+  // Distance tracking for seek suppression
   const prevDistanceRef = useRef(0)
 
-  // ROUND 5 CHANGE 4: Distance-based silence tracking for chatter
-  // Track distance where last audio (curated or chatter) was spoken
-  const lastSpeakDistanceRef = useRef(0)
-
-  // FIX 1 ROUND 6: Track distances for curated callouts and chatter separately
-  const lastCuratedSpeakDistRef = useRef(0)
-  const lastChatterSpeakDistRef = useRef(0)
-
-  // FIX #2: Distance tracking ref that NEVER resets during navigation
-  // This survives React re-renders and effect re-runs
+  // Distance tracking ref that NEVER resets during navigation
   const distanceStateRef = useRef({
     prevDist: 0,
     initialized: false,
-    navigationId: null,  // unique per navigation session
-    lastValidDist: 0,    // last known good distance
+    navigationId: null,
+    lastValidDist: 0,
   })
 
-  // FIX #4: Track when we just finished seeking to suppress false seek detection
+  // Track when we just finished seeking to suppress false seek detection
   const justSeekedRef = useRef(0)
   const wasSeekingRef = useRef(false)
-
-  // ================================
-  // RUNTIME SUMMARY (every 60s)
-  // FIX 3 ROUND 7B: Simple counters for compact logging
-  // ================================
-  const runtimeRef = useRef({
-    lastLog: 0, spoken: 0, chatter: 0, zones: [], skipped: 0
-  })
-  const prevRunningRef = useRef(false)
 
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
@@ -167,6 +151,19 @@ export default function App() {
   useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
+
+  // Speech planner — the single brain that decides what the driver hears
+  // Replaces: curated callout useEffect, chatter useEffect, zone announcement speech
+  const { plannerStats } = useSpeechPlanner({
+    isRunning,
+    currentMode,
+    currentSpeed,
+    userDistanceAlongRoute,
+    curatedHighwayCallouts,
+    routeZones,
+    announcedCalloutsRef: announcedCuratedCalloutsRef,
+    speak,
+  })
 
   // Reset on route/navigation change
   // FIX #2: Only reset distance if navigation is NOT active
@@ -182,12 +179,9 @@ export default function App() {
     earlyRef.current = new Set()
     finalRef.current = new Set()
     announcedHighwayBendsRef.current = new Set()
-    announcedCuratedCalloutsRef.current = new Set() // NEW
+    announcedCuratedCalloutsRef.current = new Set()
     lastCalloutRef.current = 0
     lastZoneAnnouncedRef.current = null
-    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     setUserDistanceAlongRoute(0)
     distanceStateRef.current = {
       prevDist: 0,
@@ -205,14 +199,27 @@ export default function App() {
       earlyRef.current = new Set()
       finalRef.current = new Set()
       announcedHighwayBendsRef.current = new Set()
-      announcedCuratedCalloutsRef.current = new Set() // NEW
+      announcedCuratedCalloutsRef.current = new Set()
       lastCalloutRef.current = Date.now() - 5000
       lastZoneAnnouncedRef.current = null
-      lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
-      lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
-      lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
 
-      // FIX #2: Initialize distance tracker for this navigation session
+      // Navigation start log
+      if (curatedHighwayCallouts?.length) {
+        const zoneStr = (routeZones || []).map(z => {
+          const s = z.startDistance != null ? (z.startDistance / 1609.34).toFixed(1) : '?'
+          const e = z.endDistance != null ? (z.endDistance / 1609.34).toFixed(1) : '?'
+          return `${z.character}(${s}-${e}mi)`
+        }).join(' → ')
+
+        const chatterCount = (useStore.getState().chatterTimeline || window.__chatterTimeline || []).length
+
+        console.log(`\n${'═'.repeat(50)}`)
+        console.log(`📋 ROUTE: ${(routeData?.distance / 1609.34).toFixed(1)}mi | ${curatedHighwayCallouts.length} callouts | ${chatterCount} chatter`)
+        console.log(`📋 ZONES: ${zoneStr}`)
+        console.log(`${'═'.repeat(50)}\n`)
+      }
+
+      // Initialize distance tracker for this navigation session
       if (!distanceStateRef.current.initialized) {
         distanceStateRef.current = {
           prevDist: 0,
@@ -322,51 +329,35 @@ export default function App() {
       const newMode = CHARACTER_TO_MODE[zone.character] || DRIVING_MODE.TECHNICAL
 
       if (newMode !== currentMode) {
-        const prevZone = sortedZones.find(z =>
-          z.endDistance < zone.startDistance
-        )
         console.log(`🎯 Zone changed: ${currentMode} → ${newMode} @ ${Math.round(userDistanceAlongRoute)}m`)
         setCurrentMode(newMode)
-        runtimeRef.current.zones.push(newMode)  // FIX 3 ROUND 7B
-
         lastZoneAnnouncedRef.current = zone.id
-        // Zone announcements handled by curated callout system (type: 'transition')
-        // Do NOT speak here — it doubles up with curated zone callouts
+        // Zone speech handled by useSpeechPlanner
       }
     }
-  }, [isRunning, routeZones, userDistanceAlongRoute, currentMode, speak])
+  }, [isRunning, routeZones, userDistanceAlongRoute, currentMode])
 
   // ================================
-  // UNIFIED CURATED CALLOUT SYSTEM
-  // Uses callouts from Preview (hybrid system output)
-  // This replaces the old highway bend + curve systems
-  // FIXED: Now uses threshold crossing instead of proximity window
+  // SEEK SUPPRESSION
+  // Marks callouts as played when user scrubs/seeks in simulation
+  // The speech planner reads announcedCuratedCalloutsRef and skips these
   // ================================
   useEffect(() => {
-    if (!isRunning || !settings.voiceEnabled) return
-
-    // Use curated callouts from store (set by RoutePreview)
-    if (!curatedHighwayCallouts?.length) {
-      return // Will fall back to legacy system below
-    }
+    if (!isRunning || !curatedHighwayCallouts?.length) return
 
     const userDist = userDistanceAlongRoute
     const prevDist = prevDistanceRef.current
-    const now = Date.now()
 
-    // FIX #4: Detect when seeking ends (isSeeking transitions from true to false)
+    // Detect when seeking ends (isSeeking transitions from true to false)
     const currentlySeeking = simulatorRef.current?.isSeeking || false
     if (wasSeekingRef.current && !currentlySeeking) {
-      // Just finished seeking - suppress seek detection for next 5 ticks
       justSeekedRef.current = 5
       console.log('🔇 Seek ended - suppressing seek detection for 5 ticks')
     }
     wasSeekingRef.current = currentlySeeking
 
-    // BUG FIX #2 (Option A): Skip callout processing while seeking/scrubbing
-    // When user is dragging the progress bar, just mark passed callouts as played silently
+    // While seeking: mark passed callouts as played silently
     if (currentlySeeking) {
-      // Find all unplayed callouts we've passed
       const passedCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
         const calloutDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
@@ -380,38 +371,25 @@ export default function App() {
         })
       }
 
-      // Update previous distance and return early - no callout firing during seek
       prevDistanceRef.current = userDist
       return
     }
 
-    // FIX #4: Decrement justSeekedRef counter and skip seek detection if still positive
+    // Post-seek grace period
     if (justSeekedRef.current > 0) {
       justSeekedRef.current--
-      console.log(`🔇 Post-seek tick ${5 - justSeekedRef.current}/5 - skipping seek detection`)
-      // Process normally but skip seek detection below
       prevDistanceRef.current = userDist
-      // Fall through to normal callout processing, but skip the seek jump handling
     }
 
-    // FIX #4: Speed-aware seek detection with HIGHER minimum threshold
-    // Only check if we're not in the post-seek grace period
-    const tickIntervalMs = 1000 // simulator tick interval
-    const currentSpeedMps = (currentSpeed || 30) * 0.44704 // mph to m/s
-    const expectedTickMovement = currentSpeedMps * (tickIntervalMs / 1000)
-    // FIX ROUND 4: Raised minimum to 800m with 15x speed multiplier
-    // At 60mph: max(800, 27*15=405) = 800m
-    // At 120mph: max(800, 54*15=810) = 810m
-    // At 180mph: max(800, 80*15=1200) = 1200m - only real scrubs will exceed this
+    // Speed-aware seek detection
+    const currentSpeedMps = (currentSpeed || 30) * 0.44704
     const seekThreshold = Math.max(800, currentSpeedMps * 15)
-
     const jumpDistance = userDist - prevDist
     const isSeekJump = jumpDistance > seekThreshold && justSeekedRef.current === 0
 
     if (isSeekJump) {
       console.log(`🚀 SEEK DETECTED: jumped ${Math.round(jumpDistance)}m (threshold=${Math.round(seekThreshold)}m at ${Math.round(currentSpeed || 0)}mph)`)
 
-      // Find all unplayed callouts in the jumped range
       const jumpedOverCallouts = curatedHighwayCallouts.filter(c => {
         if (announcedCuratedCalloutsRef.current.has(c.id)) return false
         const calloutDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
@@ -419,7 +397,6 @@ export default function App() {
       })
 
       if (jumpedOverCallouts.length > 0) {
-        // Sort by trigger distance (ascending)
         jumpedOverCallouts.sort((a, b) => {
           const distA = a.triggerDistance > 0 ? a.triggerDistance : (a.triggerMile * 1609.34)
           const distB = b.triggerDistance > 0 ? b.triggerDistance : (b.triggerMile * 1609.34)
@@ -443,9 +420,6 @@ export default function App() {
         console.log(`✅ SEEK-FIRED: "${calloutText}" from jump`)
         speak(calloutText, priority)
         announcedCuratedCalloutsRef.current.add(toFire.id)
-        lastCalloutRef.current = now
-        lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
-        lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
 
         if (toFire.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
           navigator.vibrate([150])
@@ -453,7 +427,7 @@ export default function App() {
       }
     }
 
-    // BUG FIX #3: Mark expired callouts as played (prevents stuck queue)
+    // Mark expired callouts as played (prevents stuck queue)
     const MAX_OVERSHOOT_EXPIRED = 500
     const expiredCallouts = curatedHighwayCallouts.filter(c => {
       if (announcedCuratedCalloutsRef.current.has(c.id)) return false
@@ -467,170 +441,11 @@ export default function App() {
       }
     })
 
-    // Update previous distance ref
     prevDistanceRef.current = userDist
 
-    // Adaptive throttle based on zone
-    const currentZone = routeZones?.find(z =>
-      userDist >= z.startDistance && userDist <= z.endDistance
-    )
-    const minInterval = currentZone?.character === 'technical' ? 2000
-                      : currentZone?.character === 'urban' ? 3000
-                      : 4000
+  }, [isRunning, curatedHighwayCallouts, userDistanceAlongRoute, currentSpeed, speak, settings.hapticFeedback])
 
-    if (now - lastCalloutRef.current < minInterval) return
-
-    // ========================================
-    // FIXED TRIGGER MECHANISM: Threshold crossing
-    // Fire callouts we've passed (within MAX_OVERSHOOT limit)
-    // ========================================
-    const MAX_OVERSHOOT = 500 // Don't fire if already 500m past
-
-    // Find all unannounced callouts that we've crossed
-    const crossedCallouts = curatedHighwayCallouts.filter(callout => {
-      if (announcedCuratedCalloutsRef.current.has(callout.id)) return false
-
-      const calloutDist = callout.triggerDistance > 0 ? callout.triggerDistance : (callout.triggerMile * 1609.34)
-      const overshoot = userDist - calloutDist
-
-      // Fire if: we've passed it (overshoot > 0) but not too far past
-      return overshoot >= 0 && overshoot < MAX_OVERSHOOT
-    })
-
-    // Sort by trigger distance (earliest first)
-    crossedCallouts.sort((a, b) => {
-      const distA = a.triggerDistance > 0 ? a.triggerDistance : (a.triggerMile * 1609.34)
-      const distB = b.triggerDistance > 0 ? b.triggerDistance : (b.triggerMile * 1609.34)
-      return distA - distB
-    })
-
-    // If we jumped over multiple callouts, mark earlier ones as played silently
-    // and only speak the most recent one
-    if (crossedCallouts.length > 1) {
-      // Mark all but the last as silently played
-      crossedCallouts.slice(0, -1).forEach(c => {
-        if (window.__TRAMO_VERBOSE) {
-          console.log(`⏭️ SKIPPED (jumped over): "${(c.text || '').substring(0, 30)}..."`)
-        }
-        announcedCuratedCalloutsRef.current.add(c.id)
-      })
-    }
-
-    // Get the callout to actually speak (the last/most recent one)
-    const calloutToSpeak = crossedCallouts.length > 0 ? crossedCallouts[crossedCallouts.length - 1] : null
-
-    if (!calloutToSpeak) {
-      // Also check for upcoming callouts within lookahead
-      // BUG FIX #1: Speed-based lookahead formula
-      // At 60mph: ~120m (~400ft), at 90mph: ~180m (~600ft), at 180mph: ~360m (~1200ft)
-      const currentSpeedMph = currentSpeed || 30
-      const lookaheadMeters = Math.max(80, currentSpeedMph * 2) // ~2 meters per mph
-
-      const upcomingCallout = curatedHighwayCallouts.find(callout => {
-        if (announcedCuratedCalloutsRef.current.has(callout.id)) return false
-        // BUG FIX #4: Use || instead of ?? to fall back when triggerDistance is 0
-        const calloutDist = callout.triggerDistance > 0
-          ? callout.triggerDistance
-          : (callout.triggerMile * 1609.34)
-        const distanceToCallout = calloutDist - userDist
-        return distanceToCallout > 0 && distanceToCallout <= lookaheadMeters
-      })
-
-      if (!upcomingCallout) return
-
-      // Fire the upcoming callout
-      const calloutText = upcomingCallout.text
-      const isUrgent = ['danger', 'significant'].includes(upcomingCallout.type) ||
-                       calloutText.toLowerCase().includes('caution') ||
-                       calloutText.toLowerCase().includes('hard')
-      const priority = isUrgent ? 'high' : 'normal'
-
-      const calloutDist = upcomingCallout.triggerDistance > 0 ? upcomingCallout.triggerDistance : (upcomingCallout.triggerMile * 1609.34)
-      console.log(`🔊 [${(calloutDist/1609.34).toFixed(1)}mi] "${calloutText}"`)
-      speak(calloutText, priority)
-      lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 7B
-      runtimeRef.current.spoken++  // FIX 3 ROUND 7B
-
-      announcedCuratedCalloutsRef.current.add(upcomingCallout.id)
-      lastCalloutRef.current = now
-      lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
-      lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
-
-      if (upcomingCallout.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
-        navigator.vibrate([150])
-      }
-      return
-    }
-
-    // Speak the crossed callout
-    const calloutText = calloutToSpeak.text
-    const isUrgent = ['danger', 'significant'].includes(calloutToSpeak.type) ||
-                     calloutText.toLowerCase().includes('caution') ||
-                     calloutText.toLowerCase().includes('hard')
-    const priority = isUrgent ? 'high' : 'normal'
-
-    const calloutDist = calloutToSpeak.triggerDistance > 0 ? calloutToSpeak.triggerDistance : (calloutToSpeak.triggerMile * 1609.34)
-    console.log(`🔊 [${(calloutDist/1609.34).toFixed(1)}mi] "${calloutText}"`)
-    speak(calloutText, priority)
-    lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 7B
-    runtimeRef.current.spoken++  // FIX 3 ROUND 7B
-
-    announcedCuratedCalloutsRef.current.add(calloutToSpeak.id)
-    lastCalloutRef.current = now
-    lastSpeakDistanceRef.current = userDist  // ROUND 5 CHANGE 4
-    lastCuratedSpeakDistRef.current = userDist  // FIX 1 ROUND 6
-
-    if (calloutToSpeak.type === 'danger' && settings.hapticFeedback && 'vibrate' in navigator) {
-      navigator.vibrate([150])
-    }
-
-  }, [isRunning, settings.voiceEnabled, curatedHighwayCallouts, userDistanceAlongRoute, currentSpeed, routeZones, speak, settings.hapticFeedback])
-
-  // ================================
-  // HIGHWAY COMPANION CHATTER
-  // v3: Uses App.jsx's own currentMode, checks every 100m, no external gates
-  // ================================
-  const lastChatterCheckRef = useRef(0)
-
-  useEffect(() => {
-    if (!isRunning || !settings.voiceEnabled) return
-
-    const currentDist = userDistanceAlongRoute
-
-    // Check every 100m (was 500m — too coarse for ±200m trigger windows)
-    if (Math.abs(currentDist - lastChatterCheckRef.current) < 100) return
-    lastChatterCheckRef.current = currentDist
-
-    // TEMP DIAGNOSTIC — remove after chatter confirmed working
-    if (currentMode === DRIVING_MODE.HIGHWAY) {
-      const timeline = useStore.getState().chatterTimeline || window.__chatterTimeline
-      if (!timeline?.length) {
-        console.log(`⚠️ CHATTER DIAGNOSTIC: No timeline! store=${!!useStore.getState().chatterTimeline} window=${!!window.__chatterTimeline}`)
-      }
-    }
-
-    // Use App.jsx's own currentMode — NOT useHighwayMode's inHighwayZone
-    if (currentMode !== DRIVING_MODE.HIGHWAY) return
-
-    // Don't play chatter within 400m of a curated callout
-    if (currentDist - lastCuratedSpeakDistRef.current < 400) return
-
-    // Don't play if a curated callout is coming within 300m
-    const nextCurated = curatedHighwayCallouts?.find(c => {
-      if (announcedCuratedCalloutsRef.current.has(c.id)) return false
-      const d = (c.triggerDistance ?? (c.triggerMile * 1609.34)) - currentDist
-      return d > 0 && d < 300
-    })
-    if (nextCurated) return
-
-    const chatter = getChatter()
-    if (chatter) {
-      console.log(`🎙️ CHATTER: "${chatter}" @ ${(currentDist/1609.34).toFixed(1)}mi`)
-      speak(chatter, 'low')
-      lastChatterSpeakDistRef.current = currentDist
-      runtimeRef.current.chatter++  // FIX 3 ROUND 7B: Runtime counter
-    }
-  }, [isRunning, settings.voiceEnabled, userDistanceAlongRoute, currentMode, getChatter, speak, curatedHighwayCallouts])
+  // Chatter is now handled by useSpeechPlanner — removed chatter useEffect
 
   // ================================
   // LEGACY CURVE CALLOUTS (fallback when no curated callouts)
@@ -777,44 +592,7 @@ export default function App() {
     })
   }, [isRunning, upcomingCurves])
 
-  // ================================
-  // FIX 3 ROUND 7B: Navigation Runtime Summary (every 60s)
-  // ================================
-  useEffect(() => {
-    if (!isRunning) {
-      runtimeRef.current = { lastLog: Date.now(), spoken: 0, chatter: 0, zones: [], skipped: 0 }
-      return
-    }
-
-    const now = Date.now()
-    const rt = runtimeRef.current
-    if (now - rt.lastLog < 60000) return
-    rt.lastLog = now
-
-    const mi = (userDistanceAlongRoute / 1609.34).toFixed(1)
-    const remaining = (curatedHighwayCallouts || []).filter(c =>
-      !announcedCuratedCalloutsRef.current.has(c.id)
-    ).length
-
-    console.log(`⏱️ ${mi}mi | ${Math.round(currentSpeed)}mph | ${currentMode} | spoken:${rt.spoken} chatter:${rt.chatter} remaining:${remaining}`)
-
-    // Reset counters for next interval
-    rt.spoken = 0
-    rt.chatter = 0
-    rt.zones = []
-  }, [isRunning, userDistanceAlongRoute, currentSpeed, currentMode, curatedHighwayCallouts])
-
-  // ================================
-  // FIX 3 ROUND 7B: Navigation End Summary
-  // ================================
-  useEffect(() => {
-    if (prevRunningRef.current && !isRunning) {
-      const mi = (userDistanceAlongRoute / 1609.34).toFixed(1)
-      const total = announcedCuratedCalloutsRef.current.size
-      console.log(`\n🏁 NAV COMPLETE | ${mi}mi | ${total} callouts delivered\n`)
-    }
-    prevRunningRef.current = isRunning
-  }, [isRunning, userDistanceAlongRoute])
+  // Runtime summary and nav end summary now handled by useSpeechPlanner
 
   // Navigation handlers
   const handleStartNavigation = async () => {
@@ -828,20 +606,7 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
-    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     resetHighwayTrip()
-
-    // Log all callout trigger distances at nav start (gated behind verbose flag)
-    if (window.__TRAMO_VERBOSE && curatedHighwayCallouts?.length > 0) {
-      console.log('\n📋 CALLOUT TRIGGER MAP:')
-      curatedHighwayCallouts.forEach((c, i) => {
-        const dist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
-        console.log(`  ${i + 1}. trigger=${Math.round(dist)}m (${(dist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
-      })
-      console.log('')
-    }
 
     goToDriving()
   }
@@ -896,20 +661,7 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
-    lastCuratedSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterSpeakDistRef.current = 0  // FIX 1 ROUND 6
-    lastChatterCheckRef.current = 0  // FIX 1 ROUND 7
     resetHighwayTrip()
-
-    // Log all callout trigger distances at simulation start (gated behind verbose flag)
-    if (window.__TRAMO_VERBOSE && curatedHighwayCallouts?.length > 0) {
-      console.log('\n📋 CALLOUT TRIGGER MAP (Simulation):')
-      curatedHighwayCallouts.forEach((c, i) => {
-        const dist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
-        console.log(`  ${i + 1}. trigger=${Math.round(dist)}m (${(dist / 1609.34).toFixed(2)}mi) | "${(c.text || '').substring(0, 40)}"`)
-      })
-      console.log('')
-    }
 
     // Set simulation flag BEFORE starting navigation
     setIsSimulating(true)
@@ -1072,5 +824,3 @@ export default function App() {
   )
 }
 
-// buildZoneBriefing removed in Round 7C — zone announcements now handled
-// solely by curated callout system (type: 'transition') from ruleBasedCalloutFilter.js
