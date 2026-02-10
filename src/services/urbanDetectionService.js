@@ -274,66 +274,105 @@ export async function detectUrbanSections(coordinates, totalDistance, sampleInte
 
 /**
  * Apply urban overlay to zones - converts TECHNICAL → URBAN where appropriate
- * 
+ *
  * RULES:
  * - Only TECHNICAL zones can become URBAN
  * - TRANSIT (highway) zones are NEVER changed (highway is highway regardless of location)
- * - A technical zone becomes urban if it's in an urban-density area
- * 
- * @param {Array} zones - Zones from classifyByRoadName: [{ start, end, character, roadName }, ...]
+ * - Technical zones are SPLIT at urban boundaries so partial overlaps are handled
+ *   (e.g., a zone spanning suburban Tewksbury → urban Boston gets split)
+ *
+ * @param {Array} zones - Zones from classifyByRoadName: [{ startMile, endMile, character, road }, ...]
  * @param {Array} urbanSections - From detectUrbanSections: [{ startMile, endMile, density, placeName }, ...]
  * @returns {Array} Updated zones with urban classification applied
  */
 export function applyUrbanOverlay(zones, urbanSections) {
   console.log(`\n🏙️ Applying urban overlay to ${zones.length} zones...`)
-  
+
+  // Filter to only urban-density sections (ignore suburban/rural)
+  const urbanOnly = urbanSections.filter(u => u.density === 'urban')
+
+  if (urbanOnly.length === 0) {
+    console.log(`   No urban sections detected — skipping overlay`)
+    return zones
+  }
+
+  console.log(`   Urban sections: ${urbanOnly.map(u => `${u.startMile.toFixed(1)}-${u.endMile.toFixed(1)}mi (${u.placeName || '?'})`).join(', ')}`)
+
   const result = []
   let changesCount = 0
-  
+
   for (const zone of zones) {
     // RULE: Only technical zones can become urban
     if (zone.character !== 'technical') {
       result.push(zone)
       continue
     }
-    
-    // Get zone bounds in MILES (zones may have startMile/endMile or just start/end in meters)
+
     const zoneStartMile = zone.startMile ?? (zone.start / 1609.34)
     const zoneEndMile = zone.endMile ?? (zone.end / 1609.34)
-    const zoneMidpointMile = (zoneStartMile + zoneEndMile) / 2
-    
-    // Debug: Log what we're comparing
-    console.log(`   Checking zone ${zoneStartMile.toFixed(1)}-${zoneEndMile.toFixed(1)}mi (midpoint: ${zoneMidpointMile.toFixed(2)}mi)`)
-    
-    // Find urban section that contains this zone's midpoint
-    const urbanSection = urbanSections.find(u => 
-      zoneMidpointMile >= u.startMile && zoneMidpointMile < u.endMile
+
+    // Find all urban sections that overlap this zone
+    const overlapping = urbanOnly.filter(u =>
+      u.startMile < zoneEndMile && u.endMile > zoneStartMile
     )
-    
-    if (urbanSection) {
-      console.log(`      Found urban section: ${urbanSection.startMile.toFixed(1)}-${urbanSection.endMile.toFixed(1)}mi (${urbanSection.density}) - ${urbanSection.placeName || 'unknown'}`)
+
+    if (overlapping.length === 0) {
+      // No urban overlap — keep as technical
+      result.push(zone)
+      continue
     }
-    
-    if (urbanSection?.density === 'urban') {
-      console.log(`   ✓ Mile ${zoneStartMile.toFixed(1)}-${zoneEndMile.toFixed(1)}: TECHNICAL → URBAN (in ${urbanSection.placeName || 'urban area'})`)
-      result.push({ 
-        ...zone, 
+
+    console.log(`   Splitting zone ${zoneStartMile.toFixed(1)}-${zoneEndMile.toFixed(1)}mi against ${overlapping.length} urban section(s)`)
+
+    // Walk through the zone, splitting at urban boundaries
+    let cursor = zoneStartMile
+
+    for (const urban of overlapping) {
+      const overlapStart = Math.max(urban.startMile, zoneStartMile)
+      const overlapEnd = Math.min(urban.endMile, zoneEndMile)
+
+      // Gap before urban overlap? → stays technical
+      if (cursor < overlapStart - 0.01) {
+        result.push({
+          ...zone,
+          startMile: cursor,
+          endMile: overlapStart,
+        })
+        console.log(`      ${cursor.toFixed(1)}-${overlapStart.toFixed(1)}mi: TECHNICAL (before urban)`)
+      }
+
+      // Urban overlap portion → convert to urban
+      result.push({
+        ...zone,
+        startMile: overlapStart,
+        endMile: overlapEnd,
         character: 'urban',
-        urbanPlace: urbanSection.placeName,
-        urbanNeighborhood: urbanSection.neighborhood
+        urbanPlace: urban.placeName,
+        urbanNeighborhood: urban.neighborhood,
       })
       changesCount++
-    } else {
-      result.push(zone)
+      console.log(`      ${overlapStart.toFixed(1)}-${overlapEnd.toFixed(1)}mi: TECHNICAL → URBAN (${urban.placeName || 'urban area'})`)
+
+      cursor = overlapEnd
+    }
+
+    // Remaining tail after last urban overlap? → stays technical
+    if (cursor < zoneEndMile - 0.01) {
+      result.push({
+        ...zone,
+        startMile: cursor,
+        endMile: zoneEndMile,
+      })
+      console.log(`      ${cursor.toFixed(1)}-${zoneEndMile.toFixed(1)}mi: TECHNICAL (after urban)`)
     }
   }
-  
+
   if (changesCount === 0) {
     console.log(`   No changes - no technical zones in urban areas`)
   } else {
-    console.log(`   Applied ${changesCount} urban override(s)`)
+    console.log(`   Applied ${changesCount} urban split(s)`)
   }
-  
+
   return result
 }
 

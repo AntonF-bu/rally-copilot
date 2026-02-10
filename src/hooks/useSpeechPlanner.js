@@ -79,6 +79,7 @@ export function useSpeechPlanner({
   wasMovingRecently,
   flushDriveStats,
   onNavigationEnd,
+  routeLockedRef,
 }) {
   // ================================
   // INTERNAL STATE
@@ -471,6 +472,9 @@ export function useSpeechPlanner({
     // then fire opening briefing and resume normal operation.
     // ═══════════════════════════════════════════════
     if (!launchCompleteRef.current) {
+      // Route lock gate: don't fire opening briefing until matcher has locked onto the route
+      const routeLocked = routeLockedRef ? routeLockedRef.current.locked : true
+
       if (currentSpeed > 10) {
         if (!launchSpeedAbove10Ref.current) {
           // First time seeing speed > 10
@@ -482,7 +486,7 @@ export function useSpeechPlanner({
           }
         }
 
-        if (now - launchSpeedAbove10Ref.current >= 3000) {
+        if (now - launchSpeedAbove10Ref.current >= 3000 && routeLocked) {
           launchCompleteRef.current = true
           console.log('🚀 Launch sequence complete — firing opening briefing')
 
