@@ -127,15 +127,20 @@ export function useSpeechPlanner({
         const ahead = dist - currentDist
 
         if (ahead > -50 && ahead < lookaheadMeters) {
+          const isCurve = /left|right|hairpin|chicane|esses|sweeper/i.test(callout.text || '')
           const isTransition = callout.type === 'transition'
+
+          // If marked as transition but text is curve-like, it's a misclassified curve
+          const actualSource = (isTransition && !isCurve) ? SOURCE.BRIEFING
+                             : isCurve ? SOURCE.CURVE : SOURCE.BRIEFING
 
           events.push({
             id: callout.id,
             distance: dist,
             ahead,
             text: callout.text,
-            source: isTransition ? SOURCE.BRIEFING : SOURCE.CURVE,
-            priority: isTransition ? PRIORITY[SOURCE.BRIEFING] : PRIORITY[SOURCE.CURVE],
+            source: actualSource,
+            priority: PRIORITY[actualSource],
             originalCallout: callout,
           })
         }
@@ -383,6 +388,17 @@ export function useSpeechPlanner({
     // Find curves that are within trigger range
     for (const curve of curves) {
       if (announcedCalloutsRef.current.has(curve.id)) continue
+
+      // Urban zone filter: only speak dangerous curves (70°+)
+      // Normal intersection turns (29°, 45°) are noise in city driving
+      if (currentMode === DRIVING_MODE.URBAN) {
+        const angleMatch = (curve.text || '').match(/(\d+)°/)
+        const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
+        if (angle < 70) {
+          announcedCalloutsRef.current.add(curve.id)
+          continue
+        }
+      }
 
       // Adaptive trigger distance based on speed
       const speedMps = Math.max(currentSpeed, MIN_SPEED_MPH) * 0.44704

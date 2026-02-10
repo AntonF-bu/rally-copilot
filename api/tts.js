@@ -24,7 +24,7 @@ export default async function handler(request) {
     }
 
     // Default to specific voice if not specified
-    const voice = voiceId || 'puLAe8o1npIDg374vYZp'
+    const voice = voiceId || 'lh03wW2cCRf05ksqPizq'
 
     // Default voice settings (can be overridden by caller)
     const settings = {
