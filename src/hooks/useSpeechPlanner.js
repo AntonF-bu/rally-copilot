@@ -38,6 +38,29 @@ const WORDS_PER_SECOND = 2.5
 // Minimum speed for budget calc (avoid div by zero)
 const MIN_SPEED_MPH = 5
 
+/**
+ * Convert curve callout text to clean spoken form for briefings/crossfades.
+ * "CAUTION - Right 45°" → "right 4"
+ * "Right 30° into HARD LEFT 88°" → "right 5 into left 2"
+ * Matches cleanForSpeech rally scale: 180+=hairpin, 120+=1, 80+=2, 60+=3, 40+=4, 20+=5, <20=6
+ */
+function cleanCurveForBriefing(text) {
+  if (!text) return null
+  let clean = text.replace(/^CAUTION\s*-\s*/i, '')
+  clean = clean.replace(/(\d+)°/g, (match, deg) => {
+    const d = parseFloat(deg)
+    if (d >= 180) return 'hairpin'
+    if (d >= 120) return '1'
+    if (d >= 80) return '2'
+    if (d >= 60) return '3'
+    if (d >= 40) return '4'
+    if (d >= 20) return '5'
+    return '6'
+  })
+  clean = clean.replace(/HARD\s+/gi, '')
+  return clean.toLowerCase().trim()
+}
+
 export function useSpeechPlanner({
   isRunning,
   currentMode,
@@ -201,27 +224,6 @@ export function useSpeechPlanner({
       e.distance <= zone.endDistance
     ).sort((a, b) => a.distance - b.distance)
 
-    // Helper: convert curve text to clean spoken form
-    // "CAUTION - Right 45°" → "right 4"
-    // "Right 30° into HARD LEFT 88°" → "right 5 into left 2"
-    // Matches cleanForSpeech rally scale: 180+=hairpin, 120+=1, 80+=2, 60+=3, 40+=4, 20+=5, <20=6
-    const cleanCurve = (text) => {
-      if (!text) return null
-      let clean = text.replace(/^CAUTION\s*-\s*/i, '')
-      clean = clean.replace(/(\d+)°/g, (match, deg) => {
-        const d = parseFloat(deg)
-        if (d >= 180) return 'hairpin'
-        if (d >= 120) return '1'
-        if (d >= 80) return '2'
-        if (d >= 60) return '3'
-        if (d >= 40) return '4'
-        if (d >= 20) return '5'
-        return '6'
-      })
-      clean = clean.replace(/HARD\s+/gi, '')
-      return clean.toLowerCase().trim()
-    }
-
     // Helper: distance from zone start to a curve, as readable string
     const distFromStart = (curve) => {
       const mi = ((curve.distance - zone.startDistance) / 1609.34).toFixed(1)
@@ -248,13 +250,13 @@ export function useSpeechPlanner({
 
         // First curve with distance
         const first = curvesInZone[0]
-        const firstName = cleanCurve(first.text)
+        const firstName = cleanCurveForBriefing(first.text)
         parts.push(`${firstName} in ${distFromStart(first)}.`)
 
         // Second curve
         if (previewCount >= 2) {
           const second = curvesInZone[1]
-          const secondName = cleanCurve(second.text)
+          const secondName = cleanCurveForBriefing(second.text)
           const gapMi = ((second.distance - first.distance) / 1609.34).toFixed(1)
           if (parseFloat(gapMi) < 1) {
             parts.push(`Then ${secondName}.`)
@@ -266,7 +268,7 @@ export function useSpeechPlanner({
         // Third curve (only if budget allows)
         if (previewCount >= 3 && budget.budgetSeconds > 30) {
           const third = curvesInZone[2]
-          const thirdName = cleanCurve(third.text)
+          const thirdName = cleanCurveForBriefing(third.text)
           parts.push(`Then ${thirdName}.`)
         }
 
@@ -284,7 +286,7 @@ export function useSpeechPlanner({
       } else if (budget.budgetSeconds > 10 && curvesInZone.length > 0) {
         // MEDIUM BRIEFING: just name the first curve
         const first = curvesInZone[0]
-        const firstName = cleanCurve(first.text)
+        const firstName = cleanCurveForBriefing(first.text)
         parts.push(`${zoneLengthMi} miles. ${firstName} in ${distFromStart(first)}.`)
 
       } else if (curvesInZone.length === 0) {
@@ -314,7 +316,7 @@ export function useSpeechPlanner({
     if (character === 'technical') {
       if (budget.budgetSeconds > 10 && curvesInZone.length > 0) {
         const first = curvesInZone[0]
-        const firstName = cleanCurve(first.text)
+        const firstName = cleanCurveForBriefing(first.text)
         const firstDist = distFromStart(first)
         return `Technical section. ${curvesInZone.length} curves in ${zoneLengthMi} miles. First up, ${firstName} in ${firstDist}. Stay sharp.`
       } else if (curvesInZone.length > 0) {
@@ -444,6 +446,19 @@ export function useSpeechPlanner({
       lastZoneIdRef.current = zoneId
       currentZoneRef.current = zone
 
+      // Check if crossfade already covered this zone transition
+      // (crossfade marks the transition callout as announced)
+      const nearbyTransition = briefings.find(e =>
+        Math.abs(e.distance - zone.startDistance) < 200
+      )
+      const alreadyCrossfaded = nearbyTransition &&
+        announcedCalloutsRef.current.has(nearbyTransition.id)
+
+      if (alreadyCrossfaded) {
+        console.log(`📢 [${(dist / 1609.34).toFixed(1)}mi] Zone briefing skipped — crossfade already covered it`)
+        return
+      }
+
       // Build and speak zone briefing
       // Check if there's a curated transition callout for this zone boundary
       const transitionCallout = briefings.find(e => e.ahead > -100 && e.ahead < 200)
@@ -469,8 +484,9 @@ export function useSpeechPlanner({
       return
     }
 
-    // --- STEP 5: Curve callouts ---
-    // Find curves that are within trigger range
+    // --- STEP 5: Curve callouts (with zone boundary crossfade) ---
+    // When the last curve before a zone boundary fires, append transition
+    // context and preview the next zone's first curves in one smooth sentence.
     for (const curve of curves) {
       if (announcedCalloutsRef.current.has(curve.id)) continue
 
@@ -506,7 +522,91 @@ export function useSpeechPlanner({
             navigator.vibrate([150])
           }
         }
-        submitSpeech(curve.text, SOURCE.CURVE, PRIORITY[SOURCE.CURVE], curve.id)
+
+        // ─── ZONE BOUNDARY CROSSFADE ───
+        // If this is the last curve before a zone change, append transition
+        // context and preview the next zone's first curves
+        let speechText = curve.text
+
+        if (zone && routeZones?.length) {
+          const distToZoneEnd = zone.endDistance - curve.distance
+
+          // Within 800m of zone boundary?
+          if (distToZoneEnd > 0 && distToZoneEnd < 800) {
+            // Check: no other unannounced curves between this one and zone end
+            const curvesAfterInZone = curves.filter(c =>
+              !announcedCalloutsRef.current.has(c.id) &&
+              c.id !== curve.id &&
+              c.distance > curve.distance &&
+              c.distance < zone.endDistance
+            )
+
+            if (curvesAfterInZone.length === 0) {
+              // Find the next zone (different character)
+              const nextZone = routeZones.find(z =>
+                z.startDistance >= zone.endDistance - 50 &&
+                z.character !== zone.character
+              )
+
+              if (nextZone) {
+                // Build crossfade suffix
+                const crossfadeParts = []
+
+                // Zone transition label
+                const zoneLabel = nextZone.character === 'technical' ? 'technical section'
+                                : nextZone.character === 'transit' ? 'open road'
+                                : 'urban zone'
+                crossfadeParts.push(`Then ${zoneLabel}.`)
+
+                // Preview first 2-3 curves in next zone
+                const nextZoneCurves = (curatedHighwayCallouts || []).filter(c => {
+                  if (announcedCalloutsRef.current.has(c.id)) return false
+                  const cDist = c.triggerDistance > 0 ? c.triggerDistance : ((c.triggerMile || 0) * 1609.34)
+                  return cDist >= nextZone.startDistance &&
+                         cDist <= nextZone.endDistance &&
+                         /left|right|hairpin|chicane|esses|sweeper/i.test(c.text || '')
+                }).sort((a, b) => {
+                  const aDist = a.triggerDistance > 0 ? a.triggerDistance : ((a.triggerMile || 0) * 1609.34)
+                  const bDist = b.triggerDistance > 0 ? b.triggerDistance : ((b.triggerMile || 0) * 1609.34)
+                  return aDist - bDist
+                })
+
+                const maxPreview = budget.budgetSeconds > 15 ? 3 : 2
+                const previewCount = Math.min(nextZoneCurves.length, maxPreview)
+
+                if (previewCount > 0) {
+                  const firstName = cleanCurveForBriefing(nextZoneCurves[0].text)
+                  if (firstName) crossfadeParts.push(`First up, ${firstName}.`)
+
+                  if (previewCount >= 2) {
+                    const secondName = cleanCurveForBriefing(nextZoneCurves[1].text)
+                    if (secondName) crossfadeParts.push(`Then ${secondName}.`)
+                  }
+
+                  if (previewCount >= 3) {
+                    const thirdName = cleanCurveForBriefing(nextZoneCurves[2].text)
+                    if (thirdName) crossfadeParts.push(`Then ${thirdName}.`)
+                  }
+                }
+
+                speechText = `${curve.text}. ${crossfadeParts.join(' ')}`
+
+                // Mark the transition callout at the boundary as announced
+                // so Step 4 skips the standalone briefing when we enter the next zone
+                const transitionAtBoundary = briefings.find(e =>
+                  Math.abs(e.distance - nextZone.startDistance) < 200
+                )
+                if (transitionAtBoundary) {
+                  announcedCalloutsRef.current.add(transitionAtBoundary.id)
+                }
+
+                console.log(`🔗 [${(dist / 1609.34).toFixed(1)}mi] Crossfade: curve + ${nextZone.character} zone preview`)
+              }
+            }
+          }
+        }
+
+        submitSpeech(speechText, SOURCE.CURVE, PRIORITY[SOURCE.CURVE], curve.id)
         // Only speak one curve per cycle (next cycle handles the next one)
         break
       }
