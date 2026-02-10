@@ -1,8 +1,9 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
 import { useHighwayMode } from '../hooks/useHighwayMode'
+import { DiagnosticOverlay, useTripleTap } from './DiagnosticOverlay'
 
 // ================================
 // Racing HUD - v13
@@ -23,8 +24,15 @@ const CHARACTER_LABELS = {
   [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY', color: ZONE_COLORS.urban }
 }
 
-export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 }) {
-  const { 
+export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, diagnosticLog, isSimulating: isSimProp }) {
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
+  const handleTripleTap = useTripleTap(() => {
+    if (!isSimProp && diagnosticLog?.current?.length > 0) {
+      setShowDiagnostics(true)
+    }
+  })
+
+  const {
     isRunning, 
     activeCurve, 
     upcomingCurves, 
@@ -191,6 +199,11 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
 
   const elevationUnit = isMetric ? 'm' : 'ft'
 
+  // Diagnostic overlay renders even when not running (so it's visible after nav ends)
+  if (showDiagnostics) {
+    return <DiagnosticOverlay entries={diagnosticLog?.current || []} onClose={() => setShowDiagnostics(false)} />
+  }
+
   if (!isRunning) return null
 
   const hasNetworkIssue = !isOnline
@@ -263,14 +276,14 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
                 </div>
               </div>
               
-              {/* Speed display */}
+              {/* Speed display — triple-tap for diagnostics */}
               {settings.showSpeedometer !== false && (
-                <div className="text-right pl-2 flex flex-col items-end">
+                <div className="text-right pl-2 flex flex-col items-end pointer-events-auto" onClick={handleTripleTap}>
                   <div className="flex items-baseline gap-1">
-                    <div 
+                    <div
                       className="text-4xl font-bold tracking-tight leading-none"
-                      style={{ 
-                        color: currentSpeedDisplay > targetSpeed + 10 ? '#ff3366' : 
+                      style={{
+                        color: currentSpeedDisplay > targetSpeed + 10 ? '#ff3366' :
                                currentSpeedDisplay < targetSpeed - 10 ? '#22c55e' : 'white',
                         textShadow: '0 0 20px rgba(255,255,255,0.3)'
                       }}
@@ -332,7 +345,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
               <span className="text-white/50 text-sm">Clear ahead</span>
             </div>
             {settings.showSpeedometer !== false && (
-              <div className="text-right">
+              <div className="text-right pointer-events-auto" onClick={handleTripleTap}>
                 <span className="text-2xl font-bold" style={{ color: zoneColor }}>
                   {currentSpeedDisplay}
                 </span>
@@ -340,10 +353,10 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
               </div>
             )}
           </div>
-          
+
           <div className="mt-3">
-            <ProgressBar 
-              percent={routeProgress.percent} 
+            <ProgressBar
+              percent={routeProgress.percent}
               modeColor={zoneColor}
               remainingDist={routeProgress.remainingDist}
               remainingDistUnit={routeProgress.remainingDistUnit}
@@ -351,7 +364,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
             />
           </div>
         </div>
-        
+
         <style>{hudStyles}</style>
       </div>
     )
@@ -360,13 +373,13 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
   // ========================================
   // LEGACY CURVE HUD - fallback when no curated callouts
   // ========================================
-  
+
   // No curve view
   if (!curve) {
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
         {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
-        
+
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -377,7 +390,7 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
               <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
             </div>
             {settings.showSpeedometer !== false && (
-              <div className="text-right">
+              <div className="text-right pointer-events-auto" onClick={handleTripleTap}>
                 <span className="text-2xl font-bold" style={{ color: zoneColor }}>
                   {currentSpeedDisplay}
                 </span>
@@ -518,12 +531,12 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
             </div>
             
             {settings.showSpeedometer !== false && (
-              <div className="text-right pl-2 flex flex-col items-end">
+              <div className="text-right pl-2 flex flex-col items-end pointer-events-auto" onClick={handleTripleTap}>
                 <div className="flex items-baseline gap-1">
-                  <div 
+                  <div
                     className="text-4xl font-bold tracking-tight leading-none"
-                    style={{ 
-                      color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' : 
+                    style={{
+                      color: currentSpeedDisplay > recommendedSpeed + 10 ? '#ff3366' :
                              currentSpeedDisplay < recommendedSpeed - 10 ? '#22c55e' : 'white'
                     }}
                   >

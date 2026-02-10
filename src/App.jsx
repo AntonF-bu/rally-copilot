@@ -161,6 +161,18 @@ export default function App() {
   // Round 9C: Periodic real-driving status log
   const lastDriveLogRef = useRef(0)
 
+  // Round 9C: Diagnostic log capture for real-world driving tests
+  const diagnosticLogRef = useRef([])
+  const diagnosticToastRef = useRef(false)
+
+  const logDiagnostic = useCallback((category, message, data) => {
+    console.log(`${category === 'warning' ? '⚠️' : category === 'sanity' ? '📐' : category === 'status' ? '🚗' : category === 'gps' ? '📡' : '📋'} ${message}`)
+    if (isSimulating) return
+    const log = diagnosticLogRef.current
+    log.push({ timestamp: Date.now(), category, message, data })
+    if (log.length > 500) log.shift()
+  }, [isSimulating])
+
   // TEST_REAL_MATCHING: simulator's ground-truth distance + comparison log timer
   const simDistRef = useRef(0)
   const lastMatchTestLogRef = useRef(0)
@@ -173,7 +185,7 @@ export default function App() {
   
   const isDemoMode = routeMode === 'demo'
   useSimulation(isDemoMode && isRunning)
-  useGeolocation(!isDemoMode && isRunning)
+  useGeolocation(!isDemoMode && isRunning, logDiagnostic)
   useRouteAnalysis()
 
   const currentSpeed = getDisplaySpeed()
@@ -259,6 +271,14 @@ export default function App() {
     } else {
       // Navigation ended - reset the initialized flag
       distanceStateRef.current.initialized = false
+
+      // Show diagnostic data availability toast (real driving only)
+      if (diagnosticLogRef.current.length > 0 && !diagnosticToastRef.current) {
+        diagnosticToastRef.current = true
+        console.log(`📋 Diagnostic log: ${diagnosticLogRef.current.length} entries captured. Triple-tap speed display to view.`)
+        // Reset toast flag after 60s so it can fire again on next nav end
+        setTimeout(() => { diagnosticToastRef.current = false }, 60000)
+      }
     }
   }, [isRunning])
 
@@ -328,7 +348,7 @@ export default function App() {
       if (offRouteCountRef.current >= 10 && !offRouteWarningFiredRef.current) {
         speak("Looks like we're off route.", 'normal')
         offRouteWarningFiredRef.current = true
-        console.warn(`🚗 OFF ROUTE: ${distFromRoute.toFixed(0)}m from route for ${offRouteCountRef.current} updates`)
+        logDiagnostic('warning', `OFF ROUTE: ${distFromRoute.toFixed(0)}m from route for ${offRouteCountRef.current} updates`)
       }
     } else {
       offRouteCountRef.current = 0
@@ -356,8 +376,8 @@ export default function App() {
       if (now - lastSanityLogRef.current > 10000 && si.estimatedDist > 100) {
         lastSanityLogRef.current = now
         const ratio = clampedDistance / Math.max(si.estimatedDist, 1)
-        const status = (ratio > 1.3 || ratio < 0.7) ? '⚠️' : '✅'
-        console.log(`${status} SANITY | matcher: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed-est: ${(si.estimatedDist / 1609.34).toFixed(2)}mi | ratio: ${ratio.toFixed(2)} | speed: ${currentSpeed.toFixed(0)}mph`)
+        const status = (ratio > 1.3 || ratio < 0.7) ? 'warning' : 'sanity'
+        logDiagnostic(status, `matcher: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed-est: ${(si.estimatedDist / 1609.34).toFixed(2)}mi | ratio: ${ratio.toFixed(2)} | speed: ${currentSpeed.toFixed(0)}mph`)
       }
     } else {
       si.lastTime = now
@@ -367,7 +387,7 @@ export default function App() {
     if (!isSimulating && now - lastDriveLogRef.current > 30000) {
       lastDriveLogRef.current = now
       const progress = ((clampedDistance / (routeData?.distance || 1)) * 100).toFixed(1)
-      console.log(`🚗 DRIVE STATUS | dist: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed: ${currentSpeed.toFixed(0)}mph | zone: ${currentMode} | progress: ${progress}% | callouts: ${announcedCuratedCalloutsRef.current.size}`)
+      logDiagnostic('status', `dist: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed: ${currentSpeed.toFixed(0)}mph | zone: ${currentMode} | progress: ${progress}% | callouts: ${announcedCuratedCalloutsRef.current.size}`)
     }
 
     // ── TEST_REAL_MATCHING: Compare matcher vs simulator ground truth ──
@@ -388,7 +408,7 @@ export default function App() {
 
     setUserDistanceAlongRoute(clampedDistance)
 
-  }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, currentMode, speak])
+  }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, currentMode, speak, logDiagnostic])
 
   // Detect mode from zones using calculated distance
   useEffect(() => {
@@ -691,6 +711,8 @@ export default function App() {
     speedIntegrationRef.current = { lastTime: Date.now(), estimatedDist: 0 }
     lastSanityLogRef.current = 0
     lastDriveLogRef.current = 0
+    diagnosticLogRef.current = []
+    diagnosticToastRef.current = false
     resetHighwayTrip()
 
     goToDriving()
@@ -889,7 +911,7 @@ export default function App() {
   if (showTripSummary) {
     return (
       <div style={mobileContainerStyle}>
-        <TripSummary onClose={() => { clearRouteData(); goToMenu() }} />
+        <TripSummary onClose={() => { clearRouteData(); goToMenu() }} diagnosticLog={diagnosticLogRef} />
       </div>
     )
   }
@@ -900,7 +922,7 @@ export default function App() {
         <AmbientBackground />
         <div className="relative z-[1] w-full h-full">
           <Map />
-          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} />
+          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
           <BottomBar />
           <SettingsPanel />
           <VoiceIndicator />

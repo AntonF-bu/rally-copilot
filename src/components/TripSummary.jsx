@@ -3,6 +3,7 @@ import useStore from '../store'
 import { useSwipeBack } from '../hooks/useSwipeBack'
 import { saveDriveLog } from '../services/driveLogService'
 import { submitRating, fetchUserRatingForRoute } from '../services/ratingService'
+import { DiagnosticOverlay } from './DiagnosticOverlay'
 
 // ================================
 // Trip Summary - Tramo Brand Design
@@ -16,7 +17,7 @@ const ZONE_COLORS = {
   technical: { primary: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
 }
 
-export default function TripSummary() {
+export default function TripSummary({ diagnosticLog }) {
   const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats } = useStore()
 
   // Enable iOS-style swipe-back gesture
@@ -38,6 +39,7 @@ export default function TripSummary() {
   const [isSubmittingRating, setIsSubmittingRating] = useState(false)
   const [ratingSubmitted, setRatingSubmitted] = useState(false)
   const [showRatingSection, setShowRatingSection] = useState(true)
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
 
   // Animate stats on mount
   useEffect(() => {
@@ -642,6 +644,24 @@ export default function TripSummary() {
           </div>
         )}
 
+        {/* View Drive Log - subtle link, only if diagnostic entries exist */}
+        {diagnosticLog?.current?.length > 0 && (
+          <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
+            <button
+              onClick={() => setShowDiagnostics(true)}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#555', fontSize: '12px',
+                fontFamily: "'JetBrains Mono', monospace",
+                textDecoration: 'underline',
+                textDecorationColor: '#333',
+              }}
+            >
+              View Drive Log ({diagnosticLog.current.length})
+            </button>
+          </div>
+        )}
+
         {/* Spacer for fixed buttons */}
         <div style={{ height: '140px' }} />
       </div>
@@ -780,6 +800,14 @@ export default function TripSummary() {
           </svg>
           <span style={{ color: '#22c55e', fontSize: '12px', fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}>Drive saved</span>
         </div>
+      )}
+
+      {/* Diagnostic Overlay */}
+      {showDiagnostics && diagnosticLog?.current && (
+        <DiagnosticOverlay
+          entries={diagnosticLog.current}
+          onClose={() => setShowDiagnostics(false)}
+        />
       )}
 
       <style>{`
