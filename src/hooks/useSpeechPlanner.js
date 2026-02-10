@@ -396,13 +396,22 @@ export function useSpeechPlanner({
       if (announcedCalloutsRef.current.has(curve.id)) continue
 
       // Urban zone filter: only speak dangerous curves (70°+)
-      // Normal intersection turns (29°, 45°) are noise in city driving
+      // BUT: only filter if the curve itself is IN an urban zone
+      // Don't filter curves that are physically in highway/technical zones
+      // even if currentMode hasn't caught up yet
       if (currentMode === DRIVING_MODE.URBAN) {
-        const angleMatch = (curve.text || '').match(/(\d+)°/)
-        const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
-        if (angle < 70) {
-          announcedCalloutsRef.current.add(curve.id)
-          continue
+        const curveZone = routeZones?.find(z =>
+          curve.distance >= z.startDistance && curve.distance <= z.endDistance
+        )
+        const curveIsInUrban = !curveZone || curveZone.character === 'urban'
+
+        if (curveIsInUrban) {
+          const angleMatch = (curve.text || '').match(/(\d+)°/)
+          const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
+          if (angle < 70) {
+            announcedCalloutsRef.current.add(curve.id)
+            continue
+          }
         }
       }
 
