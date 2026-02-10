@@ -1,5 +1,5 @@
 // ── TEST FLAG: Set to true to route simulator positions through the real GPS matcher ──
-const TEST_REAL_MATCHING = true
+const TEST_REAL_MATCHING = false
 
 import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
 import useStore from './store'
@@ -154,8 +154,12 @@ export default function App() {
   // Round 9B: Throttle distance calc to ~1Hz to ignore RAF interpolated positions
   const lastDistCalcTimeRef = useRef(0)
 
-  // Round 9B: Cumulative sanity check — speed-integrated distance vs route-matched distance
-  const sanityCheckRef = useRef({ lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 })
+  // Round 9C: Speed-integration sanity check — compares matcher distance vs speed-estimated distance
+  const speedIntegrationRef = useRef({ lastTime: 0, estimatedDist: 0 })
+  const lastSanityLogRef = useRef(0)
+
+  // Round 9C: Periodic real-driving status log
+  const lastDriveLogRef = useRef(0)
 
   // TEST_REAL_MATCHING: simulator's ground-truth distance + comparison log timer
   const simDistRef = useRef(0)
@@ -261,9 +265,23 @@ export default function App() {
   // Calculate user's distance along route from position
   // Round 9: Windowed route matching — constrains GPS snap to nearby segments
   // Round 9B: Throttled to ~1Hz to prevent interpolation-induced drift on curves
+  // Round 9C: Speed-integration sanity check + periodic drive status log
   useEffect(() => {
     if (!isRunning || !position || !routeData?.coordinates) {
       return
+    }
+
+    // ── ROUND 9B: THROTTLE TO ~1Hz (real GPS only) ──
+    // GPS fires at ~1Hz but RAF interpolation fires at ~60fps.
+    // Both write to the same Zustand `position`. Running distance matching
+    // on interpolated positions causes cumulative forward drift on curves
+    // (interpolation cuts corners → projection bias → 322% bug).
+    // Only process distance at most once per 900ms to catch real GPS updates only.
+    // Simulation bypasses this entirely (returns early below).
+    if (!isSimulating) {
+      const now = Date.now()
+      if (now - lastDistCalcTimeRef.current < 900) return
+      lastDistCalcTimeRef.current = now
     }
 
     // During simulation, distance is set by handleSimulatorPosition directly
@@ -279,19 +297,7 @@ export default function App() {
       return
     }
 
-    // ── ROUND 9B: THROTTLE TO ~1Hz ──
-    // GPS fires at ~1Hz but RAF interpolation fires at ~60fps.
-    // Both write to the same Zustand `position`. Running distance matching
-    // on interpolated positions causes cumulative forward drift on curves
-    // (interpolation cuts corners → projection bias → 322% bug).
-    // Only process distance at most once per 900ms to catch real GPS updates only.
-    // When TEST_REAL_MATCHING: skip throttle so we see raw drift at full framerate.
     const now = Date.now()
-    if (!TEST_REAL_MATCHING) {
-      const timeSinceLastCalc = now - lastDistCalcTimeRef.current
-      if (timeSinceLastCalc < 900) return
-    }
-    lastDistCalcTimeRef.current = now
 
     // ── PRE-COMPUTE CUMULATIVE DISTANCES (once per route) ──
     const coords = routeData.coordinates
@@ -334,46 +340,43 @@ export default function App() {
       return
     }
 
-    // ── ROUND 9B SAFEGUARD: NEVER EXCEED ROUTE LENGTH ──
+    // ── SAFEGUARD: NEVER EXCEED ROUTE LENGTH ──
     const totalRouteDist = routeData?.distance || Infinity
     const clampedDistance = Math.min(distanceAlong, totalRouteDist)
 
-    // ── ROUND 9B SAFEGUARD: CUMULATIVE SANITY CHECK (every 10s) ──
-    const sc = sanityCheckRef.current
-    sc.speedSamples.push(currentSpeed * 0.44704) // mph → m/s
-    if (sc.speedSamples.length > 20) sc.speedSamples.shift()
+    // ── ROUND 9C: SPEED-INTEGRATION SANITY CHECK (every 10s) ──
+    const si = speedIntegrationRef.current
+    const dt = (now - si.lastTime) / 1000
 
-    if (now - sc.lastCheckTime > 10000 && sc.lastCheckTime > 0) {
-      const avgSpeedMps = sc.speedSamples.reduce((a, b) => a + b, 0) / sc.speedSamples.length
-      const elapsedSec = (now - sc.lastCheckTime) / 1000
-      const expectedDist = avgSpeedMps * elapsedSec
-      const actualDist = clampedDistance - sc.lastCheckDist
-      const ratio = actualDist / Math.max(expectedDist, 1)
+    if (dt > 0 && currentSpeed > 5) {
+      const speedMps = currentSpeed * 0.44704
+      si.estimatedDist += speedMps * dt
+      si.lastTime = now
 
-      if (ratio > 1.5 || ratio < 0.5) {
-        console.warn(`📐 Distance sanity FAILED: tracked ${actualDist.toFixed(0)}m but speed suggests ${expectedDist.toFixed(0)}m (ratio: ${ratio.toFixed(2)})`)
-      } else if (window.__TRAMO_VERBOSE) {
-        console.log(`📐 Distance sanity OK: tracked ${actualDist.toFixed(0)}m, speed suggests ${expectedDist.toFixed(0)}m (ratio: ${ratio.toFixed(2)})`)
+      if (now - lastSanityLogRef.current > 10000 && si.estimatedDist > 100) {
+        lastSanityLogRef.current = now
+        const ratio = clampedDistance / Math.max(si.estimatedDist, 1)
+        const status = (ratio > 1.3 || ratio < 0.7) ? '⚠️' : '✅'
+        console.log(`${status} SANITY | matcher: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed-est: ${(si.estimatedDist / 1609.34).toFixed(2)}mi | ratio: ${ratio.toFixed(2)} | speed: ${currentSpeed.toFixed(0)}mph`)
       }
+    } else {
+      si.lastTime = now
+    }
 
-      sc.lastCheckTime = now
-      sc.lastCheckDist = clampedDistance
-      sc.speedSamples = []
-    } else if (sc.lastCheckTime === 0) {
-      sc.lastCheckTime = now
-      sc.lastCheckDist = clampedDistance
+    // ── ROUND 9C: REAL-DRIVING STATUS LOG (every 30s, non-simulated only) ──
+    if (!isSimulating && now - lastDriveLogRef.current > 30000) {
+      lastDriveLogRef.current = now
+      const progress = ((clampedDistance / (routeData?.distance || 1)) * 100).toFixed(1)
+      console.log(`🚗 DRIVE STATUS | dist: ${(clampedDistance / 1609.34).toFixed(2)}mi | speed: ${currentSpeed.toFixed(0)}mph | zone: ${currentMode} | progress: ${progress}% | callouts: ${announcedCuratedCalloutsRef.current.size}`)
     }
 
     // ── TEST_REAL_MATCHING: Compare matcher vs simulator ground truth ──
     if (TEST_REAL_MATCHING && isSimulating) {
       const simDist = simDistRef.current
-      const matchedDist = clampedDistance
       if (now - lastMatchTestLogRef.current > 5000 && simDist > 0) {
-        console.log(`📐 MATCH TEST | sim says: ${(simDist / 1609.34).toFixed(2)}mi | matcher says: ${(matchedDist / 1609.34).toFixed(2)}mi | diff: ${(matchedDist - simDist).toFixed(0)}m`)
+        console.log(`📐 MATCH TEST | sim: ${(simDist / 1609.34).toFixed(2)}mi | matcher: ${(clampedDistance / 1609.34).toFixed(2)}mi | diff: ${(clampedDistance - simDist).toFixed(0)}m`)
         lastMatchTestLogRef.current = now
       }
-      // In test mode, DON'T update userDistanceAlongRoute — simulator still drives the UI.
-      // We only observe the matcher output.
       distanceStateRef.current.lastValidDist = clampedDistance
       distanceStateRef.current.prevDist = clampedDistance
       return
@@ -385,7 +388,7 @@ export default function App() {
 
     setUserDistanceAlongRoute(clampedDistance)
 
-  }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, speak])
+  }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, currentMode, speak])
 
   // Detect mode from zones using calculated distance
   useEffect(() => {
@@ -685,7 +688,9 @@ export default function App() {
     offRouteCountRef.current = 0
     offRouteWarningFiredRef.current = false
     lastDistCalcTimeRef.current = 0
-    sanityCheckRef.current = { lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 }
+    speedIntegrationRef.current = { lastTime: Date.now(), estimatedDist: 0 }
+    lastSanityLogRef.current = 0
+    lastDriveLogRef.current = 0
     resetHighwayTrip()
 
     goToDriving()
@@ -746,7 +751,9 @@ export default function App() {
     offRouteCountRef.current = 0
     offRouteWarningFiredRef.current = false
     lastDistCalcTimeRef.current = 0
-    sanityCheckRef.current = { lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 }
+    speedIntegrationRef.current = { lastTime: Date.now(), estimatedDist: 0 }
+    lastSanityLogRef.current = 0
+    lastDriveLogRef.current = 0
     resetHighwayTrip()
 
     // Set simulation flag BEFORE starting navigation
