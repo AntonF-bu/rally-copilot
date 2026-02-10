@@ -8,7 +8,7 @@ const HIGHWAY_MARKER_COLOR = '#66B3FF'
 
 /**
  * Get a short label for a callout marker on the map.
- * e.g. "L42", "HP", "zone", "SEQ", "G3"
+ * e.g. "L42", "HP", "SEQ", "G3". Returns null for transitions (no marker).
  */
 export function getCalloutLabel(callout) {
   const text = callout.text || ''
@@ -29,7 +29,7 @@ export function getCalloutLabel(callout) {
   // Special types
   if (callout.type === 'wake_up') return '!'
   if (callout.type === 'sequence') return 'SEQ'
-  if (callout.type === 'transition') return 'zone'
+  if (callout.type === 'transition') return null
 
   // Direction + angle from text
   const dirMatch = text.match(/\b(left|right|L|R)\b/i)
@@ -60,13 +60,15 @@ export function getCalloutMarkerColor(callout) {
 
 /**
  * Create the HTML element for a callout marker on the map.
- * Returns a DOM element ready for mapboxgl.Marker({ element }).
+ * Returns a DOM element ready for mapboxgl.Marker({ element }),
+ * or null for callout types that shouldn't render a marker (e.g. transitions).
  */
 export function createCalloutMarkerElement(callout) {
+  const label = getCalloutLabel(callout)
+  if (label === null) return null
+
   const el = document.createElement('div')
   el.style.cursor = 'pointer'
-
-  const label = getCalloutLabel(callout)
   const color = getCalloutMarkerColor(callout)
   const isGrouped = callout.groupedFrom && callout.groupedFrom.length > 1
   const isHighway = callout.zone === 'transit' || callout.zone === 'highway'

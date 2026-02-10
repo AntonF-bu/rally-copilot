@@ -228,6 +228,7 @@ export default function Map() {
       if (!callout.position) return
 
       const el = createCalloutMarkerElement(callout)
+      if (!el) return
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat(callout.position)

@@ -149,6 +149,7 @@ export function useMapSetup({
       if (!callout.position) return
 
       const el = createCalloutMarkerElement(callout)
+      if (!el) return
 
       el.onclick = () => {
         if (onCalloutClick) {
