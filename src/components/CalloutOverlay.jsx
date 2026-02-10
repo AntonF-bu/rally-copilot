@@ -138,20 +138,20 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0 })
     }
   }, [nextCallout?.id, userDistance, isRunning])
 
-  // Calculate route progress
+  // Calculate route progress (clamped to 0-100% to prevent overflow from GPS errors)
   const routeProgress = useMemo(() => {
     const totalDist = routeData?.distance || 15000
     const currentDist = userDistance > 0 ? userDistance : ((simulationProgress || 0) * totalDist)
-    const progress = currentDist / totalDist
-    const remainingDist = totalDist - currentDist
+    const progress = Math.min(1, Math.max(0, currentDist / totalDist))
+    const remainingDist = Math.max(0, totalDist - currentDist)
     const totalTime = routeData?.duration || 1800
     const remainingTime = totalTime * (1 - progress)
-    
+
     return {
       percent: Math.round(progress * 100),
       remainingDist: isMetric ? Math.round(remainingDist) : Math.round(remainingDist * 3.28084),
       remainingDistUnit: isMetric ? 'm' : 'ft',
-      remainingTime: Math.round(remainingTime / 60),
+      remainingTime: Math.max(0, Math.round(remainingTime / 60)),
       totalCurves: curatedHighwayCallouts?.length || routeData?.curves?.length || 0,
       curvesPassed: Math.round((curatedHighwayCallouts?.length || routeData?.curves?.length || 0) * progress)
     }

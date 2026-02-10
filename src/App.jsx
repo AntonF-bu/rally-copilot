@@ -35,6 +35,7 @@ import {
 import { useHighwayMode } from './hooks/useHighwayMode'
 import useHighwayStore from './services/highwayStore'
 import { useSpeechPlanner } from './hooks/useSpeechPlanner'
+import { getDistanceAlongRoute, buildCumulativeDistances } from './services/routeMatcher'
 
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
@@ -139,6 +140,14 @@ export default function App() {
   const justSeekedRef = useRef(0)
   const wasSeekingRef = useRef(false)
 
+  // Windowed route matching — pre-computed segment distances
+  const cumulativeDistancesRef = useRef(null)
+  const routeCoordsKeyRef = useRef(null) // track which route we computed for
+
+  // Off-route detection
+  const offRouteCountRef = useRef(0)
+  const offRouteWarningFiredRef = useRef(false)
+
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
 
@@ -237,17 +246,13 @@ export default function App() {
   }, [isRunning])
 
   // Calculate user's distance along route from position
-  // OPTIMIZED: Use cached index and only search nearby points
-  const lastClosestIdxRef = useRef(0)
-  
+  // Round 9: Windowed route matching — constrains GPS snap to nearby segments
   useEffect(() => {
     if (!isRunning || !position || !routeData?.coordinates) {
       return
     }
 
-    // FIX ROOT CAUSE: During simulation, distance is set by handleSimulatorPosition
-    // directly from the simulator's distanceAlongRoute. Do NOT recalculate from lat/lng
-    // as this creates the dual-system conflict (two different distance values fighting).
+    // During simulation, distance is set by handleSimulatorPosition directly
     if (isSimulating) {
       return
     }
@@ -258,59 +263,55 @@ export default function App() {
       setUserDistanceAlongRoute(useStore.getState().simulationProgress * totalDist)
       return
     }
-    
-    // In live GPS mode, calculate from position
-    // OPTIMIZATION: Only search near the last known position
+
+    // ── PRE-COMPUTE CUMULATIVE DISTANCES (once per route) ──
     const coords = routeData.coordinates
-    const searchRadius = 50 // Only check 50 points in each direction
-    const startIdx = Math.max(0, lastClosestIdxRef.current - searchRadius)
-    const endIdx = Math.min(coords.length - 1, lastClosestIdxRef.current + searchRadius)
-    
-    let minDist = Infinity
-    let closestIdx = lastClosestIdxRef.current
-    
-    for (let i = startIdx; i <= endIdx; i++) {
-      const dx = coords[i][0] - position[0]
-      const dy = coords[i][1] - position[1]
-      const dist = dx * dx + dy * dy // Skip sqrt for comparison
-      if (dist < minDist) {
-        minDist = dist
-        closestIdx = i
-      }
-    }
-    
-    // Update cached index
-    lastClosestIdxRef.current = closestIdx
-    
-    // Use pre-calculated distances if available, otherwise estimate
-    let distanceAlong
-    if (routeData.cumulativeDistances?.[closestIdx]) {
-      distanceAlong = routeData.cumulativeDistances[closestIdx]
-    } else {
-      // Estimate based on index ratio
-      distanceAlong = (closestIdx / coords.length) * (routeData.distance || 15000)
-    }
-    
-    // FIX #2: Guard against distance anomalies
-    // If distance went to 0 or jumped backwards significantly, something re-initialized. Ignore it.
-    const prevValid = distanceStateRef.current.lastValidDist
-    if (distanceAlong < prevValid - 50 || (distanceAlong === 0 && prevValid > 100)) {
-      console.warn(`⚠️ DISTANCE ANOMALY: prev=${Math.round(prevValid)}m, current=${Math.round(distanceAlong)}m. Ignoring.`)
-      return // Don't update state with bad value
+    const routeKey = `${coords.length}-${coords[0]?.[0]}-${coords[0]?.[1]}`
+    if (routeCoordsKeyRef.current !== routeKey) {
+      cumulativeDistancesRef.current = buildCumulativeDistances(coords)
+      routeCoordsKeyRef.current = routeKey
+      console.log(`🗺️ Pre-computed ${coords.length} segment distances for route matching`)
     }
 
-    // Update last valid distance
+    const cumDist = cumulativeDistancesRef.current
+    if (!cumDist) return
+
+    // ── WINDOWED ROUTE MATCHING ──
+    const lastDist = distanceStateRef.current.lastValidDist
+    const { distance: distanceAlong, distFromRoute } = getDistanceAlongRoute(
+      coords,
+      cumDist,
+      position[0], // lng
+      position[1], // lat
+      lastDist,
+      currentSpeed
+    )
+
+    // ── OFF-ROUTE DETECTION ──
+    if (distFromRoute > 50) {
+      offRouteCountRef.current++
+      if (offRouteCountRef.current >= 10 && !offRouteWarningFiredRef.current) {
+        speak("Looks like we're off route.", 'normal')
+        offRouteWarningFiredRef.current = true
+        console.warn(`🚗 OFF ROUTE: ${distFromRoute.toFixed(0)}m from route for ${offRouteCountRef.current} updates`)
+      }
+    } else {
+      offRouteCountRef.current = 0
+      offRouteWarningFiredRef.current = false
+    }
+
+    // Guard: if windowed matcher returned same distance (GPS too far), skip update
+    if (distanceAlong === lastDist && lastDist > 0) {
+      return
+    }
+
+    // Update distance state
     distanceStateRef.current.lastValidDist = distanceAlong
     distanceStateRef.current.prevDist = distanceAlong
 
-    // Check for distance reset (debug)
-    if (distanceAlong === 0 && prevValid > 100) {
-      console.error('🚨 DISTANCE RESET DETECTED! prevDist was', prevValid)
-    }
-
     setUserDistanceAlongRoute(distanceAlong)
 
-  }, [isRunning, position, routeData, isDemoMode, isSimulating])
+  }, [isRunning, position, routeData, isDemoMode, isSimulating, currentSpeed, speak])
 
   // Detect mode from zones using calculated distance
   useEffect(() => {
@@ -607,6 +608,8 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
+    offRouteCountRef.current = 0
+    offRouteWarningFiredRef.current = false
     resetHighwayTrip()
 
     goToDriving()
@@ -662,6 +665,8 @@ export default function App() {
     announcedCuratedCalloutsRef.current = new Set()
     prevDistanceRef.current = 0
     lastCalloutRef.current = Date.now() - 5000
+    offRouteCountRef.current = 0
+    offRouteWarningFiredRef.current = false
     resetHighwayTrip()
 
     // Set simulation flag BEFORE starting navigation
