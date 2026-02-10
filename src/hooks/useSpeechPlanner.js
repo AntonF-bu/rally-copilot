@@ -72,6 +72,13 @@ export function useSpeechPlanner({
   announcedCalloutsRef,
   speak,
   routeData,
+  // Round 10: Drive stats integration
+  onCurveCallout,
+  onCalloutSpoken,
+  driveStatsRef,
+  wasMovingRecently,
+  flushDriveStats,
+  onNavigationEnd,
 }) {
   // ================================
   // INTERNAL STATE
@@ -101,6 +108,15 @@ export function useSpeechPlanner({
   const statsRef = useRef({ spoken: 0, chatter: 0, dropped: 0, briefings: 0 })
   const lastSummaryRef = useRef(0)
 
+  // Round 10: Launch sequence — hold all speech until speed sustained > 10mph
+  const launchCompleteRef = useRef(false)
+  const launchSpeedAbove10Ref = useRef(0)  // timestamp when speed first exceeded 10mph
+  const firstPlanTickRef = useRef(true)
+
+  // Round 10: Finish sequence — "half mile to go" → "that's the route" → recap → auto-end
+  const finishPhaseRef = useRef('driving')  // 'driving' | 'approaching' | 'finished'
+  const finishTimerRef = useRef(null)
+
   // Get chatter timeline from store
   const chatterTimeline = useStore(state => state.chatterTimeline)
 
@@ -120,6 +136,22 @@ export function useSpeechPlanner({
       announcedChatterRef.current = new Set()
       statsRef.current = { spoken: 0, chatter: 0, dropped: 0, briefings: 0 }
       lastSummaryRef.current = Date.now()
+
+      // Round 10: Reset launch + finish
+      launchCompleteRef.current = false
+      launchSpeedAbove10Ref.current = 0
+      firstPlanTickRef.current = true
+      finishPhaseRef.current = 'driving'
+      if (finishTimerRef.current) {
+        clearTimeout(finishTimerRef.current)
+        finishTimerRef.current = null
+      }
+    } else {
+      // Cleanup timers on stop
+      if (finishTimerRef.current) {
+        clearTimeout(finishTimerRef.current)
+        finishTimerRef.current = null
+      }
     }
   }, [isRunning])
 
@@ -409,8 +441,11 @@ export function useSpeechPlanner({
     if (source === SOURCE.CHATTER) statsRef.current.chatter++
     if (source === SOURCE.BRIEFING) statsRef.current.briefings++
 
+    // Round 10: Notify drive stats
+    if (onCalloutSpoken) onCalloutSpoken()
+
     return true
-  }, [speak, userDistanceAlongRoute, announcedCalloutsRef])
+  }, [speak, userDistanceAlongRoute, announcedCalloutsRef, onCalloutSpoken])
 
   // ================================
   // THE MAIN PLANNING LOOP
@@ -429,6 +464,146 @@ export function useSpeechPlanner({
 
     lastPlanDistRef.current = dist
     lastPlanTimeRef.current = now
+
+    // ═══════════════════════════════════════════════
+    // ROUND 10: LAUNCH SEQUENCE
+    // Hold ALL speech until speed > 10mph for 3 seconds,
+    // then fire opening briefing and resume normal operation.
+    // ═══════════════════════════════════════════════
+    if (!launchCompleteRef.current) {
+      if (currentSpeed > 10) {
+        if (!launchSpeedAbove10Ref.current) {
+          // First time seeing speed > 10
+          if (firstPlanTickRef.current) {
+            // Already moving when nav started (highway on-ramp) — fire after ~2s
+            launchSpeedAbove10Ref.current = now - 1000
+          } else {
+            launchSpeedAbove10Ref.current = now
+          }
+        }
+
+        if (now - launchSpeedAbove10Ref.current >= 3000) {
+          launchCompleteRef.current = true
+          console.log('🚀 Launch sequence complete — firing opening briefing')
+
+          // Build opening briefing based on starting zone
+          const startZone = findCurrentZone(dist)
+          let openingLine = "Let's go."
+
+          if (startZone?.character === 'urban') {
+            openingLine = "Let's go. Urban section first, watch for traffic."
+            // Preview first curve
+            const upcoming = getUpcoming(dist)
+            const firstCurve = upcoming.find(e => e.source === SOURCE.CURVE)
+            if (firstCurve) {
+              const name = cleanCurveForBriefing(firstCurve.text)
+              if (name) openingLine += ` First up, ${name}.`
+            }
+
+          } else if (startZone?.character === 'transit') {
+            const nextTech = (routeZones || []).find(z =>
+              z.startDistance > dist && z.character === 'technical'
+            )
+            if (nextTech) {
+              const miToTech = ((nextTech.startDistance - dist) / 1609.34).toFixed(0)
+              openingLine = `Let's go. Open road ahead. Technical in ${miToTech} miles.`
+            } else {
+              openingLine = "Let's go. Open road ahead."
+            }
+
+          } else if (startZone?.character === 'technical') {
+            openingLine = "Let's go. Technical right away."
+            // Preview first 2-3 curves
+            const upcoming = getUpcoming(dist)
+            const curves = upcoming.filter(e => e.source === SOURCE.CURVE).slice(0, 3)
+            const names = curves.map(c => cleanCurveForBriefing(c.text)).filter(Boolean)
+            if (names.length > 0) {
+              openingLine += ` First up, ${names.join(', then ')}.`
+            }
+          }
+
+          submitSpeech(openingLine, SOURCE.BRIEFING, PRIORITY[SOURCE.BRIEFING], 'launch-briefing')
+        }
+      } else {
+        // Speed dropped below 10 — reset timer
+        launchSpeedAbove10Ref.current = 0
+      }
+
+      firstPlanTickRef.current = false
+      return // Skip ALL planner steps during launch hold
+    }
+
+    // ═══════════════════════════════════════════════
+    // ROUND 10: FINISH SEQUENCE
+    // Detect approaching route end, fire finish callouts,
+    // deliver verbal recap, then auto-end navigation.
+    // ═══════════════════════════════════════════════
+    const totalRouteDist = routeData?.distance || Infinity
+    const distToEnd = totalRouteDist - dist
+    const routeProgress = (dist / totalRouteDist) * 100
+
+    if (finishPhaseRef.current === 'driving' && distToEnd < 800 && distToEnd > 0 && currentSpeed > 5) {
+      finishPhaseRef.current = 'approaching'
+      submitSpeech("Half a mile to go.", SOURCE.SYSTEM, PRIORITY[SOURCE.SYSTEM], 'finish-approaching')
+    }
+
+    if (finishPhaseRef.current === 'approaching' && (routeProgress > 99 || distToEnd < 100)) {
+      const driverWasMoving = wasMovingRecently ? wasMovingRecently() : currentSpeed > 5
+      if (driverWasMoving && finishPhaseRef.current !== 'finished') {
+        finishPhaseRef.current = 'finished'
+        submitSpeech("And that's the route.", SOURCE.SYSTEM, PRIORITY[SOURCE.SYSTEM], 'finish-line')
+
+        // Schedule recap + auto-end after 3 seconds
+        finishTimerRef.current = setTimeout(() => {
+          // Build verbal recap from drive stats
+          const stats = driveStatsRef?.current
+          let recapText = ''
+
+          if (stats && stats.technicalCurves > 0 && stats.technicalTime > 0) {
+            const techMins = Math.round(stats.technicalTime / 60000)
+            recapText = `${stats.technicalCurves} curves in ${techMins} minute${techMins !== 1 ? 's' : ''}.`
+            if (stats.technicalAvgSpeed > 0) {
+              const techAvg = Math.round(
+                stats.technicalAvgSpeed || (
+                  // Fallback: compute from samples if not yet flushed
+                  stats.speedSamples?.length > 0
+                    ? stats.speedSamples.reduce((a, b) => a + b, 0) / stats.speedSamples.length
+                    : 0
+                )
+              )
+              if (techAvg > 0) recapText += ` Averaged ${techAvg} through the technical.`
+            }
+            if (stats.fastestApex) {
+              recapText += ` Fastest apex, ${stats.fastestApex.speed} through mile ${stats.fastestApex.mile.toFixed(1)}.`
+            }
+            recapText += ' Nice drive.'
+          } else if (stats) {
+            const totalMi = (stats.totalDistance / 1609.34).toFixed(1)
+            const totalMins = Math.round(stats.driveTime / 60000)
+            recapText = `${totalMi} miles in ${totalMins} minute${totalMins !== 1 ? 's' : ''}.`
+            if (stats.topSpeed > 0) {
+              recapText += ` Top speed ${Math.round(stats.topSpeed)}.`
+            }
+            recapText += ' Smooth cruise.'
+          }
+
+          if (recapText) {
+            submitSpeech(recapText, SOURCE.SYSTEM, PRIORITY[SOURCE.SYSTEM], 'finish-recap')
+          }
+
+          // Flush drive stats to store, then auto-end navigation
+          if (flushDriveStats) flushDriveStats()
+
+          finishTimerRef.current = setTimeout(() => {
+            console.log('🏁 Auto-ending navigation after finish sequence')
+            if (onNavigationEnd) onNavigationEnd()
+          }, 5000) // 5s after recap = ~8s after finish line
+        }, 3000) // 3s after "And that's the route."
+      }
+    }
+
+    // If finish phase is 'finished', skip normal planner operations
+    if (finishPhaseRef.current === 'finished') return
 
     // ── STEP 0: Pending curve score ──
     if (pendingScoreRef.current) {
@@ -657,7 +832,19 @@ export function useSpeechPlanner({
 
         submitSpeech(speechText, SOURCE.CURVE, PRIORITY[SOURCE.CURVE], curve.id)
 
-        // ── CURVE SCORING (technical only) ──
+        // ── CURVE SCORING + DRIVE STATS ──
+        {
+          const angleMatch = (curve.text || '').match(/(\d+)°/)
+          const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
+          const dirMatch = (curve.text || '').match(/\b(left|right)\b/i)
+          const direction = dirMatch ? dirMatch[1].toUpperCase() : 'LEFT'
+
+          // Round 10: Record curve in drive stats
+          if (onCurveCallout) {
+            onCurveCallout({ angle, direction, mile: dist / 1609.34 })
+          }
+        }
+
         if (currentMode === DRIVING_MODE.TECHNICAL && curve.source === SOURCE.CURVE) {
           const angleMatch = (curve.text || '').match(/(\d+)°/)
           const angle = angleMatch ? parseFloat(angleMatch[1]) : 0
@@ -771,7 +958,8 @@ export function useSpeechPlanner({
 
   }, [isRunning, userDistanceAlongRoute, currentMode, currentSpeed,
       curatedHighwayCallouts, routeZones, routeData, findCurrentZone, getUpcoming,
-      calculateBudget, buildZoneBriefing, submitSpeech, announcedCalloutsRef])
+      calculateBudget, buildZoneBriefing, submitSpeech, announcedCalloutsRef,
+      onCurveCallout, wasMovingRecently, driveStatsRef, flushDriveStats, onNavigationEnd])
 
   // ================================
   // NAVIGATION END SUMMARY

@@ -38,6 +38,7 @@ import {
 import { useHighwayMode } from './hooks/useHighwayMode'
 import useHighwayStore from './services/highwayStore'
 import { useSpeechPlanner } from './hooks/useSpeechPlanner'
+import { useDriveStats } from './hooks/useDriveStats'
 import { getDistanceAlongRoute, buildCumulativeDistances } from './services/routeMatcher'
 
 import Map from './components/Map'
@@ -190,6 +191,26 @@ export default function App() {
 
   const currentSpeed = getDisplaySpeed()
 
+  // Round 10: Drive stats collection
+  const { driveStatsRef, recordCurveCallout, recordCalloutSpoken, flushStats, wasMovingRecently } = useDriveStats({
+    isRunning,
+    currentSpeed,
+    currentMode,
+    userDistanceAlongRoute,
+    routeZones,
+  })
+
+  // Auto-end navigation handler (called by finish sequence in speech planner)
+  const handleAutoEnd = useCallback(() => {
+    // Flush drive stats before ending (in case not already flushed)
+    flushStats()
+    if (simulatorRef.current) {
+      simulatorRef.current.stop()
+      simulatorRef.current = null
+    }
+    endTrip()
+  }, [flushStats, endTrip])
+
   // Speech planner — the single brain that decides what the driver hears
   // Replaces: curated callout useEffect, chatter useEffect, zone announcement speech
   const { plannerStats } = useSpeechPlanner({
@@ -202,6 +223,13 @@ export default function App() {
     announcedCalloutsRef: announcedCuratedCalloutsRef,
     speak,
     routeData,
+    // Round 10: Drive stats integration
+    onCurveCallout: recordCurveCallout,
+    onCalloutSpoken: recordCalloutSpoken,
+    driveStatsRef,
+    wasMovingRecently,
+    flushDriveStats: flushStats,
+    onNavigationEnd: handleAutoEnd,
   })
 
   // Reset on route/navigation change
@@ -751,12 +779,13 @@ export default function App() {
   // Handle simulation complete
   const handleSimulationComplete = useCallback(() => {
     console.log('Simulation complete - ending trip')
+    flushStats() // Round 10: Flush drive stats before ending
     if (simulatorRef.current) {
       simulatorRef.current.stop()
       simulatorRef.current = null
     }
     endTrip()
-  }, [endTrip])
+  }, [endTrip, flushStats])
 
   // Start simulation
   const handleStartSimulation = useCallback(async ({ coordinates, zones, curves }) => {

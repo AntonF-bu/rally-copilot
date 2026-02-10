@@ -18,7 +18,7 @@ const ZONE_COLORS = {
 }
 
 export default function TripSummary({ diagnosticLog }) {
-  const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats } = useStore()
+  const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats, driveStats } = useStore()
 
   // Enable iOS-style swipe-back gesture
   useSwipeBack(closeTripSummary)
@@ -386,6 +386,11 @@ export default function TripSummary({ diagnosticLog }) {
     ? Math.round((curveInsights.completed / curveInsights.total) * 100)
     : 100
 
+  // Round 10: Determine if drive was completed (>95% of route)
+  const driveCompleted = driveStats && routeData?.distance
+    ? (driveStats.totalDistance / routeData.distance) > 0.95
+    : true // Default to complete if no stats
+
   return (
     <div style={styles.container}>
       {/* Scrollable content */}
@@ -393,7 +398,7 @@ export default function TripSummary({ diagnosticLog }) {
 
         {/* Header Bar */}
         <div style={styles.headerBar}>
-          <span style={styles.driveComplete}>DRIVE COMPLETE</span>
+          <span style={styles.driveComplete}>{driveCompleted ? 'DRIVE COMPLETE' : 'DRIVE ENDED'}</span>
           <span style={styles.headerDate}>
             {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
@@ -476,6 +481,138 @@ export default function TripSummary({ diagnosticLog }) {
             }}>
               {Math.abs(performanceInsights.timeDiffMins)} min {performanceInsights.faster ? 'faster' : 'slower'} than estimate
             </p>
+          </div>
+        )}
+
+        {/* Round 10: Highway Section Stats */}
+        {driveStats && driveStats.highwayDistance > 500 && (
+          <div style={{
+            ...styles.section,
+            borderColor: 'rgba(102,179,255,0.2)',
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.05s'
+          }}>
+            <div style={styles.sectionHeader}>
+              <span style={{ ...styles.sectionOverline, color: '#66B3FF' }}>HIGHWAY</span>
+              <span style={styles.sectionMeta}>
+                {(driveStats.highwayDistance / 1609.34).toFixed(1)} mi
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#66B3FF', fontSize: '28px' }}>
+                  {Math.round(driveStats.highwayTime / 60000)}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(102,179,255,0.6)' }}>MIN</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#66B3FF', fontSize: '28px' }}>
+                  {driveStats.highwayAvgSpeed || '—'}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(102,179,255,0.6)' }}>AVG MPH</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#66B3FF', fontSize: '28px' }}>
+                  {driveStats.highwayTopSpeed || '—'}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(102,179,255,0.6)' }}>TOP MPH</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Round 10: Technical Section Stats */}
+        {driveStats && driveStats.technicalDistance > 500 && (
+          <div style={{
+            ...styles.section,
+            borderColor: 'rgba(0,230,138,0.2)',
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.1s'
+          }}>
+            <div style={styles.sectionHeader}>
+              <span style={{ ...styles.sectionOverline, color: '#00E68A' }}>TECHNICAL</span>
+              <span style={styles.sectionMeta}>
+                {(driveStats.technicalDistance / 1609.34).toFixed(1)} mi
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#00E68A', fontSize: '28px' }}>
+                  {Math.round(driveStats.technicalTime / 60000)}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(0,230,138,0.6)' }}>MIN</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#00E68A', fontSize: '28px' }}>
+                  {driveStats.technicalCurves}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(0,230,138,0.6)' }}>CURVES</span>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <span style={{ ...styles.curveNumber, color: '#00E68A', fontSize: '28px' }}>
+                  {driveStats.technicalAvgSpeed || '—'}
+                </span>
+                <span style={{ ...styles.curveLabel, color: 'rgba(0,230,138,0.6)' }}>AVG MPH</span>
+              </div>
+            </div>
+
+            {/* Fastest Apex */}
+            {driveStats.fastestApex && (
+              <div style={{
+                ...styles.sharpestRow,
+                marginTop: 0,
+                paddingTop: '12px',
+                borderTop: '1px solid rgba(0,230,138,0.15)',
+              }}>
+                <div>
+                  <span style={{ ...styles.sharpestLabel, display: 'block' }}>Fastest apex</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#555' }}>
+                    {driveStats.fastestApex.curveDirection} {driveStats.fastestApex.curveAngle}° — mile {driveStats.fastestApex.mile.toFixed(1)}
+                  </span>
+                </div>
+                <span style={{ ...styles.sharpestValue, color: '#00E68A' }}>
+                  {driveStats.fastestApex.speed}
+                  <span style={{ fontSize: '12px', color: '#555' }}> mph</span>
+                </span>
+              </div>
+            )}
+
+            {/* Hardest Curve */}
+            {driveStats.hardestCurve && (
+              <div style={styles.sharpestRow}>
+                <div>
+                  <span style={{ ...styles.sharpestLabel, display: 'block' }}>Hardest curve</span>
+                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '10px', color: '#555' }}>
+                    {driveStats.hardestCurve.direction} — mile {driveStats.hardestCurve.mile.toFixed(1)}
+                  </span>
+                </div>
+                <span style={{ ...styles.sharpestValue, color: '#00E68A' }}>
+                  {driveStats.hardestCurve.angle}°
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Round 10: Callouts Delivered */}
+        {driveStats && driveStats.calloutsDelivered > 0 && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '6px',
+            marginBottom: '16px',
+            opacity: showDetails ? 1 : 0,
+            transition: 'opacity 0.5s ease 0.15s'
+          }}>
+            <span style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: '11px',
+              color: '#555',
+            }}>
+              {driveStats.calloutsDelivered} callouts delivered
+            </span>
           </div>
         )}
 
