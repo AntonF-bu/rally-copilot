@@ -911,7 +911,7 @@ export default function App() {
   if (showTripSummary) {
     return (
       <div style={mobileContainerStyle}>
-        <TripSummary onClose={() => { clearRouteData(); goToMenu() }} />
+        <TripSummary onClose={() => { clearRouteData(); goToMenu() }} diagnosticLog={diagnosticLogRef} />
       </div>
     )
   }
