@@ -129,14 +129,16 @@ export function useGeolocation(enabled = false) {
       const { latitude, longitude, accuracy, speed: gpsSpeed, heading: gpsHeading, altitude } = position.coords
       const now = Date.now()
 
-      // Round 9B: Log GPS update rate (first 10 updates, then every 50th)
+      // Round 9C: Log GPS update rate with min/max gap
       gpsUpdateTimesRef.current.push(now)
-      if (gpsUpdateTimesRef.current.length === 10) {
+      if (gpsUpdateTimesRef.current.length >= 10) {
         const times = gpsUpdateTimesRef.current
         const gaps = []
         for (let i = 1; i < times.length; i++) gaps.push(times[i] - times[i - 1])
         const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length
-        console.log(`📡 GPS update rate: avg ${avgGap.toFixed(0)}ms between updates (${(1000 / avgGap).toFixed(1)} Hz)`)
+        const minGap = Math.min(...gaps)
+        const maxGap = Math.max(...gaps)
+        console.log(`📡 GPS: ${(1000 / avgGap).toFixed(1)}Hz avg | gaps: ${minGap}ms - ${maxGap}ms`)
         gpsUpdateTimesRef.current = []
       }
 
