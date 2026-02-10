@@ -1,3 +1,6 @@
+// ── TEST FLAG: Set to true to route simulator positions through the real GPS matcher ──
+const TEST_REAL_MATCHING = true
+
 import { useEffect, useRef, useState, useLayoutEffect, useCallback } from 'react'
 import useStore from './store'
 import { useAuth } from './hooks/useAuth'
@@ -154,6 +157,10 @@ export default function App() {
   // Round 9B: Cumulative sanity check — speed-integrated distance vs route-matched distance
   const sanityCheckRef = useRef({ lastCheckTime: 0, speedSamples: [], lastCheckDist: 0 })
 
+  // TEST_REAL_MATCHING: simulator's ground-truth distance + comparison log timer
+  const simDistRef = useRef(0)
+  const lastMatchTestLogRef = useRef(0)
+
   const [currentMode, setCurrentMode] = useState(DRIVING_MODE.HIGHWAY)
   const [userDistanceAlongRoute, setUserDistanceAlongRoute] = useState(0)
 
@@ -260,7 +267,8 @@ export default function App() {
     }
 
     // During simulation, distance is set by handleSimulatorPosition directly
-    if (isSimulating) {
+    // (unless TEST_REAL_MATCHING is on — then we fall through to the matcher)
+    if (isSimulating && !TEST_REAL_MATCHING) {
       return
     }
 
@@ -277,9 +285,12 @@ export default function App() {
     // on interpolated positions causes cumulative forward drift on curves
     // (interpolation cuts corners → projection bias → 322% bug).
     // Only process distance at most once per 900ms to catch real GPS updates only.
+    // When TEST_REAL_MATCHING: skip throttle so we see raw drift at full framerate.
     const now = Date.now()
-    const timeSinceLastCalc = now - lastDistCalcTimeRef.current
-    if (timeSinceLastCalc < 900) return
+    if (!TEST_REAL_MATCHING) {
+      const timeSinceLastCalc = now - lastDistCalcTimeRef.current
+      if (timeSinceLastCalc < 900) return
+    }
     lastDistCalcTimeRef.current = now
 
     // ── PRE-COMPUTE CUMULATIVE DISTANCES (once per route) ──
@@ -351,6 +362,21 @@ export default function App() {
     } else if (sc.lastCheckTime === 0) {
       sc.lastCheckTime = now
       sc.lastCheckDist = clampedDistance
+    }
+
+    // ── TEST_REAL_MATCHING: Compare matcher vs simulator ground truth ──
+    if (TEST_REAL_MATCHING && isSimulating) {
+      const simDist = simDistRef.current
+      const matchedDist = clampedDistance
+      if (now - lastMatchTestLogRef.current > 5000 && simDist > 0) {
+        console.log(`📐 MATCH TEST | sim says: ${(simDist / 1609.34).toFixed(2)}mi | matcher says: ${(matchedDist / 1609.34).toFixed(2)}mi | diff: ${(matchedDist - simDist).toFixed(0)}m`)
+        lastMatchTestLogRef.current = now
+      }
+      // In test mode, DON'T update userDistanceAlongRoute — simulator still drives the UI.
+      // We only observe the matcher output.
+      distanceStateRef.current.lastValidDist = clampedDistance
+      distanceStateRef.current.prevDist = clampedDistance
+      return
     }
 
     // Update distance state
@@ -677,6 +703,8 @@ export default function App() {
     // This is more accurate than recalculating from lat/lng
     if (positionData.distanceAlongRoute !== undefined) {
       const currentDist = positionData.distanceAlongRoute
+      // TEST_REAL_MATCHING: stash ground-truth for comparison logging
+      if (TEST_REAL_MATCHING) simDistRef.current = currentDist
       const prevDist = distanceStateRef.current.lastValidDist
 
       // FIX #2: Guard against distance anomalies during seeking
