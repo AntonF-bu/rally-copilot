@@ -202,6 +202,11 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     tickCount: 0,         // v2: for logging
   })
 
+  // v4: Dead-simple ref-based API throttle — immune to async races
+  const lastApiCallRef = useRef(0)
+  // v4: Prevent concurrent async ticks from overlapping
+  const tickInProgressRef = useRef(false)
+
   // v3: Sync props into stable refs so tick() doesn't depend on them
   const positionRef = useRef(position)
   const speedRef = useRef(speed)
@@ -367,97 +372,106 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     return true
   }, [])
 
-  // ── Main tick (called from App.jsx effect) ──
-  // v3: Read position/speed/speak from REFS, not closure — makes tick stable
+  // ── Main tick (called from App.jsx effect every 2s) ──
+  // v4: Dead-simple ref-based throttle + concurrency guard
   const tick = useCallback(async () => {
-    const isAct = isActiveRef.current
-    const pos = positionRef.current
-    const spd = speedRef.current
-    const spk = speakRef.current
-
-    if (!isAct || !pos) return null
-
-    const state = stateRef.current
-    const now = Date.now()
-    const hdg = reliableHeadingRef.current
-
-    state.tickCount++
-
-    // Initialize start time
-    if (!state.startTime) state.startTime = now
-
-    // Speed sample
-    if (spd > 0) {
-      state.speedSamples.push(spd)
-      if (state.speedSamples.length > 10000) state.speedSamples = state.speedSamples.slice(-5000)
-
-      const road = state.roadsVisited[state.roadName]
-      if (road) road.speedSamples.push(spd)
-    }
-
-    // Pause: don't call API when crawling
-    if (spd < MIN_SPEED_MPH) {
-      if (!state.paused) {
-        console.log(`[FreeDrive] Paused: speed ${Math.round(spd)}mph < ${MIN_SPEED_MPH}mph threshold`)
-      }
-      state.paused = true
+    // Concurrency guard — prevent overlapping async ticks
+    if (tickInProgressRef.current) {
+      console.log('[FreeDrive] Tick skipped: previous tick still in progress')
       return null
     }
-    if (state.paused) {
-      console.log(`[FreeDrive] Resumed: speed ${Math.round(spd)}mph`)
-    }
-    state.paused = false
+    tickInProgressRef.current = true
 
-    // Log every tick
-    console.log(`[FreeDrive] Tick #${state.tickCount}: speed=${Math.round(spd)}mph heading=${Math.round(hdg)}° pos=(${pos[1].toFixed(4)}, ${pos[0].toFixed(4)}) curves=${state.detectedCurves.length} announced=${state.announcedCurves.size}`)
-
-    // Check if we should make an API call
-    const timeSinceLast = now - state.lastApiCall
-    const distSinceLast = state.lastPosition ? haversine(pos, state.lastPosition) : Infinity
-    const headingChange = state.lastPosition
-      ? Math.abs(angleDiff(hdg, bearing(state.lastPosition, pos)))
-      : 0
-
-    // Skip API if nothing changed significantly
-    if (timeSinceLast < CALL_INTERVAL_MS &&
-        distSinceLast < MIN_MOVE_FOR_CALL &&
-        distSinceLast < 50 && headingChange < 15) {
-      // Still process existing curves
-      return processExistingState(pos, hdg, state, spk, now, canSpeak)
-    }
-
-    // Make API call
     try {
-      const result = await callDirectionsAPI(pos, hdg)
-      if (!result) return null
+      const isAct = isActiveRef.current
+      const pos = positionRef.current
+      const spd = speedRef.current
+      const spk = speakRef.current
 
-      const { newCurves, allCurves } = processLookahead(result, pos)
+      if (!isAct || !pos) return null
 
-      // Speech: pick ONE thing to say this tick (priority: curves > junction > road)
-      if (canSpeak(state, now)) {
-        const spoke = trySpeakCurve(state, pos, hdg, spk, now)
-        if (!spoke) {
-          const spokeJunction = trySpeakJunction(state, spk, now)
-          if (!spokeJunction) {
-            trySpeakRoadChange(state, spk, now)
+      const state = stateRef.current
+      const now = Date.now()
+      const hdg = reliableHeadingRef.current
+
+      state.tickCount++
+
+      // Initialize start time
+      if (!state.startTime) state.startTime = now
+
+      // Speed sample
+      if (spd > 0) {
+        state.speedSamples.push(spd)
+        if (state.speedSamples.length > 10000) state.speedSamples = state.speedSamples.slice(-5000)
+
+        const road = state.roadsVisited[state.roadName]
+        if (road) road.speedSamples.push(spd)
+      }
+
+      // Pause: don't call API when crawling
+      if (spd < MIN_SPEED_MPH) {
+        if (!state.paused) {
+          console.log(`[FreeDrive] Paused: speed ${Math.round(spd)}mph < ${MIN_SPEED_MPH}mph threshold`)
+        }
+        state.paused = true
+        return null
+      }
+      if (state.paused) {
+        console.log(`[FreeDrive] Resumed: speed ${Math.round(spd)}mph`)
+      }
+      state.paused = false
+
+      // Log every tick
+      console.log(`[FreeDrive] Tick #${state.tickCount}: speed=${Math.round(spd)}mph heading=${Math.round(hdg)}° pos=(${pos[1].toFixed(4)}, ${pos[0].toFixed(4)}) curves=${state.detectedCurves.length} announced=${state.announcedCurves.size}`)
+
+      // v4: DEAD-SIMPLE API THROTTLE — ref-based, set BEFORE async call
+      // This is the ONLY gate. No complex multi-condition checks.
+      const timeSinceLastApi = now - lastApiCallRef.current
+      if (timeSinceLastApi < CALL_INTERVAL_MS) {
+        console.log(`[FreeDrive] API throttled, skipping. Time since last: ${timeSinceLastApi}ms`)
+        // Still process existing curves for speech
+        return processExistingState(pos, hdg, state, spk, now, canSpeak)
+      }
+
+      // Mark throttle BEFORE the async call — prevents any concurrent tick from passing
+      lastApiCallRef.current = now
+      console.log('[FreeDrive] API calling (throttle passed)')
+
+      // Make API call
+      try {
+        const result = await callDirectionsAPI(pos, hdg)
+        if (!result) return null
+
+        const { newCurves, allCurves } = processLookahead(result, pos)
+
+        // Speech: pick ONE thing to say this tick (priority: curves > junction > road)
+        if (canSpeak(state, now)) {
+          const spoke = trySpeakCurve(state, pos, hdg, spk, now)
+          if (!spoke) {
+            const spokeJunction = trySpeakJunction(state, spk, now)
+            if (!spokeJunction) {
+              trySpeakRoadChange(state, spk, now)
+            }
           }
         }
-      }
 
-      // Cleanup passed curves
-      cleanupPassedCurves(state, pos, hdg)
+        // Cleanup passed curves
+        cleanupPassedCurves(state, pos, hdg)
 
-      return {
-        geometry: state.geometry,
-        curves: allCurves,
-        newCurves,
-        roadName: state.roadName,
-        junctionAhead: state.junctionAhead,
-        apiLatency: result.latency,
+        return {
+          geometry: state.geometry,
+          curves: allCurves,
+          newCurves,
+          roadName: state.roadName,
+          junctionAhead: state.junctionAhead,
+          apiLatency: result.latency,
+        }
+      } catch (err) {
+        console.error('[FreeDrive] API error:', err)
+        return null
       }
-    } catch (err) {
-      console.error('[FreeDrive] API error:', err)
-      return null
+    } finally {
+      tickInProgressRef.current = false
     }
   }, [callDirectionsAPI, processLookahead, canSpeak]) // v3: NO position/speed/speak deps
 
@@ -518,6 +532,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       tickCount: 0,
     }
     reliableHeadingRef.current = 0
+    lastApiCallRef.current = 0
+    tickInProgressRef.current = false
   }, [])
 
   // ── Get trip stats for summary ──

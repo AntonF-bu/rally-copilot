@@ -457,6 +457,8 @@ const useStore = create(
       setPosition: (position) => set({ position }),
       setHeading: (heading) => set({ heading }),
       setSpeed: (speed) => set({ speed }),
+      // v4: Batch GPS update — single store mutation, single re-render
+      setGps: (position, heading, speed) => set({ position, heading, speed }),
       setAltitude: (altitude) => set({ altitude }),
       setGpsAccuracy: (gpsAccuracy) => set({ gpsAccuracy }),
       

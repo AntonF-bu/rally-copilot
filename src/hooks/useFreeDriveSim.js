@@ -27,6 +27,7 @@ export function useFreeDriveSim(enabled) {
     setPosition,
     setHeading,
     setSpeed,
+    setGps,
     setIsSimulating,
   } = useStore()
 
@@ -123,16 +124,15 @@ export function useFreeDriveSim(enabled) {
     const posData = getPositionAtDistance(distAlongRef.current)
     if (!posData) return
 
-    setPosition(posData.position)
-    setHeading(posData.heading)
-    setSpeed(speedMphRef.current)
+    // v4: Single store mutation → single re-render (was 3 separate calls)
+    setGps(posData.position, posData.heading, speedMphRef.current)
 
     // Log every 5th tick to avoid flooding
     if (Math.round(distAlongRef.current) % 100 < 20) {
       const pct = ((distAlongRef.current / segmentsRef.current.totalLength) * 100).toFixed(1)
       console.log(`[FreeDrive] 🎮 Sim: ${pct}% | ${speedMphRef.current}mph | pos=(${posData.position[1].toFixed(4)}, ${posData.position[0].toFixed(4)}) | hdg=${Math.round(posData.heading)}°`)
     }
-  }, [getPositionAtDistance, setPosition, setHeading, setSpeed])
+  }, [getPositionAtDistance, setGps])
 
   // ── Initialize on enable ──
   useEffect(() => {
