@@ -297,11 +297,50 @@ export default function App() {
 
       // Initialize distance tracker for this navigation session
       if (!distanceStateRef.current.initialized) {
+        // Re-snap: grab current GPS position and snap to nearest route point
+        // Handles case where loading took 30-60s and driver moved
+        let initialDist = 0
+        const currentPos = useStore.getState().position
+        const coords = routeData?.coordinates
+        if (currentPos && coords?.length > 1 && !isSimulating) {
+          const cumDist = cumulativeDistancesRef.current || buildCumulativeDistances(coords)
+          if (!cumulativeDistancesRef.current) {
+            cumulativeDistancesRef.current = cumDist
+            const routeKey = `${coords.length}-${coords[0]?.[0]}-${coords[0]?.[1]}`
+            routeCoordsKeyRef.current = routeKey
+          }
+          const { distance: snappedDist, distFromRoute } = getDistanceAlongRoute(
+            coords, cumDist, currentPos[0], currentPos[1], 0, 0
+          )
+          initialDist = snappedDist
+          console.log(`🔒 [startup] Re-snapped to mile ${(snappedDist / 1609.34).toFixed(2)} (${distFromRoute.toFixed(0)}m from route)`)
+          if (distFromRoute > 200) {
+            console.warn(`⚠️ [startup] Re-snap is ${distFromRoute.toFixed(0)}m from route — GPS may be inaccurate`)
+          }
+
+          // Mark callouts before snap point as already announced
+          const callouts = useStore.getState().curatedHighwayCallouts || []
+          let skipped = 0
+          callouts.forEach(c => {
+            const trigDist = c.triggerDistance > 0 ? c.triggerDistance : (c.triggerMile * 1609.34)
+            if (trigDist < initialDist) {
+              announcedCuratedCalloutsRef.current.add(c.id || `${c.triggerMile}`)
+              skipped++
+            }
+          })
+          if (skipped > 0) {
+            console.log(`🔒 [startup] Skipped ${skipped} callouts before re-snap point`)
+          }
+        }
+
         distanceStateRef.current = {
-          prevDist: 0,
+          prevDist: initialDist,
           initialized: true,
           navigationId: Date.now(),
-          lastValidDist: 0,
+          lastValidDist: initialDist,
+        }
+        if (initialDist > 0) {
+          setUserDistanceAlongRoute(initialDist)
         }
         console.log('🚀 Navigation distance tracker initialized, sessionId:', distanceStateRef.current.navigationId)
       }

@@ -81,7 +81,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
           `${route.end.lng},${route.end.lat}`,
         ].join(';')
 
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
         const response = await fetch(url)
         const data = await response.json()
 
@@ -243,7 +243,7 @@ export function RouteDetailView({ route, onClose, onStartDrive }) {
             `${route.end.lng},${route.end.lat}`,
           ].join(';')
 
-          const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
+          const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
           const response = await fetch(url)
           const data = await response.json()
 
