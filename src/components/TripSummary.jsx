@@ -18,7 +18,7 @@ const ZONE_COLORS = {
 }
 
 export default function TripSummary({ diagnosticLog }) {
-  const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats, driveStats } = useStore()
+  const { getTripSummary, closeTripSummary, goToMenu, routeData, routeZones, user, tripStats, driveStats, freeDriveTripStats, driveMode } = useStore()
 
   // Enable iOS-style swipe-back gesture
   useSwipeBack(closeTripSummary)
@@ -387,9 +387,12 @@ export default function TripSummary({ diagnosticLog }) {
     : 100
 
   // Round 10: Determine if drive was completed (>95% of route)
-  const driveCompleted = driveStats && routeData?.distance
-    ? (driveStats.totalDistance / routeData.distance) > 0.95
-    : true // Default to complete if no stats
+  const isFreeDriveMode = driveMode === 'free' || !!freeDriveTripStats
+  const driveCompleted = isFreeDriveMode
+    ? true  // Free drive is always "complete" (no destination)
+    : (driveStats && routeData?.distance
+      ? (driveStats.totalDistance / routeData.distance) > 0.95
+      : true)
 
   return (
     <div style={styles.container}>
@@ -484,8 +487,68 @@ export default function TripSummary({ diagnosticLog }) {
           </div>
         )}
 
+        {/* Free Drive Stats */}
+        {isFreeDriveMode && freeDriveTripStats && (
+          <div style={{
+            ...styles.section,
+            borderColor: 'rgba(232,98,44,0.2)',
+            opacity: showDetails ? 1 : 0,
+            transform: showDetails ? 'translateY(0)' : 'translateY(16px)',
+            transition: 'all 0.5s ease 0.05s'
+          }}>
+            <div style={{ ...styles.sectionHeader, borderBottomColor: 'rgba(232,98,44,0.15)' }}>
+              <span style={{ ...styles.sectionTitle, color: '#E8622C' }}>FREE DRIVE</span>
+            </div>
+            <div style={styles.statGrid}>
+              <div style={styles.statCell}>
+                <div style={{ ...styles.statValue, color: '#E8622C' }}>
+                  {freeDriveTripStats.totalDistanceMiles.toFixed(1)} mi
+                </div>
+                <div style={styles.statLabel}>DISTANCE</div>
+              </div>
+              <div style={styles.statCell}>
+                <div style={{ ...styles.statValue, color: '#E8622C' }}>
+                  {Math.round(freeDriveTripStats.driveTime / 60000)}
+                </div>
+                <div style={styles.statLabel}>MIN</div>
+              </div>
+              <div style={styles.statCell}>
+                <div style={{ ...styles.statValue, color: '#E8622C' }}>
+                  {freeDriveTripStats.avgSpeed}
+                </div>
+                <div style={styles.statLabel}>AVG MPH</div>
+              </div>
+              <div style={styles.statCell}>
+                <div style={{ ...styles.statValue, color: '#E8622C' }}>
+                  {freeDriveTripStats.topSpeed}
+                </div>
+                <div style={styles.statLabel}>TOP MPH</div>
+              </div>
+            </div>
+
+            {/* Curves called */}
+            <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+              <span style={{ fontSize: '12px', color: '#888', fontFamily: "'JetBrains Mono', monospace" }}>
+                {freeDriveTripStats.totalCurvesCalled} curves called
+              </span>
+            </div>
+
+            {/* Roads visited */}
+            {freeDriveTripStats.roadsVisited?.length > 0 && (
+              <div style={{ padding: '8px 16px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px', letterSpacing: '0.5px' }}>ROADS</div>
+                {freeDriveTripStats.roadsVisited.filter(r => r.name).map((road, i) => (
+                  <div key={i} style={{ fontSize: '12px', color: '#aaa', padding: '2px 0', fontFamily: "'JetBrains Mono', monospace" }}>
+                    {road.name} — {road.curves} curve{road.curves !== 1 ? 's' : ''}, avg {road.avgSpeed}mph
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Round 10: Highway Section Stats */}
-        {driveStats && driveStats.highwayDistance > 500 && (
+        {!isFreeDriveMode && driveStats && driveStats.highwayDistance > 500 && (
           <div style={{
             ...styles.section,
             borderColor: 'rgba(102,179,255,0.2)',
@@ -523,7 +586,7 @@ export default function TripSummary({ diagnosticLog }) {
         )}
 
         {/* Round 10: Technical Section Stats */}
-        {driveStats && driveStats.technicalDistance > 500 && (
+        {!isFreeDriveMode && driveStats && driveStats.technicalDistance > 500 && (
           <div style={{
             ...styles.section,
             borderColor: 'rgba(0,230,138,0.2)',
@@ -597,7 +660,7 @@ export default function TripSummary({ diagnosticLog }) {
         )}
 
         {/* Round 10: Callouts Delivered */}
-        {driveStats && driveStats.calloutsDelivered > 0 && (
+        {!isFreeDriveMode && driveStats && driveStats.calloutsDelivered > 0 && (
           <div style={{
             display: 'flex',
             justifyContent: 'center',
@@ -617,7 +680,7 @@ export default function TripSummary({ diagnosticLog }) {
         )}
 
         {/* Road Breakdown */}
-        {zoneInsights && zoneInsights.total > 0 && (
+        {!isFreeDriveMode && zoneInsights && zoneInsights.total > 0 && (
           <div style={{
             ...styles.section,
             opacity: showDetails ? 1 : 0,
@@ -656,7 +719,7 @@ export default function TripSummary({ diagnosticLog }) {
         )}
 
         {/* Curves Tackled */}
-        {curveInsights && curveInsights.total > 0 && (
+        {!isFreeDriveMode && curveInsights && curveInsights.total > 0 && (
           <div style={{
             ...styles.section,
             opacity: showDetails ? 1 : 0,

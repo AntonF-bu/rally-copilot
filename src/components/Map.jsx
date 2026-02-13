@@ -24,7 +24,7 @@ const ZONE_COLORS = {
   urban: '#FF668C',
 }
 
-export default function Map() {
+export default function Map({ freeDriveGeometry } = {}) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const userMarker = useRef(null)
@@ -304,6 +304,40 @@ export default function Map() {
       addCalloutMarkers()
     }
   }, [curatedHighwayCallouts, mapLoaded, addCalloutMarkers])
+
+  // Free Drive: draw lookahead line
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+    const m = map.current
+
+    if (freeDriveGeometry && freeDriveGeometry.length >= 2) {
+      const geojson = {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: freeDriveGeometry }
+      }
+
+      if (m.getSource('freedrive-lookahead')) {
+        m.getSource('freedrive-lookahead').setData(geojson)
+      } else {
+        m.addSource('freedrive-lookahead', { type: 'geojson', data: geojson })
+        m.addLayer({
+          id: 'freedrive-lookahead',
+          type: 'line',
+          source: 'freedrive-lookahead',
+          paint: {
+            'line-color': 'rgba(255, 255, 255, 0.35)',
+            'line-width': 3,
+            'line-dasharray': [2, 3],
+          }
+        })
+      }
+    } else if (m.getSource('freedrive-lookahead')) {
+      m.getSource('freedrive-lookahead').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: [] }
+      })
+    }
+  }, [mapLoaded, freeDriveGeometry])
 
   // Create user marker
   useEffect(() => {
