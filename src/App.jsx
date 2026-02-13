@@ -229,6 +229,11 @@ export default function App() {
     speak,
   })
   const freeDriveStateRef = useRef(null)
+  const freeDriveTickRef = useRef(null) // v3: stable ref for tick function
+  const freeDriveOpeningDoneRef = useRef(false) // v3: prevent repeated opening lines
+
+  // Keep tick ref up to date (doesn't cause re-renders or effect re-runs)
+  useEffect(() => { freeDriveTickRef.current = freeDrive.tick }, [freeDrive.tick])
 
   // ── FREE DRIVE SIMULATOR (?freedrive&sim) ──
   const freeDriveSim = useFreeDriveSim(FREE_DRIVE_SIM && isFreeDrive && isRunning)
@@ -247,32 +252,43 @@ export default function App() {
     console.log('🎮 Free Drive Sim: auto-started via URL params')
   }, [])
 
-  // Free drive tick loop: run every 2 seconds, hook decides when to call API
+  // v3: Free drive tick loop — stable interval, reads tick from ref
+  // Only restarts when isRunning or isFreeDrive change (not on every render)
   useEffect(() => {
-    if (!isRunning || !isFreeDrive) return
+    if (!isRunning || !isFreeDrive) {
+      freeDriveOpeningDoneRef.current = false
+      return
+    }
     let mounted = true
 
     const interval = setInterval(async () => {
-      if (!mounted) return
-      const result = await freeDrive.tick()
+      if (!mounted || !freeDriveTickRef.current) return
+      const result = await freeDriveTickRef.current()
       if (result) {
         freeDriveStateRef.current = result
       }
     }, 2000)
 
-    // Opening line
-    const openTimer = setTimeout(() => {
-      if (mounted && currentSpeed > 5) {
-        speak('Free drive. Calling curves as they come.', 'normal')
-      }
-    }, 4000)
-
     return () => {
       mounted = false
       clearInterval(interval)
-      clearTimeout(openTimer)
     }
-  }, [isRunning, isFreeDrive, freeDrive, speak, currentSpeed, userDistanceAlongRoute])
+  }, [isRunning, isFreeDrive])
+
+  // v3: Opening line — fires once per free drive session, separate from tick loop
+  useEffect(() => {
+    if (!isRunning || !isFreeDrive || freeDriveOpeningDoneRef.current) return
+
+    const openTimer = setTimeout(() => {
+      const spd = useStore.getState().speed || 0
+      if (spd > 5) {
+        speak('Free drive. Calling curves as they come.', 'normal')
+      }
+      freeDriveOpeningDoneRef.current = true
+    }, 4000)
+
+    return () => clearTimeout(openTimer)
+  }, [isRunning, isFreeDrive, speak])
 
   // Free drive stop handler
   const handleStopFreeDrive = useCallback(() => {

@@ -202,6 +202,17 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     tickCount: 0,         // v2: for logging
   })
 
+  // v3: Sync props into stable refs so tick() doesn't depend on them
+  const positionRef = useRef(position)
+  const speedRef = useRef(speed)
+  const speakRef = useRef(speak)
+  const isActiveRef = useRef(isActive)
+
+  useEffect(() => { positionRef.current = position }, [position])
+  useEffect(() => { speedRef.current = speed }, [speed])
+  useEffect(() => { speakRef.current = speak }, [speak])
+  useEffect(() => { isActiveRef.current = isActive }, [isActive])
+
   // Reliable heading ref (hold last good heading when speed drops)
   const reliableHeadingRef = useRef(0)
 
@@ -289,7 +300,26 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       : curves
 
     // Update curves: keep announced set stable, add new ones
-    const newCurves = safeCurves.filter(c => !state.announcedCurves.has(c.id))
+    // v3: Proximity-based dedup — same physical curve gets slightly different
+    // GPS coords between API calls, generating different IDs. Check if a "new"
+    // curve is within 50m of an announced curve with same direction.
+    const isAlreadyAnnounced = (curve) => {
+      if (state.announcedCurves.has(curve.id)) return true
+      // Check proximity to any announced curve
+      for (const announcedId of state.announcedCurves) {
+        const announced = state.detectedCurves.find(c => c.id === announcedId)
+        if (!announced) continue
+        if (announced.direction !== curve.direction) continue
+        const dist = haversine(announced.position, curve.position)
+        if (dist < 50) {
+          // Same physical curve — add this ID to announced set too
+          state.announcedCurves.add(curve.id)
+          return true
+        }
+      }
+      return false
+    }
+    const newCurves = safeCurves.filter(c => !isAlreadyAnnounced(c))
     state.detectedCurves = safeCurves
 
     // Extract road info
@@ -338,12 +368,17 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
   }, [])
 
   // ── Main tick (called from App.jsx effect) ──
+  // v3: Read position/speed/speak from REFS, not closure — makes tick stable
   const tick = useCallback(async () => {
-    if (!isActive || !position) return null
+    const isAct = isActiveRef.current
+    const pos = positionRef.current
+    const spd = speedRef.current
+    const spk = speakRef.current
+
+    if (!isAct || !pos) return null
 
     const state = stateRef.current
     const now = Date.now()
-    const pos = position
     const hdg = reliableHeadingRef.current
 
     state.tickCount++
@@ -352,29 +387,29 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     if (!state.startTime) state.startTime = now
 
     // Speed sample
-    if (speed > 0) {
-      state.speedSamples.push(speed)
+    if (spd > 0) {
+      state.speedSamples.push(spd)
       if (state.speedSamples.length > 10000) state.speedSamples = state.speedSamples.slice(-5000)
 
       const road = state.roadsVisited[state.roadName]
-      if (road) road.speedSamples.push(speed)
+      if (road) road.speedSamples.push(spd)
     }
 
     // Pause: don't call API when crawling
-    if (speed < MIN_SPEED_MPH) {
+    if (spd < MIN_SPEED_MPH) {
       if (!state.paused) {
-        console.log(`[FreeDrive] Paused: speed ${Math.round(speed)}mph < ${MIN_SPEED_MPH}mph threshold`)
+        console.log(`[FreeDrive] Paused: speed ${Math.round(spd)}mph < ${MIN_SPEED_MPH}mph threshold`)
       }
       state.paused = true
       return null
     }
     if (state.paused) {
-      console.log(`[FreeDrive] Resumed: speed ${Math.round(speed)}mph`)
+      console.log(`[FreeDrive] Resumed: speed ${Math.round(spd)}mph`)
     }
     state.paused = false
 
     // Log every tick
-    console.log(`[FreeDrive] Tick #${state.tickCount}: speed=${Math.round(speed)}mph heading=${Math.round(hdg)}° pos=(${pos[1].toFixed(4)}, ${pos[0].toFixed(4)}) curves=${state.detectedCurves.length} announced=${state.announcedCurves.size}`)
+    console.log(`[FreeDrive] Tick #${state.tickCount}: speed=${Math.round(spd)}mph heading=${Math.round(hdg)}° pos=(${pos[1].toFixed(4)}, ${pos[0].toFixed(4)}) curves=${state.detectedCurves.length} announced=${state.announcedCurves.size}`)
 
     // Check if we should make an API call
     const timeSinceLast = now - state.lastApiCall
@@ -388,7 +423,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
         distSinceLast < MIN_MOVE_FOR_CALL &&
         distSinceLast < 50 && headingChange < 15) {
       // Still process existing curves
-      return processExistingState(pos, hdg, state, speak, now, canSpeak)
+      return processExistingState(pos, hdg, state, spk, now, canSpeak)
     }
 
     // Make API call
@@ -400,11 +435,11 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
 
       // Speech: pick ONE thing to say this tick (priority: curves > junction > road)
       if (canSpeak(state, now)) {
-        const spoke = trySpeakCurve(state, pos, hdg, speak, now)
+        const spoke = trySpeakCurve(state, pos, hdg, spk, now)
         if (!spoke) {
-          const spokeJunction = trySpeakJunction(state, speak, now)
+          const spokeJunction = trySpeakJunction(state, spk, now)
           if (!spokeJunction) {
-            trySpeakRoadChange(state, speak, now)
+            trySpeakRoadChange(state, spk, now)
           }
         }
       }
@@ -424,7 +459,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       console.error('[FreeDrive] API error:', err)
       return null
     }
-  }, [isActive, position, speed, callDirectionsAPI, processLookahead, speak, canSpeak])
+  }, [callDirectionsAPI, processLookahead, canSpeak]) // v3: NO position/speed/speak deps
 
   // ── Get current state (for HUD) ──
   const getState = useCallback(() => {
