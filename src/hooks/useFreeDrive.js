@@ -86,8 +86,33 @@ function degreeToRallyText(angle, direction) {
 
 // ── Curve detection on geometry ──
 
-function detectCurvesOnGeometry(coords) {
+// Minimum angle threshold for Free Drive callouts.
+// Route Mode uses: technical=12°, transit=20°, urban=70°.
+// Free Drive doesn't know zone type, so use 25° — catches real curves,
+// ignores gentle bends that require zero driver effort.
+const MIN_CURVE_ANGLE = 25
+
+// Distance threshold for filtering intersection maneuvers (meters)
+const INTERSECTION_FILTER_DIST = 50
+
+function detectCurvesOnGeometry(coords, steps) {
   if (coords.length < 3) return []
+
+  // Build maneuver locations from steps for intersection filtering (Issue 2)
+  const maneuverPoints = []
+  if (steps?.length) {
+    for (const step of steps) {
+      const m = step.maneuver
+      if (!m?.location) continue
+      const type = m.type
+      // These maneuver types indicate intersections, not road curves
+      if (type === 'turn' || type === 'fork' || type === 'end of road' ||
+          type === 'roundabout' || type === 'rotary' || type === 'merge' ||
+          type === 'on ramp' || type === 'off ramp') {
+        maneuverPoints.push({ location: m.location, type, instruction: m.instruction || '' })
+      }
+    }
+  }
 
   const raw = []
   let dist = 0
@@ -98,7 +123,7 @@ function detectCurvesOnGeometry(coords) {
     const b2 = bearing(coords[i], coords[i + 1])
     const turn = angleDiff(b1, b2)
 
-    if (Math.abs(turn) >= 15) {
+    if (Math.abs(turn) >= 10) {  // Low threshold for raw detection; final filter after merge
       raw.push({
         index: i,
         distance: dist,
@@ -127,8 +152,9 @@ function detectCurvesOnGeometry(coords) {
   }
 
   // Build curve objects with stable IDs
-  return merged
-    .filter(c => Math.abs(c.angle) >= 15) // re-filter after merge
+  // Issue 3: Use MIN_CURVE_ANGLE (25°) as final threshold
+  const curves = merged
+    .filter(c => Math.abs(c.angle) >= MIN_CURVE_ANGLE)
     .map(c => {
       const direction = c.angle > 0 ? 'Right' : 'Left'
       const absAngle = Math.round(Math.abs(c.angle))
@@ -149,6 +175,29 @@ function detectCurvesOnGeometry(coords) {
         severity: absAngle >= 120 ? 'critical' : absAngle >= 80 ? 'high' : absAngle >= 40 ? 'medium' : 'low',
       }
     })
+
+  // Issue 2: Filter out curves near intersection maneuvers
+  // The Directions API routes through intersections, creating sharp angles
+  // at turn points. Cross-reference with step maneuvers to remove these.
+  if (maneuverPoints.length > 0) {
+    const beforeCount = curves.length
+    const filtered = curves.filter(curve => {
+      for (const mp of maneuverPoints) {
+        const dist = haversine(curve.position, mp.location)
+        if (dist < INTERSECTION_FILTER_DIST) {
+          console.log(`[FreeDrive] Filtered intersection curve: ${curve.direction[0]}${curve.angle}° at ${Math.round(curve.distanceFromDriver)}m (near ${mp.type} maneuver)`)
+          return false
+        }
+      }
+      return true
+    })
+    if (beforeCount !== filtered.length) {
+      console.log(`[FreeDrive] Intersection filter: ${beforeCount} → ${filtered.length} curves (${beforeCount - filtered.length} removed)`)
+    }
+    return filtered
+  }
+
+  return curves
 }
 
 // ── Junction detection from Directions API steps ──
@@ -281,34 +330,11 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     // Store geometry for map display
     state.geometry = coords
 
-    // Detect curves
-    const curves = detectCurvesOnGeometry(coords)
-
-    // Detect junction
-    let junctionDist = 0
-    const junction = detectJunctions(steps)
-    if (junction) {
-      let cumDist = 0
-      for (const step of steps) {
-        if (step.maneuver?.type === junction.type) {
-          junctionDist = cumDist
-          break
-        }
-        cumDist += step.distance || 0
-      }
-      state.junctionAhead = { ...junction, distanceFromDriver: junctionDist }
-      if (!state.junctionAnnounced) {
-        console.log(`[FreeDrive] Junction detected: ${junction.type} in ${Math.round(junctionDist)}m`)
-      }
-    } else {
-      state.junctionAhead = null
-      state.junctionAnnounced = false
-    }
-
-    // Filter out curves beyond junction
-    const safeCurves = junction && junctionDist > 0
-      ? curves.filter(c => c.distanceFromDriver < junctionDist)
-      : curves
+    // Issue 1: Scan ENTIRE geometry for curves — don't stop at junctions.
+    // The Directions API already follows the most likely road through
+    // intersections, so geometry beyond a fork is still valid road ahead.
+    // Issue 2: Pass steps so intersection maneuvers can be filtered out.
+    const curves = detectCurvesOnGeometry(coords, steps)
 
     // Update curves: keep announced set stable, add new ones
     // v3: Proximity-based dedup — same physical curve gets slightly different
@@ -330,8 +356,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       }
       return false
     }
-    const newCurves = safeCurves.filter(c => !isAlreadyAnnounced(c))
-    state.detectedCurves = safeCurves
+    const newCurves = curves.filter(c => !isAlreadyAnnounced(c))
+    state.detectedCurves = curves
 
     // Extract road info
     const roadInfo = extractRoadInfo(steps)
@@ -355,14 +381,16 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     state.lastApiCall = Date.now()
 
     // Log curve detection results
-    if (safeCurves.length > 0) {
-      const curveIds = safeCurves.slice(0, 4).map(c => `${c.direction[0]}${c.angle}°@${Math.round(c.distanceFromDriver)}m`).join(', ')
-      console.log(`[FreeDrive] Curves detected: ${safeCurves.length} total | ${newCurves.length} new | ${curveIds}`)
+    if (curves.length > 0) {
+      const curveList = curves.slice(0, 4).map(c => `${c.direction[0]}${c.angle}°@${Math.round(c.distanceFromDriver)}m`).join(', ')
+      console.log(`[FreeDrive] Curves detected: ${curves.length} total | ${newCurves.length} new | ${curveList}`)
+    } else {
+      console.log(`[FreeDrive] No curves detected in ${coords.length} geometry points`)
     }
 
     console.log(`[FreeDrive] 🗺️ Geometry updated: ${coords.length} pts for map`)
 
-    return { newCurves, allCurves: safeCurves }
+    return { newCurves, allCurves: curves }
   }, [])
 
   // ── Check if speech is allowed (global cooldown + startup grace) ──
