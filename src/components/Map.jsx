@@ -24,14 +24,14 @@ const ZONE_COLORS = {
   urban: '#FF668C',
 }
 
-export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
+export default function Map({ freeDriveGeometry } = {}) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const calloutMarkers = useRef([])
-  const fdMarkers = useRef([]) // Free Drive curve markers
+  // Free Drive curve markers now handled by curatedHighwayCallouts (same as Route Mode)
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
@@ -374,53 +374,8 @@ export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
     }
   }, [mapLoaded, freeDriveGeometry])
 
-  // Free Drive: curve markers using same createCalloutMarkerElement as Route Mode
-  useEffect(() => {
-    if (!map.current || !mapLoaded) return
-
-    // Clear old FD markers
-    fdMarkers.current.forEach(m => m.remove())
-    fdMarkers.current = []
-
-    if (!freeDriveCurves?.length) return
-
-    // Rally grade conversion (same thresholds as useSpeech.js cleanForSpeech)
-    const rallyGrade = (angle) => {
-      if (angle >= 180) return 'H'
-      if (angle >= 120) return '1'
-      if (angle >= 80) return '2'
-      if (angle >= 60) return '3'
-      if (angle >= 40) return '4'
-      if (angle >= 20) return '5'
-      return '6'
-    }
-
-    // Show max 5 nearest curves
-    const toShow = freeDriveCurves
-      .filter(c => c.distanceFromDriver > 0)
-      .sort((a, b) => a.distanceFromDriver - b.distanceFromDriver)
-      .slice(0, 5)
-
-    toShow.forEach(curve => {
-      if (!curve.position) return
-      // Build callout with rally grade label (e.g. "Right 2" not "Right 90°")
-      const grade = rallyGrade(curve.angle)
-      const dir = curve.direction === 'Left' ? 'Left' : 'Right'
-      const calloutObj = {
-        text: `${dir} ${grade}`,
-        position: curve.position,
-        zone: 'technical',
-        type: 'curve',
-      }
-      const el = createCalloutMarkerElement(calloutObj)
-      if (!el) return
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(curve.position)
-        .addTo(map.current)
-      fdMarkers.current.push(marker)
-    })
-  }, [mapLoaded, freeDriveCurves])
+  // Free Drive curve markers are now handled by curatedHighwayCallouts
+  // (same as Route Mode) — see addCalloutMarkers effect above
 
   // Create user marker
   useEffect(() => {
