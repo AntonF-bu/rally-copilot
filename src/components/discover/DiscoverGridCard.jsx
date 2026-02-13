@@ -60,7 +60,7 @@ export function DiscoverGridCard({ route, isSaved, onSelect, stats }) {
         ].join(';')
 
         // Use geojson format so we can simplify the coordinates
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`
         const response = await fetch(url)
         const data = await response.json()
 

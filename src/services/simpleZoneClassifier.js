@@ -62,11 +62,13 @@ export async function classifyZones(roadSegments, totalMiles, coordinates, total
   
   if (coordinates?.length > 0 && totalDistanceMeters > 0) {
     try {
-      console.log('\n🏙️ Detecting urban sections...')
+      // Scale sampling density for short routes — 0.25mi for <10mi, 0.5mi for <20mi, 1mi otherwise
+      const sampleInterval = totalMiles < 10 ? 0.25 : totalMiles < 20 ? 0.5 : 1
+      console.log(`\n🏙️ Detecting urban sections... (sampling every ${sampleInterval}mi for ${totalMiles.toFixed(1)}mi route)`)
       const urbanSections = await detectUrbanSections(
         coordinates,
         totalDistanceMeters,
-        1  // Sample every 1 mile
+        sampleInterval
       )
       
       // Apply urban overlay (only changes TECHNICAL → URBAN, never TRANSIT)

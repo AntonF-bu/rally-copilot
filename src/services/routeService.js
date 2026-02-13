@@ -41,7 +41,7 @@ export async function getRoute(start, end) {
     const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`
     // ADDED: steps=true to get road refs
     const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
+      `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
     )
     const data = await response.json()
     
@@ -72,7 +72,7 @@ export async function getRouteWithWaypoints(waypoints) {
     const coords = waypoints.map(w => `${w[0]},${w[1]}`).join(';')
     // ADDED: steps=true to get road refs
     const response = await fetch(
-      `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
+      `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
     )
     const data = await response.json()
     
