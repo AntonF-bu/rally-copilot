@@ -366,6 +366,12 @@ export default function App() {
       fdLastPosRef.current = null
       return
     }
+
+    // Pre-lock route for speech planner — Free Drive has no route matching,
+    // so the lock would never engage. Without this, the planner's launch
+    // sequence blocks ALL speech forever.
+    routeLockRef.current = { locked: true, startTime: Date.now(), consecutiveGoodUpdates: 3, lastMatchedDist: 0 }
+
     let mounted = true
 
     const interval = setInterval(async () => {
@@ -384,17 +390,14 @@ export default function App() {
     }
   }, [isRunning, isFreeDrive, analyzeFreeDriveGeometry])
 
-  // v5: Opening line — briefing voice profile, short and clean
+  // v5: Opening line — fires on first movement (ensures audio was unlocked by play click)
   useEffect(() => {
     if (!isRunning || !isFreeDrive || freeDriveOpeningDoneRef.current) return
+    if (currentSpeed < 5) return // Wait until moving — play button click initializes audio
 
-    const openTimer = setTimeout(() => {
-      speak('Free drive mode. Let\'s go.', 'normal', { voiceProfile: 'briefing' })
-      freeDriveOpeningDoneRef.current = true
-    }, 3000)
-
-    return () => clearTimeout(openTimer)
-  }, [isRunning, isFreeDrive, speak])
+    speak('Free drive mode. Let\'s go.', 'normal', { voiceProfile: 'briefing' })
+    freeDriveOpeningDoneRef.current = true
+  }, [isRunning, isFreeDrive, speak, currentSpeed])
 
   // Free drive stop handler
   const handleStopFreeDrive = useCallback(() => {
@@ -443,6 +446,7 @@ export default function App() {
     flushDriveStats: flushStats,
     onNavigationEnd: handleAutoEnd,
     routeLockedRef: routeLockRef,
+    skipLaunchSequence: isFreeDrive,
   })
 
   // Reset on route/navigation change

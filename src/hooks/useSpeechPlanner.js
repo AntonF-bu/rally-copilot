@@ -80,6 +80,8 @@ export function useSpeechPlanner({
   flushDriveStats,
   onNavigationEnd,
   routeLockedRef,
+  // Free Drive: skip launch sequence (opening line handled externally)
+  skipLaunchSequence = false,
 }) {
   // ================================
   // INTERNAL STATE
@@ -472,6 +474,12 @@ export function useSpeechPlanner({
     // then fire opening briefing and resume normal operation.
     // ═══════════════════════════════════════════════
     if (!launchCompleteRef.current) {
+      // Free Drive: skip launch hold entirely (opening line handled externally)
+      if (skipLaunchSequence) {
+        launchCompleteRef.current = true
+        console.log('🚀 Launch sequence skipped (Free Drive mode)')
+        // Fall through to normal planner — don't return
+      } else {
       // Route lock gate: don't fire opening briefing until matcher has locked onto the route
       const routeLocked = routeLockedRef ? routeLockedRef.current.locked : true
 
@@ -535,6 +543,7 @@ export function useSpeechPlanner({
 
       firstPlanTickRef.current = false
       return // Skip ALL planner steps during launch hold
+      }
     }
 
     // ═══════════════════════════════════════════════
