@@ -32,6 +32,7 @@ const useStore = create(
       
       routeData: null,
       routeMode: null,
+      driveMode: 'route', // 'route' | 'free'
       destination: null,
       
       // Multi-stop trip planning
@@ -299,10 +300,12 @@ const useStore = create(
           showRouteEditor: false,
           isRunning: false,
           isSimulating: false,
+          driveMode: 'route',
           simulationProgress: 0,
           activeCurve: null,
           upcomingCurves: [],
-          lastAnnouncedCurveId: null
+          lastAnnouncedCurveId: null,
+          freeDriveTripStats: null,
         })
       },
       
@@ -327,6 +330,7 @@ const useStore = create(
           showTripSummary: false,
           showRouteEditor: false,
           isRunning: true,
+          driveMode: 'route',
           simulationProgress: 0,
           lastAnnouncedCurveId: null,
           driveStats: null,
@@ -343,6 +347,37 @@ const useStore = create(
         })
       },
       
+      goToFreeDrive: () => {
+        set({
+          showRouteSelector: false,
+          showRoutePreview: false,
+          showTripSummary: false,
+          showRouteEditor: false,
+          isRunning: true,
+          isSimulating: false,
+          driveMode: 'free',
+          routeData: null,
+          curatedHighwayCallouts: [],
+          routeZones: [],
+          driveStats: null,
+          simulationProgress: 0,
+          lastAnnouncedCurveId: null,
+          tripStats: {
+            startTime: Date.now(),
+            endTime: null,
+            distance: 0,
+            maxSpeed: 0,
+            curvesCompleted: 0,
+            sharpestCurve: null,
+            speedSamples: [],
+            positionHistory: [],
+          }
+        })
+      },
+
+      freeDriveTripStats: null,
+      setFreeDriveTripStats: (stats) => set({ freeDriveTripStats: stats }),
+
       setShowRouteSelector: (show) => {
         if (show) get().goToMenu()
         else set({ showRouteSelector: false })

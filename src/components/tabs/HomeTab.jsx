@@ -13,6 +13,7 @@ export function HomeTab({
   recentRoutes,
   favoriteRoutes,
   onStartDrive,
+  onStartFreeDrive,
   onSelectSavedRoute,
   onStartDiscoveryRoute,
   onRemoveRecent,
@@ -428,6 +429,53 @@ export function HomeTab({
             </button>
           </div>
         )}
+
+        {/* Free Drive CTA */}
+        <div className="ns-d5" style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          padding: '0 20px',
+          marginTop: '-4px',
+          marginBottom: '8px',
+        }}>
+          <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+          <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', letterSpacing: '1px', fontFamily: "'Sora', sans-serif" }}>or</span>
+          <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+        </div>
+        <div className="ns-d5" style={{ padding: '0 20px', marginBottom: '16px' }}>
+          <button
+            onClick={onStartFreeDrive}
+            disabled={!hasLocation || isLoading}
+            style={{
+              width: '100%',
+              padding: '14px 20px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: '12px',
+              color: '#ccc',
+              fontSize: '14px',
+              fontFamily: "'Sora', sans-serif",
+              fontWeight: 500,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              opacity: (!hasLocation || isLoading) ? 0.4 : 1,
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8622C" strokeWidth="2">
+              <path d="M12 2L12 22M2 12L22 12" strokeLinecap="round" />
+              <circle cx="12" cy="12" r="3" fill="#E8622C" stroke="none" />
+            </svg>
+            Free Drive
+            <span style={{ fontSize: '11px', color: '#666', fontWeight: 400, marginLeft: '4px' }}>
+              No destination needed
+            </span>
+          </button>
+        </div>
 
         {/* Your Driving Section - only show if user has driven */}
         {recentRoutes?.length > 0 && (

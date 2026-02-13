@@ -39,6 +39,7 @@ import { useHighwayMode } from './hooks/useHighwayMode'
 import useHighwayStore from './services/highwayStore'
 import { useSpeechPlanner } from './hooks/useSpeechPlanner'
 import { useDriveStats } from './hooks/useDriveStats'
+import { useFreeDrive } from './hooks/useFreeDrive'
 import { getDistanceAlongRoute, buildCumulativeDistances } from './services/routeMatcher'
 
 import Map from './components/Map'
@@ -51,6 +52,7 @@ import RoutePreview from './components/RoutePreview'
 import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
+import FreeDriveHUD from './components/FreeDriveHUD'
 
 // ================================
 // Tramo App - v23
@@ -86,14 +88,16 @@ export default function App() {
     showRoutePreview,
     showTripSummary,
     routeMode,
+    driveMode,
     routeData,
     routeZones,
-    curatedHighwayCallouts, // NEW: Get curated callouts from store
+    curatedHighwayCallouts,
     goToMenu,
     goToPreview,
     goToDriving,
     clearRouteData,
     position,
+    heading: storeHeading,
     speed,
     showRouteEditor,
     goToEditor,
@@ -101,6 +105,7 @@ export default function App() {
     setHeading,
     setSpeed,
     endTrip,
+    setFreeDriveTripStats,
   } = useStore()
 
   // Highway mode hook (still used for zone tracking, chatter, etc)
@@ -207,6 +212,58 @@ export default function App() {
     userDistanceAlongRoute,
     routeZones,
   })
+
+  // ── FREE DRIVE MODE ──
+  const isFreeDrive = driveMode === 'free'
+  const freeDrive = useFreeDrive({
+    isActive: isRunning && isFreeDrive,
+    position,
+    heading: storeHeading,
+    speed: currentSpeed,
+    speak,
+  })
+  const freeDriveStateRef = useRef(null)
+
+  // Free drive tick loop: run every 2 seconds, hook decides when to call API
+  useEffect(() => {
+    if (!isRunning || !isFreeDrive) return
+    let mounted = true
+
+    const interval = setInterval(async () => {
+      if (!mounted) return
+      const result = await freeDrive.tick()
+      if (result) {
+        freeDriveStateRef.current = result
+      }
+    }, 2000)
+
+    // Opening line
+    const openTimer = setTimeout(() => {
+      if (mounted && currentSpeed > 5) {
+        speak('Free drive. Calling curves as they come.', 'normal')
+      }
+    }, 4000)
+
+    return () => {
+      mounted = false
+      clearInterval(interval)
+      clearTimeout(openTimer)
+    }
+  }, [isRunning, isFreeDrive, freeDrive, speak, currentSpeed, userDistanceAlongRoute])
+
+  // Free drive stop handler
+  const handleStopFreeDrive = useCallback(() => {
+    const stats = freeDrive.getTripStats()
+    setFreeDriveTripStats(stats)
+
+    // Closing line
+    const curvesText = stats.totalCurvesCalled === 1 ? '1 curve' : `${stats.totalCurvesCalled} curves`
+    const distText = `${stats.totalDistanceMiles.toFixed(1)} miles`
+    speak(`Nice drive. ${curvesText} over ${distText}.`, 'normal')
+
+    freeDrive.reset()
+    endTrip()
+  }, [freeDrive, setFreeDriveTripStats, speak, endTrip])
 
   // Auto-end navigation handler (called by finish sequence in speech planner)
   const handleAutoEnd = useCallback(() => {
@@ -1024,14 +1081,32 @@ export default function App() {
     )
   }
 
+  // Build free drive state for HUD
+  const fdState = isFreeDrive ? freeDrive.getState() : null
+
   return (
     <div style={mobileContainerStyle}>
       <div className="absolute inset-0" style={{ background: 'var(--bg-deep)' }}>
         <AmbientBackground />
         <div className="relative z-[1] w-full h-full">
-          <Map />
-          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
-          <BottomBar />
+          <Map
+            freeDriveGeometry={isFreeDrive ? fdState?.geometry : null}
+          />
+          {isFreeDrive ? (
+            <FreeDriveHUD
+              speed={currentSpeed}
+              roadName={fdState?.roadName || ''}
+              curves={fdState?.detectedCurves || []}
+              junctionAhead={fdState?.junctionAhead}
+              paused={fdState?.paused}
+              onStop={handleStopFreeDrive}
+            />
+          ) : (
+            <>
+              <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
+              <BottomBar />
+            </>
+          )}
           <SettingsPanel />
           <VoiceIndicator />
           {/* Drive Simulator Panel - only when simulating */}

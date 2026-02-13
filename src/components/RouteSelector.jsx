@@ -78,6 +78,7 @@ export default function RouteSelector() {
     removeRecentRoute,
     removeFavoriteRoute,
     clearRecentRoutes,
+    goToFreeDrive,
   } = useStore()
 
   const { initDestinationRoute, initRouteFromCoordinates } = useRouteAnalysis()
@@ -146,6 +147,11 @@ export default function RouteSelector() {
       )
     }
   }, [setPosition])
+
+  // Free Drive handler — no route, no loading, just go
+  const handleStartFreeDrive = () => {
+    goToFreeDrive()
+  }
 
   // Route handlers
   const handleStartDrive = async (dest) => {
@@ -313,6 +319,7 @@ export default function RouteSelector() {
               recentRoutes={recentRoutes}
               favoriteRoutes={favoriteRoutes}
               onStartDrive={handleStartDrive}
+              onStartFreeDrive={handleStartFreeDrive}
               onSelectSavedRoute={handleSelectSavedRoute}
               onStartDiscoveryRoute={handleStartDiscoveryRoute}
               onRemoveRecent={removeRecentRoute}
