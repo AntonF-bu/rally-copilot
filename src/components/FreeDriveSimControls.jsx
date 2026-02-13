@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 
 // ================================
-// Free Drive Sim Controls - v2
-// Compact corner overlay for play/pause,
+// Free Drive Sim Controls - v3
+// Collapsible corner overlay for play/pause,
 // speed slider, position readout, and log panel.
 // Intercepts console.log for [FreeDrive] messages.
 // ================================
@@ -36,7 +36,7 @@ function patchConsole() {
     _origWarn.apply(console, args)
     const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
     if (msg.includes('[FreeDrive]')) {
-      const entry = { time: Date.now(), msg: '⚠️ ' + msg.replace('[FreeDrive] ', '') }
+      const entry = { time: Date.now(), msg: '\u26a0\ufe0f ' + msg.replace('[FreeDrive] ', '') }
       LOG_BUFFER.push(entry)
       if (LOG_BUFFER.length > MAX_LOGS) LOG_BUFFER.shift()
       LOG_LISTENERS.forEach(fn => fn())
@@ -46,6 +46,7 @@ function patchConsole() {
 
 export default function FreeDriveSimControls({ sim, onInitAudio }) {
   const audioInitedRef = useRef(false)
+  const [expanded, setExpanded] = useState(false)
   const [state, setState] = useState({
     paused: true,
     speedMph: 40,
@@ -55,18 +56,14 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
     ready: false,
   })
   const [logs, setLogs] = useState([])
-  const [showLogs, setShowLogs] = useState(true)
+  const [showLogs, setShowLogs] = useState(false)
   const logEndRef = useRef(null)
-
   const intervalRef = useRef(null)
 
   // Start log capture
   useEffect(() => {
     patchConsole()
-
-    const listener = () => {
-      setLogs([...LOG_BUFFER])
-    }
+    const listener = () => setLogs([...LOG_BUFFER])
     LOG_LISTENERS.add(listener)
     return () => LOG_LISTENERS.delete(listener)
   }, [])
@@ -81,9 +78,7 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
   // Poll sim state at 2Hz for UI updates
   useEffect(() => {
     intervalRef.current = setInterval(() => {
-      if (sim?.getSimState) {
-        setState(sim.getSimState())
-      }
+      if (sim?.getSimState) setState(sim.getSimState())
     }, 500)
     return () => clearInterval(intervalRef.current)
   }, [sim])
@@ -99,27 +94,51 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
     return `${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
   }
 
-  // Color code log lines
   const getLogColor = (msg) => {
     if (msg.includes('Speech')) return '#E8622C'
     if (msg.includes('Curve')) return '#00E68A'
     if (msg.includes('API')) return '#66B3FF'
     if (msg.includes('Road')) return '#eab308'
-    if (msg.includes('🗺️')) return '#a855f7'
-    if (msg.includes('⚠️')) return '#ff6b6b'
+    if (msg.includes('\ud83d\uddfa')) return '#a855f7'
+    if (msg.includes('\u26a0')) return '#ff6b6b'
     if (msg.includes('Tick')) return '#555'
     return '#888'
   }
 
   if (!state.ready) {
     return (
-      <div style={styles.container}>
-        <div style={styles.label}>SIM</div>
-        <div style={{ ...styles.value, color: '#666' }}>Loading route...</div>
+      <div style={styles.pill}>
+        <span style={styles.pillLabel}>SIM</span>
+        <span style={{ color: '#666', fontSize: '9px' }}>Loading...</span>
       </div>
     )
   }
 
+  // ── Collapsed: just a small pill with play/pause ──
+  if (!expanded) {
+    return (
+      <div style={styles.pill} onClick={() => setExpanded(true)}>
+        <span style={styles.pillLabel}>SIM</span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!audioInitedRef.current && onInitAudio) {
+              onInitAudio()
+              audioInitedRef.current = true
+            }
+            sim.togglePause()
+          }}
+          style={styles.pillBtn}
+        >
+          {state.paused ? '\u25b6' : '\u23f8'}
+        </button>
+        <span style={{ color: '#666', fontSize: '9px' }}>{state.speedMph}mph</span>
+        <span style={{ color: '#444', fontSize: '8px' }}>{state.progressPercent.toFixed(0)}%</span>
+      </div>
+    )
+  }
+
+  // ── Expanded: full controls ──
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -129,6 +148,7 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
           <div style={{ ...styles.progressFill, width: `${state.progressPercent}%` }} />
         </div>
         <div style={styles.percent}>{state.progressPercent.toFixed(0)}%</div>
+        <button onClick={() => setExpanded(false)} style={styles.collapseBtn}>\u2715</button>
       </div>
 
       {/* Play/Pause */}
@@ -142,7 +162,7 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
         }}
         style={styles.playBtn}
       >
-        {state.paused ? '▶  PLAY' : '⏸  PAUSE'}
+        {state.paused ? '\u25b6  PLAY' : '\u23f8  PAUSE'}
       </button>
 
       {/* Speed slider */}
@@ -166,9 +186,7 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
           <span style={styles.posText}>
             {state.position[1].toFixed(4)}, {state.position[0].toFixed(4)}
           </span>
-          <span style={styles.posText}>
-            {state.heading.toFixed(0)}°
-          </span>
+          <span style={styles.posText}>{state.heading.toFixed(0)}\u00b0</span>
         </div>
       )}
 
@@ -178,7 +196,7 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
           onClick={() => setShowLogs(!showLogs)}
           style={{ ...styles.logToggle, color: showLogs ? '#E8622C' : '#555' }}
         >
-          {showLogs ? '▼' : '▶'} LOGS ({logs.length})
+          {showLogs ? '\u25bc' : '\u25b6'} LOGS ({logs.length})
         </button>
       </div>
 
@@ -204,6 +222,40 @@ export default function FreeDriveSimControls({ sim, onInitAudio }) {
 }
 
 const styles = {
+  // Collapsed pill — small, stays in corner
+  pill: {
+    position: 'fixed',
+    top: '12px',
+    right: '12px',
+    zIndex: 9999,
+    background: 'rgba(8, 11, 18, 0.9)',
+    border: '1px solid rgba(232, 98, 44, 0.3)',
+    borderRadius: '20px',
+    padding: '6px 12px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+    backdropFilter: 'blur(12px)',
+    fontFamily: "'JetBrains Mono', monospace",
+  },
+  pillLabel: {
+    fontSize: '8px',
+    fontWeight: 700,
+    color: '#E8622C',
+    letterSpacing: '1px',
+  },
+  pillBtn: {
+    background: 'rgba(232, 98, 44, 0.2)',
+    border: '1px solid rgba(232, 98, 44, 0.3)',
+    borderRadius: '4px',
+    color: '#E8622C',
+    fontSize: '10px',
+    padding: '2px 6px',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  // Expanded container
   container: {
     position: 'fixed',
     top: '12px',
@@ -250,6 +302,15 @@ const styles = {
     minWidth: '24px',
     textAlign: 'right',
   },
+  collapseBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#555',
+    fontSize: '12px',
+    cursor: 'pointer',
+    padding: '0 2px',
+    fontFamily: 'inherit',
+  },
   playBtn: {
     width: '100%',
     padding: '8px',
@@ -295,11 +356,6 @@ const styles = {
   posText: {
     fontSize: '9px',
     color: '#555',
-  },
-  value: {
-    fontSize: '11px',
-    color: '#888',
-    marginTop: '4px',
   },
   logToggle: {
     background: 'none',

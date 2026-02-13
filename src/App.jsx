@@ -275,17 +275,14 @@ export default function App() {
     }
   }, [isRunning, isFreeDrive])
 
-  // v3: Opening line — fires once per free drive session, separate from tick loop
+  // v5: Opening line — briefing voice profile, short and clean
   useEffect(() => {
     if (!isRunning || !isFreeDrive || freeDriveOpeningDoneRef.current) return
 
     const openTimer = setTimeout(() => {
-      const spd = useStore.getState().speed || 0
-      if (spd > 5) {
-        speak('Free drive. Calling curves as they come.', 'normal')
-      }
+      speak('Free drive mode. Let\'s go.', 'normal', { voiceProfile: 'briefing' })
       freeDriveOpeningDoneRef.current = true
-    }, 4000)
+    }, 3000)
 
     return () => clearTimeout(openTimer)
   }, [isRunning, isFreeDrive, speak])
@@ -1130,14 +1127,15 @@ export default function App() {
         <div className="relative z-[1] w-full h-full">
           <Map
             freeDriveGeometry={isFreeDrive ? fdState?.geometry : null}
+            freeDriveCurves={isFreeDrive ? fdState?.detectedCurves : null}
           />
           {isFreeDrive ? (
             <FreeDriveHUD
               speed={currentSpeed}
               roadName={fdState?.roadName || ''}
               curves={fdState?.detectedCurves || []}
-              junctionAhead={fdState?.junctionAhead}
               paused={fdState?.paused}
+              lastSpokenCallout={fdState?.lastSpokenCallout}
               onStop={handleStopFreeDrive}
             />
           ) : (

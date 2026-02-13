@@ -13,6 +13,7 @@
 // =============================================
 
 import { useRef, useCallback, useEffect } from 'react'
+import { getWarningDistances } from '../services/calloutEngine'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 const LOOKAHEAD_KM = 2
@@ -21,12 +22,16 @@ const CALL_INTERVAL_MS = 10000        // 10s between API calls
 const MIN_MOVE_FOR_CALL = 200         // 200m movement triggers immediate call
 const MIN_SPEED_MPH = 5               // Don't call API below 5mph
 const HEADING_HOLD_SPEED = 10         // Below this, hold last reliable heading
-const ROAD_ANNOUNCE_COOLDOWN = 60000  // 1 road announcement per 60s max
 const CURVE_BEHIND_BUFFER = 50        // 50m behind before removing a curve
-const JUNCTION_WARN_DIST = 200        // Announce junction at 200m
-const CURVE_ANNOUNCE_DIST = 300       // Announce curves within 300m
+const CHAIN_GAP_MAX = 200             // Chain curves within 200m (same as Route Mode merge distance)
 const SPEECH_COOLDOWN_MS = 3000       // Minimum 3s between ANY speech
 const STARTUP_GRACE_MS = 6000         // No announcements for first 6s (let opening line play)
+
+// Speed-based announce distance using Route Mode's calloutEngine
+// Uses highway mode's "early" distance = generous lookahead
+function getAnnounceDistance(speedMph) {
+  return getWarningDistances('highway', speedMph).early
+}
 
 // ── Geo helpers ──
 
@@ -200,6 +205,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     paused: false,
     lastSpeakTime: 0,    // v2: global speech cooldown
     tickCount: 0,         // v2: for logging
+    lastSpokenCallout: null, // v5: for HUD flash {text, time, direction, angle}
   })
 
   // v4: Dead-simple ref-based API throttle — immune to async races
@@ -430,7 +436,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       if (timeSinceLastApi < CALL_INTERVAL_MS) {
         console.log(`[FreeDrive] API throttled, skipping. Time since last: ${timeSinceLastApi}ms`)
         // Still process existing curves for speech
-        return processExistingState(pos, hdg, state, spk, now, canSpeak)
+        return processExistingState(pos, hdg, state, spk, now, canSpeak, spd)
       }
 
       // Mark throttle BEFORE the async call — prevents any concurrent tick from passing
@@ -444,15 +450,9 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
 
         const { newCurves, allCurves } = processLookahead(result, pos)
 
-        // Speech: pick ONE thing to say this tick (priority: curves > junction > road)
+        // Speech: curves only — no road names, no junction announcements
         if (canSpeak(state, now)) {
-          const spoke = trySpeakCurve(state, pos, hdg, spk, now)
-          if (!spoke) {
-            const spokeJunction = trySpeakJunction(state, spk, now)
-            if (!spokeJunction) {
-              trySpeakRoadChange(state, spk, now)
-            }
-          }
+          trySpeakCurve(state, pos, hdg, spk, now, spd)
         }
 
         // Cleanup passed curves
@@ -494,6 +494,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       avgSpeed,
       startTime: state.startTime,
       roadsVisited: state.roadsVisited,
+      lastSpokenCallout: state.lastSpokenCallout,
     }
   }, [])
 
@@ -530,6 +531,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       paused: false,
       lastSpeakTime: 0,
       tickCount: 0,
+      lastSpokenCallout: null,
     }
     reliableHeadingRef.current = 0
     lastApiCallRef.current = 0
@@ -569,13 +571,10 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
 }
 
 // ── Helper: process existing state without API call ──
-function processExistingState(pos, hdg, state, speak, now, canSpeak) {
-  // Speech: one thing per tick
+function processExistingState(pos, hdg, state, speak, now, canSpeak, spd) {
+  // Speech: curves only
   if (canSpeak(state, now)) {
-    const spoke = trySpeakCurve(state, pos, hdg, speak, now)
-    if (!spoke) {
-      trySpeakJunction(state, speak, now)
-    }
+    trySpeakCurve(state, pos, hdg, speak, now, spd || 40)
   }
 
   cleanupPassedCurves(state, pos, hdg)
@@ -590,7 +589,10 @@ function processExistingState(pos, hdg, state, speak, now, canSpeak) {
 }
 
 // ── Helper: try to announce approaching curve (returns true if spoke) ──
-function trySpeakCurve(state, pos, hdg, speak, now) {
+// Uses Route Mode's speed-based warning distance + chain logic
+function trySpeakCurve(state, pos, hdg, speak, now, speedMph) {
+  const announceRange = getAnnounceDistance(speedMph || 40)
+
   // Find nearest unannounced curve ahead within range
   const upcoming = state.detectedCurves
     .filter(c => {
@@ -606,29 +608,45 @@ function trySpeakCurve(state, pos, hdg, speak, now) {
   const nearest = upcoming[0]
   const dist = haversine(pos, nearest.position)
 
-  if (dist > CURVE_ANNOUNCE_DIST) {
+  if (dist > announceRange) {
     return false
   }
 
-  // Build text: chain with next curve if close
+  // Chain curves within 200m (same as Route Mode mergeCloseCallouts)
   let text = nearest.text
+  const chainedIds = [nearest.id]
   if (upcoming.length >= 2) {
     const second = upcoming[1]
     const secondDist = haversine(pos, second.position)
     const gap = secondDist - dist
-    if (gap < 250 && gap > 0) {
+    if (gap < CHAIN_GAP_MAX && gap > 0) {
       text = `${nearest.text}, ${second.text}`
-      state.announcedCurves.add(second.id)
+      chainedIds.push(second.id)
       state.totalCurvesCalled++
-      console.log(`[FreeDrive] Curve chained: "${second.text}" at ${Math.round(secondDist)}m`)
+      console.log(`[FreeDrive] Curve chained: "${second.text}" gap=${Math.round(gap)}m`)
+
+      // Chain a 3rd if within range (max 3, same as Route Mode)
+      if (upcoming.length >= 3) {
+        const third = upcoming[2]
+        const thirdDist = haversine(pos, third.position)
+        const gap2 = thirdDist - secondDist
+        if (gap2 < CHAIN_GAP_MAX && gap2 > 0) {
+          text = `${nearest.text}, ${second.text}, ${third.text}`
+          chainedIds.push(third.id)
+          state.totalCurvesCalled++
+          console.log(`[FreeDrive] Curve chained (3rd): "${third.text}" gap=${Math.round(gap2)}m`)
+        }
+      }
     }
   }
 
-  console.log(`[FreeDrive] Curve approaching: ${nearest.direction} ${nearest.angle}° in ${Math.round(dist)}m (announcing)`)
-  console.log(`[FreeDrive] Speech queued: "${text}" | priority: high`)
+  console.log(`[FreeDrive] Curve: ${nearest.direction} ${nearest.angle}° in ${Math.round(dist)}m (range=${Math.round(announceRange)}m @ ${Math.round(speedMph)}mph)`)
 
-  speak(text, 'high')
-  state.announcedCurves.add(nearest.id)
+  // Store last spoken callout for HUD flash
+  state.lastSpokenCallout = { text, time: now, direction: nearest.direction, angle: nearest.angle }
+
+  speak(text, 'high', { voiceProfile: 'curve' })
+  chainedIds.forEach(id => state.announcedCurves.add(id))
   state.lastSpeakTime = now
   state.totalCurvesCalled++
 
