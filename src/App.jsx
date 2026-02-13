@@ -40,6 +40,7 @@ import useHighwayStore from './services/highwayStore'
 import { useSpeechPlanner } from './hooks/useSpeechPlanner'
 import { useDriveStats } from './hooks/useDriveStats'
 import { useFreeDrive } from './hooks/useFreeDrive'
+import { useFreeDriveSim } from './hooks/useFreeDriveSim'
 import { getDistanceAlongRoute, buildCumulativeDistances } from './services/routeMatcher'
 
 import Map from './components/Map'
@@ -53,6 +54,11 @@ import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
 import FreeDriveHUD from './components/FreeDriveHUD'
+import FreeDriveSimControls from './components/FreeDriveSimControls'
+
+// URL param detection for Free Drive sim mode
+const URL_PARAMS = new URLSearchParams(window.location.search)
+const FREE_DRIVE_SIM = URL_PARAMS.has('freedrive') && URL_PARAMS.has('sim')
 
 // ================================
 // Tramo App - v23
@@ -223,6 +229,23 @@ export default function App() {
     speak,
   })
   const freeDriveStateRef = useRef(null)
+
+  // ── FREE DRIVE SIMULATOR (?freedrive&sim) ──
+  const freeDriveSim = useFreeDriveSim(FREE_DRIVE_SIM && isFreeDrive && isRunning)
+  const simAutoStartedRef = useRef(false)
+
+  // Auto-start Free Drive when ?freedrive&sim is in URL
+  useEffect(() => {
+    if (!FREE_DRIVE_SIM || simAutoStartedRef.current) return
+    simAutoStartedRef.current = true
+
+    // Kick into Free Drive mode via store action
+    const { goToFreeDrive, setIsSimulating } = useStore.getState()
+    goToFreeDrive()
+    setIsSimulating(true)
+
+    console.log('🎮 Free Drive Sim: auto-started via URL params')
+  }, [])
 
   // Free drive tick loop: run every 2 seconds, hook decides when to call API
   useEffect(() => {
@@ -1109,6 +1132,10 @@ export default function App() {
           )}
           <SettingsPanel />
           <VoiceIndicator />
+          {/* Free Drive Sim Controls */}
+          {FREE_DRIVE_SIM && isFreeDrive && (
+            <FreeDriveSimControls sim={freeDriveSim} onInitAudio={initAudio} />
+          )}
           {/* Drive Simulator Panel - only when simulating */}
           {isSimulating && simulatorRef.current && (
             <DriveSimulatorPanel
