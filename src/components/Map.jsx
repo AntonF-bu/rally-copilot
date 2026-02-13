@@ -312,46 +312,64 @@ export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
     const m = map.current
 
     if (freeDriveGeometry && freeDriveGeometry.length >= 2) {
+      // Debug: log first and last coordinate to verify [lng, lat] format
+      const first = freeDriveGeometry[0]
+      const last = freeDriveGeometry[freeDriveGeometry.length - 1]
+      console.log(`[FreeDrive] 🗺️ Lookahead line: ${freeDriveGeometry.length} pts | first=[${first}] last=[${last}]`)
+
       const geojson = {
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: freeDriveGeometry }
       }
 
-      if (m.getSource('freedrive-lookahead')) {
-        m.getSource('freedrive-lookahead').setData(geojson)
+      const sourceId = 'freedrive-lookahead'
+      const glowId = 'freedrive-lookahead-glow'
+      const lineId = 'freedrive-lookahead-line'
+
+      if (m.getSource(sourceId)) {
+        m.getSource(sourceId).setData(geojson)
       } else {
-        m.addSource('freedrive-lookahead', { type: 'geojson', data: geojson })
-        // Glow layer (like Route Mode)
+        m.addSource(sourceId, { type: 'geojson', data: geojson })
+
+        // DEBUG: Bright red 5px solid test line — rules out styling issues
         m.addLayer({
-          id: 'freedrive-lookahead-glow',
+          id: glowId,
           type: 'line',
-          source: 'freedrive-lookahead',
+          source: sourceId,
           paint: {
-            'line-color': ZONE_COLORS.technical,
-            'line-width': 10,
-            'line-opacity': 0.25,
-            'line-blur': 5,
+            'line-color': '#ff0000',
+            'line-width': 8,
+            'line-opacity': 0.4,
+            'line-blur': 4,
           }
         })
-        // Main line — dashed technical green
+
         m.addLayer({
-          id: 'freedrive-lookahead',
+          id: lineId,
           type: 'line',
-          source: 'freedrive-lookahead',
+          source: sourceId,
           paint: {
-            'line-color': ZONE_COLORS.technical,
-            'line-width': 3,
-            'line-opacity': 0.7,
-            'line-dasharray': [2, 3],
+            'line-color': '#ff0000',
+            'line-width': 5,
+            'line-opacity': 1.0,
           }
         })
+
+        // Move to top of layer stack so nothing covers it
+        try { m.moveLayer(glowId) } catch(e) {}
+        try { m.moveLayer(lineId) } catch(e) {}
+
+        // Verify creation
+        const srcCheck = m.getSource(sourceId)
+        const glowCheck = m.getLayer(glowId)
+        const lineCheck = m.getLayer(lineId)
+        console.log(`[FreeDrive] 🗺️ Source exists: ${!!srcCheck} | Glow layer: ${!!glowCheck} | Line layer: ${!!lineCheck}`)
+        console.log(`[FreeDrive] 🗺️ All layers:`, m.getStyle().layers.map(l => l.id).filter(id => id.includes('freedrive')))
       }
     } else {
-      if (m.getSource('freedrive-lookahead')) {
-        m.getSource('freedrive-lookahead').setData({
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: [] }
-        })
+      const src = m.getSource('freedrive-lookahead')
+      if (src) {
+        src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } })
       }
     }
   }, [mapLoaded, freeDriveGeometry])
@@ -366,6 +384,17 @@ export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
 
     if (!freeDriveCurves?.length) return
 
+    // Rally grade conversion (same thresholds as useSpeech.js cleanForSpeech)
+    const rallyGrade = (angle) => {
+      if (angle >= 180) return 'H'
+      if (angle >= 120) return '1'
+      if (angle >= 80) return '2'
+      if (angle >= 60) return '3'
+      if (angle >= 40) return '4'
+      if (angle >= 20) return '5'
+      return '6'
+    }
+
     // Show max 5 nearest curves
     const toShow = freeDriveCurves
       .filter(c => c.distanceFromDriver > 0)
@@ -374,9 +403,11 @@ export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
 
     toShow.forEach(curve => {
       if (!curve.position) return
-      // Build a callout-shaped object for the shared marker creator
+      // Build callout with rally grade label (e.g. "Right 2" not "Right 90°")
+      const grade = rallyGrade(curve.angle)
+      const dir = curve.direction === 'Left' ? 'Left' : 'Right'
       const calloutObj = {
-        text: curve.text,
+        text: `${dir} ${grade}`,
         position: curve.position,
         zone: 'technical',
         type: 'curve',
