@@ -6,11 +6,11 @@ import './styles/brand.css'
 
 const FreeDriveTest = lazy(() => import('./components/FreeDriveTest'))
 
-const isFreeDrive = window.location.search.includes('freedrive')
+const isFreeDriveTest = window.location.search.includes('freedrivetest')
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    {isFreeDrive ? (
+    {isFreeDriveTest ? (
       <Suspense fallback={<div style={{ background: '#0a0e18', color: '#888', padding: '40px', fontFamily: 'monospace' }}>Loading Free Drive Test...</div>}>
         <FreeDriveTest />
       </Suspense>
