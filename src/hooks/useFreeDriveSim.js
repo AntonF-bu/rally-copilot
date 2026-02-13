@@ -126,6 +126,12 @@ export function useFreeDriveSim(enabled) {
     setPosition(posData.position)
     setHeading(posData.heading)
     setSpeed(speedMphRef.current)
+
+    // Log every 5th tick to avoid flooding
+    if (Math.round(distAlongRef.current) % 100 < 20) {
+      const pct = ((distAlongRef.current / segmentsRef.current.totalLength) * 100).toFixed(1)
+      console.log(`[FreeDrive] 🎮 Sim: ${pct}% | ${speedMphRef.current}mph | pos=(${posData.position[1].toFixed(4)}, ${posData.position[0].toFixed(4)}) | hdg=${Math.round(posData.heading)}°`)
+    }
   }, [getPositionAtDistance, setPosition, setHeading, setSpeed])
 
   // ── Initialize on enable ──

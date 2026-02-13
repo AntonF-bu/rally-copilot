@@ -581,6 +581,10 @@ export function useSpeech() {
     // Set current priority
     currentPriorityRef.current = priorityValue
 
+    // v2: Mark as playing IMMEDIATELY to prevent concurrent speak() calls
+    // from racing past the isPlayingRef check during async TTS fetch
+    isPlayingRef.current = true
+
     lastSpokenRef.current = text
     lastSpokenTimeRef.current = now
 
@@ -598,7 +602,15 @@ export function useSpeech() {
 
     // Fall back to native
     console.log('🔊 Falling back to native')
-    return speakNative(spokenText)
+    const nativeSuccess = speakNative(spokenText)
+    if (!nativeSuccess) {
+      // Both failed — reset playing state
+      isPlayingRef.current = false
+      currentPriorityRef.current = -1
+      currentlyPlayingRef.current = null
+      setSpeaking(false, '')
+    }
+    return nativeSuccess
   }, [settings.voiceEnabled, speakNative, speakElevenLabs])
 
   const stop = useCallback(() => {

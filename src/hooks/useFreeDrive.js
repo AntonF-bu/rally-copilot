@@ -1,12 +1,15 @@
 // =============================================
-// useFreeDrive.js — Real-time road lookahead engine
+// useFreeDrive.js — Real-time road lookahead engine v2
 //
-// Core loop (every 10s while driving):
+// Core loop (every 2s while driving):
 // 1. Get GPS position + heading
-// 2. Call Mapbox Directions API → 2km ahead
+// 2. Call Mapbox Directions API → 2km ahead (every 10s)
 // 3. Run curve detection on returned geometry
 // 4. Diff against known curves (don't re-announce)
-// 5. Feed new curves to speech planner
+// 5. Announce approaching curves via speak()
+//
+// v2: Fixed speech timing (one speak per tick),
+//     comprehensive [FreeDrive] logging
 // =============================================
 
 import { useRef, useCallback, useEffect } from 'react'
@@ -22,7 +25,8 @@ const ROAD_ANNOUNCE_COOLDOWN = 60000  // 1 road announcement per 60s max
 const CURVE_BEHIND_BUFFER = 50        // 50m behind before removing a curve
 const JUNCTION_WARN_DIST = 200        // Announce junction at 200m
 const CURVE_ANNOUNCE_DIST = 300       // Announce curves within 300m
-const CURVE_ANNOUNCE_COOLDOWN = 3000  // 3s between curve announcements
+const SPEECH_COOLDOWN_MS = 3000       // Minimum 3s between ANY speech
+const STARTUP_GRACE_MS = 6000         // No announcements for first 6s (let opening line play)
 
 // ── Geo helpers ──
 
@@ -71,11 +75,7 @@ function degreeToRallyText(angle, direction) {
   const absAngle = Math.abs(angle)
   const dir = direction.toLowerCase()
   if (absAngle >= 180) return `Hairpin ${dir}`
-  if (absAngle >= 120) return `CAUTION - ${dir} ${absAngle}°`
-  if (absAngle >= 80) return `${dir} ${absAngle}°`
-  if (absAngle >= 60) return `${dir} ${absAngle}°`
-  if (absAngle >= 40) return `${dir} ${absAngle}°`
-  if (absAngle >= 20) return `${dir} ${absAngle}°`
+  // Pass degrees through — cleanForSpeech will convert to rally scale
   return `${dir} ${absAngle}°`
 }
 
@@ -103,7 +103,7 @@ function detectCurvesOnGeometry(coords) {
     }
   }
 
-  // Merge nearby angle changes into single curves (within 30m, same direction)
+  // Merge nearby angle changes into single curves (within 40m, same direction)
   const merged = []
   for (const r of raw) {
     const last = merged[merged.length - 1]
@@ -138,7 +138,7 @@ function detectCurvesOnGeometry(coords) {
         direction,
         angle: absAngle,
         distanceFromDriver: c.distance,
-        triggerDistance: c.distance,    // used by speech planner
+        triggerDistance: c.distance,
         triggerMile: c.distance / 1609.34,
         position: pos,
         severity: absAngle >= 120 ? 'critical' : absAngle >= 80 ? 'high' : absAngle >= 40 ? 'medium' : 'low',
@@ -154,9 +154,6 @@ function detectJunctions(steps) {
     const type = step.maneuver?.type
     if (type === 'turn' || type === 'fork' || type === 'end of road' || type === 'roundabout') {
       const dist = step.distance || 0
-      // Calculate distance from driver to this junction
-      // step.distance is distance OF this step, not TO it
-      // We need cumulative distance up to the step
       return {
         type,
         distance: dist,
@@ -174,7 +171,7 @@ function extractRoadInfo(steps) {
   const first = steps[0]
   return {
     name: first.name || '',
-    roadClass: first.driving_side || '', // Directions API doesn't give class directly
+    roadClass: first.driving_side || '',
   }
 }
 
@@ -199,9 +196,10 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     startTime: 0,
     topSpeed: 0,
     speedSamples: [],
-    roadsVisited: {},     // { roadName: { distance, curves, speedSamples } }
+    roadsVisited: {},
     paused: false,
-    lastCurveAnnounce: 0,
+    lastSpeakTime: 0,    // v2: global speech cooldown
+    tickCount: 0,         // v2: for logging
   })
 
   // Reliable heading ref (hold last good heading when speed drops)
@@ -225,6 +223,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
   const callDirectionsAPI = useCallback(async (pos, hdg) => {
     const target = destinationPoint(pos, hdg, LOOKAHEAD_KM * 1000)
 
+    console.log(`[FreeDrive] API call: (${pos[1].toFixed(4)},${pos[0].toFixed(4)}) → (${target[1].toFixed(4)},${target[0].toFixed(4)}) heading=${Math.round(hdg)}°`)
+
     const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pos[0]},${pos[1]};${target[0]},${target[1]}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`
 
     const start = performance.now()
@@ -233,7 +233,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     const latency = Math.round(performance.now() - start)
 
     if (!data.routes?.length) {
-      console.warn('[FreeDrive] No route from API')
+      console.warn('[FreeDrive] API: no route returned')
       return null
     }
 
@@ -241,7 +241,12 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     const coords = route.geometry.coordinates
     const steps = route.legs?.[0]?.steps || []
 
+    // Extract road class from first step
+    const roadClass = steps[0]?.ref || steps[0]?.name || 'unknown'
+
     stateRef.current.apiCallCount++
+
+    console.log(`[FreeDrive] API response: ${latency}ms | ${coords.length} pts | road: ${steps[0]?.name || '?'} | class: ${roadClass}`)
 
     return { coords, steps, distance: route.distance, latency }
   }, [])
@@ -261,7 +266,6 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     let junctionDist = 0
     const junction = detectJunctions(steps)
     if (junction) {
-      // Calculate cumulative distance to junction step
       let cumDist = 0
       for (const step of steps) {
         if (step.maneuver?.type === junction.type) {
@@ -271,12 +275,15 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
         cumDist += step.distance || 0
       }
       state.junctionAhead = { ...junction, distanceFromDriver: junctionDist }
+      if (!state.junctionAnnounced) {
+        console.log(`[FreeDrive] Junction detected: ${junction.type} in ${Math.round(junctionDist)}m`)
+      }
     } else {
       state.junctionAhead = null
       state.junctionAnnounced = false
     }
 
-    // Filter out curves beyond junction (they might be on wrong road)
+    // Filter out curves beyond junction
     const safeCurves = junction && junctionDist > 0
       ? curves.filter(c => c.distanceFromDriver < junctionDist)
       : curves
@@ -291,9 +298,14 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       state.prevRoadName = state.roadName
       state.roadName = roadInfo.name
 
-      // Track road visit
       if (!state.roadsVisited[roadInfo.name]) {
         state.roadsVisited[roadInfo.name] = { distance: 0, curves: 0, speedSamples: [] }
+      }
+
+      if (state.prevRoadName) {
+        console.log(`[FreeDrive] Road changed: ${state.prevRoadName} → ${state.roadName}`)
+      } else {
+        console.log(`[FreeDrive] Road: ${state.roadName}`)
       }
     }
 
@@ -301,9 +313,28 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
     state.lastPosition = currentPos
     state.lastApiCall = Date.now()
 
-    console.log(`[FreeDrive] API: ${latency}ms | ${coords.length} pts | ${safeCurves.length} curves (${newCurves.length} new) | road: ${state.roadName}`)
+    // Log curve detection results
+    if (safeCurves.length > 0) {
+      const curveIds = safeCurves.slice(0, 4).map(c => `${c.direction[0]}${c.angle}°@${Math.round(c.distanceFromDriver)}m`).join(', ')
+      console.log(`[FreeDrive] Curves detected: ${safeCurves.length} total | ${newCurves.length} new | ${curveIds}`)
+    }
+
+    console.log(`[FreeDrive] 🗺️ Geometry updated: ${coords.length} pts for map`)
 
     return { newCurves, allCurves: safeCurves }
+  }, [])
+
+  // ── Check if speech is allowed (global cooldown + startup grace) ──
+  const canSpeak = useCallback((state, now) => {
+    // Startup grace period — let opening line play
+    if (state.startTime && (now - state.startTime) < STARTUP_GRACE_MS) {
+      return false
+    }
+    // Global speech cooldown
+    if ((now - state.lastSpeakTime) < SPEECH_COOLDOWN_MS) {
+      return false
+    }
+    return true
   }, [])
 
   // ── Main tick (called from App.jsx effect) ──
@@ -312,8 +343,10 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
 
     const state = stateRef.current
     const now = Date.now()
-    const pos = position // [lng, lat]
+    const pos = position
     const hdg = reliableHeadingRef.current
+
+    state.tickCount++
 
     // Initialize start time
     if (!state.startTime) state.startTime = now
@@ -323,17 +356,25 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       state.speedSamples.push(speed)
       if (state.speedSamples.length > 10000) state.speedSamples = state.speedSamples.slice(-5000)
 
-      // Track per-road speed
       const road = state.roadsVisited[state.roadName]
       if (road) road.speedSamples.push(speed)
     }
 
     // Pause: don't call API when crawling
     if (speed < MIN_SPEED_MPH) {
+      if (!state.paused) {
+        console.log(`[FreeDrive] Paused: speed ${Math.round(speed)}mph < ${MIN_SPEED_MPH}mph threshold`)
+      }
       state.paused = true
       return null
     }
+    if (state.paused) {
+      console.log(`[FreeDrive] Resumed: speed ${Math.round(speed)}mph`)
+    }
     state.paused = false
+
+    // Log every tick
+    console.log(`[FreeDrive] Tick #${state.tickCount}: speed=${Math.round(speed)}mph heading=${Math.round(hdg)}° pos=(${pos[1].toFixed(4)}, ${pos[0].toFixed(4)}) curves=${state.detectedCurves.length} announced=${state.announcedCurves.size}`)
 
     // Check if we should make an API call
     const timeSinceLast = now - state.lastApiCall
@@ -342,12 +383,12 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       ? Math.abs(angleDiff(hdg, bearing(state.lastPosition, pos)))
       : 0
 
-    // Skip if nothing changed significantly
+    // Skip API if nothing changed significantly
     if (timeSinceLast < CALL_INTERVAL_MS &&
         distSinceLast < MIN_MOVE_FOR_CALL &&
         distSinceLast < 50 && headingChange < 15) {
-      // Still process existing curves (driver may be approaching them)
-      return processExistingCurves(pos, hdg, state, speak, now)
+      // Still process existing curves
+      return processExistingState(pos, hdg, state, speak, now, canSpeak)
     }
 
     // Make API call
@@ -357,16 +398,18 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
 
       const { newCurves, allCurves } = processLookahead(result, pos)
 
-      // Announce road change
-      announceRoadChange(state, speak, now)
+      // Speech: pick ONE thing to say this tick (priority: curves > junction > road)
+      if (canSpeak(state, now)) {
+        const spoke = trySpeakCurve(state, pos, hdg, speak, now)
+        if (!spoke) {
+          const spokeJunction = trySpeakJunction(state, speak, now)
+          if (!spokeJunction) {
+            trySpeakRoadChange(state, speak, now)
+          }
+        }
+      }
 
-      // Announce approaching curves
-      announceCurves(state, pos, hdg, speak, now)
-
-      // Announce junction if approaching
-      announceJunction(state, speak)
-
-      // Remove curves that are behind the driver
+      // Cleanup passed curves
       cleanupPassedCurves(state, pos, hdg)
 
       return {
@@ -381,7 +424,7 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       console.error('[FreeDrive] API error:', err)
       return null
     }
-  }, [isActive, position, speed, callDirectionsAPI, processLookahead, speak])
+  }, [isActive, position, speed, callDirectionsAPI, processLookahead, speak, canSpeak])
 
   // ── Get current state (for HUD) ──
   const getState = useCallback(() => {
@@ -408,11 +451,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
   // ── Build callouts array for speech planner ──
   const getCalloutsForPlanner = useCallback((currentDist) => {
     const state = stateRef.current
-    // Convert free drive curves to the format speech planner expects
     return state.detectedCurves.map(c => ({
       ...c,
-      // triggerDistance relative to some "virtual route start"
-      // For free drive, we use distance-from-driver directly
       triggerDistance: currentDist + c.distanceFromDriver,
       triggerMile: (currentDist + c.distanceFromDriver) / 1609.34,
     }))
@@ -439,7 +479,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       speedSamples: [],
       roadsVisited: {},
       paused: false,
-      lastCurveAnnounce: 0,
+      lastSpeakTime: 0,
+      tickCount: 0,
     }
     reliableHeadingRef.current = 0
   }, [])
@@ -452,10 +493,8 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
       ? state.speedSamples.reduce((a, b) => a + b, 0) / state.speedSamples.length
       : 0
 
-    // Estimate total distance from speed samples (each ~1s apart in the tick)
-    // Better: use GPS position history
     const totalDist = state.lastPosition && state.speedSamples.length > 0
-      ? avgSpeed * (elapsed / 3600000) // rough: avg mph * hours → miles
+      ? avgSpeed * (elapsed / 3600000)
       : 0
 
     return {
@@ -478,10 +517,16 @@ export function useFreeDrive({ isActive, position, heading, speed, speak }) {
   return { tick, getState, getCalloutsForPlanner, reset, getTripStats }
 }
 
-// ── Helper: process existing curves without API call ──
-function processExistingCurves(pos, hdg, state, speak, now) {
-  announceCurves(state, pos, hdg, speak, now)
-  announceJunction(state, speak)
+// ── Helper: process existing state without API call ──
+function processExistingState(pos, hdg, state, speak, now, canSpeak) {
+  // Speech: one thing per tick
+  if (canSpeak(state, now)) {
+    const spoke = trySpeakCurve(state, pos, hdg, speak, now)
+    if (!spoke) {
+      trySpeakJunction(state, speak, now)
+    }
+  }
+
   cleanupPassedCurves(state, pos, hdg)
 
   return {
@@ -493,86 +538,102 @@ function processExistingCurves(pos, hdg, state, speak, now) {
   }
 }
 
-// ── Helper: announce approaching curves ──
-function announceCurves(state, pos, hdg, speak, now) {
-  if (now - state.lastCurveAnnounce < CURVE_ANNOUNCE_COOLDOWN) return
-
-  // Find nearest unannounced curve within announce distance
+// ── Helper: try to announce approaching curve (returns true if spoke) ──
+function trySpeakCurve(state, pos, hdg, speak, now) {
+  // Find nearest unannounced curve ahead within range
   const upcoming = state.detectedCurves
     .filter(c => {
       if (state.announcedCurves.has(c.id)) return false
-      // Check it's ahead, not behind
       const brg = bearing(pos, c.position)
       const diff = Math.abs(angleDiff(hdg, brg))
       return diff < 90
     })
-    .sort((a, b) => a.distanceFromDriver - b.distanceFromDriver)
+    .sort((a, b) => haversine(pos, a.position) - haversine(pos, b.position))
 
-  if (upcoming.length === 0) return
+  if (upcoming.length === 0) return false
 
   const nearest = upcoming[0]
-  // Adaptive announce distance: faster = earlier warning
-  // ~80m at 20mph, ~250m at 60mph
   const dist = haversine(pos, nearest.position)
-  if (dist > CURVE_ANNOUNCE_DIST) return
 
-  // Check for chain: is there another curve within 250m?
+  if (dist > CURVE_ANNOUNCE_DIST) {
+    return false
+  }
+
+  // Build text: chain with next curve if close
   let text = nearest.text
   if (upcoming.length >= 2) {
     const second = upcoming[1]
-    const gap = second.distanceFromDriver - nearest.distanceFromDriver
+    const secondDist = haversine(pos, second.position)
+    const gap = secondDist - dist
     if (gap < 250 && gap > 0) {
       text = `${nearest.text}, ${second.text}`
       state.announcedCurves.add(second.id)
       state.totalCurvesCalled++
+      console.log(`[FreeDrive] Curve chained: "${second.text}" at ${Math.round(secondDist)}m`)
     }
   }
 
+  console.log(`[FreeDrive] Curve approaching: ${nearest.direction} ${nearest.angle}° in ${Math.round(dist)}m (announcing)`)
+  console.log(`[FreeDrive] Speech queued: "${text}" | priority: high`)
+
   speak(text, 'high')
   state.announcedCurves.add(nearest.id)
-  state.lastCurveAnnounce = now
+  state.lastSpeakTime = now
   state.totalCurvesCalled++
 
   // Track per-road curves
   const road = state.roadsVisited[state.roadName]
   if (road) road.curves++
 
-  console.log(`[FreeDrive] Announce: "${text}" at ${Math.round(dist)}m`)
+  return true
 }
 
-// ── Helper: announce road name change ──
-function announceRoadChange(state, speak, now) {
-  if (!state.roadName || state.roadName === state.prevRoadName) return
-  if (now - state.lastRoadAnnounce < ROAD_ANNOUNCE_COOLDOWN) return
+// ── Helper: try to announce road name change (returns true if spoke) ──
+function trySpeakRoadChange(state, speak, now) {
+  if (!state.roadName || state.roadName === state.prevRoadName) return false
+  if (now - state.lastRoadAnnounce < ROAD_ANNOUNCE_COOLDOWN) return false
 
   const text = `Now on ${state.roadName}`
+  console.log(`[FreeDrive] Speech queued: "${text}" | priority: normal`)
+
   speak(text, 'normal')
+  state.lastSpeakTime = now
   state.lastRoadAnnounce = now
   state.prevRoadName = state.roadName
-  console.log(`[FreeDrive] Road: ${text}`)
+
+  return true
 }
 
-// ── Helper: announce approaching junction ──
-function announceJunction(state, speak) {
-  if (!state.junctionAhead || state.junctionAnnounced) return
-  if (state.junctionAhead.distanceFromDriver < JUNCTION_WARN_DIST) {
-    speak('Junction ahead', 'normal')
-    state.junctionAnnounced = true
-    console.log(`[FreeDrive] Junction announced at ${state.junctionAhead.distanceFromDriver}m`)
-  }
+// ── Helper: try to announce approaching junction (returns true if spoke) ──
+function trySpeakJunction(state, speak, now) {
+  if (!state.junctionAhead || state.junctionAnnounced) return false
+  if (state.junctionAhead.distanceFromDriver >= JUNCTION_WARN_DIST) return false
+
+  console.log(`[FreeDrive] Speech queued: "Junction ahead" | priority: normal`)
+
+  speak('Junction ahead', 'normal')
+  state.junctionAnnounced = true
+  state.lastSpeakTime = now
+
+  return true
 }
 
 // ── Helper: remove curves the driver has passed ──
 function cleanupPassedCurves(state, pos, hdg) {
+  const before = state.detectedCurves.length
   state.detectedCurves = state.detectedCurves.filter(c => {
     const dist = haversine(pos, c.position)
-    // Check if curve is behind us (bearing from pos to curve vs our heading)
     const brg = bearing(pos, c.position)
     const diff = Math.abs(angleDiff(hdg, brg))
     const isBehind = diff > 90 && dist > CURVE_BEHIND_BUFFER
     if (isBehind) {
       state.announcedCurves.add(c.id)
+      console.log(`[FreeDrive] Curve passed: ${c.id.substring(0, 30)}`)
     }
     return !isBehind
   })
+  const removed = before - state.detectedCurves.length
+  if (removed > 0) {
+    console.log(`[FreeDrive] Cleanup: removed ${removed} passed curves, ${state.detectedCurves.length} remaining`)
+  }
 }
