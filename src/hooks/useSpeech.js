@@ -558,6 +558,9 @@ export function useSpeech() {
 
     const priorityValue = PRIORITY_VALUES[priority] ?? 1
 
+    // v3: FreeDrive speech debug logging
+    console.log(`[FreeDrive] Speech: attempting to queue: "${text}" | currently playing: ${isPlayingRef.current} | current pri: ${currentPriorityRef.current} | new pri: ${priorityValue}`)
+
     // FIX 3 ROUND 6: SPEECH INTERRUPT LOGIC
     if (isPlayingRef.current) {
       if (priorityValue >= currentPriorityRef.current) {
