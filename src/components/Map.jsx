@@ -311,6 +311,8 @@ export default function Map({ freeDriveGeometry } = {}) {
     const m = map.current
 
     if (freeDriveGeometry && freeDriveGeometry.length >= 2) {
+      console.log(`[FreeDrive] 🗺️ Map: drawing lookahead line, ${freeDriveGeometry.length} pts`)
+
       const geojson = {
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: freeDriveGeometry }
@@ -319,23 +321,30 @@ export default function Map({ freeDriveGeometry } = {}) {
       if (m.getSource('freedrive-lookahead')) {
         m.getSource('freedrive-lookahead').setData(geojson)
       } else {
+        console.log('[FreeDrive] 🗺️ Map: creating lookahead source + layer')
         m.addSource('freedrive-lookahead', { type: 'geojson', data: geojson })
         m.addLayer({
           id: 'freedrive-lookahead',
           type: 'line',
           source: 'freedrive-lookahead',
           paint: {
-            'line-color': 'rgba(255, 255, 255, 0.35)',
+            'line-color': '#ffffff',
             'line-width': 3,
+            'line-opacity': 0.5,
             'line-dasharray': [2, 3],
           }
         })
       }
-    } else if (m.getSource('freedrive-lookahead')) {
-      m.getSource('freedrive-lookahead').setData({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: [] }
-      })
+    } else {
+      if (freeDriveGeometry) {
+        console.log(`[FreeDrive] 🗺️ Map: geometry too short (${freeDriveGeometry.length} pts), skipping`)
+      }
+      if (m.getSource('freedrive-lookahead')) {
+        m.getSource('freedrive-lookahead').setData({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [] }
+        })
+      }
     }
   }, [mapLoaded, freeDriveGeometry])
 
