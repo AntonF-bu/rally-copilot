@@ -39,9 +39,11 @@ import { useHighwayMode } from './hooks/useHighwayMode'
 import useHighwayStore from './services/highwayStore'
 import { useSpeechPlanner } from './hooks/useSpeechPlanner'
 import { useDriveStats } from './hooks/useDriveStats'
-import { useFreeDrive } from './hooks/useFreeDrive'
+import { useFreeDrive, haversine } from './hooks/useFreeDrive'
 import { useFreeDriveSim } from './hooks/useFreeDriveSim'
 import { getDistanceAlongRoute, buildCumulativeDistances } from './services/routeMatcher'
+import { analyzeRoadFlow } from './services/roadFlowAnalyzer'
+import { filterEventsToCallouts, mergeCloseCallouts } from './services/ruleBasedCalloutFilter'
 
 import Map from './components/Map'
 import CalloutOverlay from './components/CalloutOverlay'
@@ -226,11 +228,13 @@ export default function App() {
     position,
     heading: storeHeading,
     speed: currentSpeed,
-    speak,
   })
   const freeDriveStateRef = useRef(null)
   const freeDriveTickRef = useRef(null) // v3: stable ref for tick function
   const freeDriveOpeningDoneRef = useRef(false) // v3: prevent repeated opening lines
+  // Free Drive cumulative distance tracking
+  const fdCumulativeDistRef = useRef(0)
+  const fdLastPosRef = useRef(null)
 
   // Keep tick ref up to date (doesn't cause re-renders or effect re-runs)
   useEffect(() => { freeDriveTickRef.current = freeDrive.tick }, [freeDrive.tick])
@@ -252,11 +256,114 @@ export default function App() {
     console.log('🎮 Free Drive Sim: auto-started via URL params')
   }, [])
 
+  // Free Drive: cumulative distance tracking from GPS position changes
+  // This replaces Route Mode's route-matching distance calculation.
+  // userDistanceAlongRoute monotonically increases as the driver moves.
+  useEffect(() => {
+    if (!isRunning || !isFreeDrive || !position) return
+    if (fdLastPosRef.current) {
+      const moved = haversine(fdLastPosRef.current, position)
+      // Sanity: ignore tiny GPS jitter (< 1m) and teleports (> 500m)
+      if (moved > 1 && moved < 500) {
+        fdCumulativeDistRef.current += moved
+        setUserDistanceAlongRoute(fdCumulativeDistRef.current)
+      }
+    }
+    fdLastPosRef.current = position
+  }, [isRunning, isFreeDrive, position])
+
+  // Free Drive: analysis pipeline — runs Route Mode's curve detection on lookahead geometry
+  const analyzeFreeDriveGeometry = useCallback((geometry, distance) => {
+    if (!geometry?.length || geometry.length < 5) return
+
+    const totalDist = distance || 3000
+    const totalMiles = totalDist / 1609.34
+
+    // Single 'technical' zone for maximum curve detection sensitivity
+    // analyzeRoadFlow uses {startDistance, endDistance} format
+    const fdZones = [{
+      character: 'technical',
+      startDistance: 0,
+      endDistance: totalDist,
+      startMile: 0,
+      endMile: totalMiles,
+    }]
+
+    // Step 1: Road flow analysis (same as Route Mode)
+    const flowResult = analyzeRoadFlow(geometry, fdZones, totalDist)
+    if (!flowResult.events.length) {
+      console.log(`[FreeDrive] Analysis: 0 events from ${geometry.length} points`)
+      useStore.getState().setCuratedHighwayCallouts([])
+      return
+    }
+
+    // Step 2: Filter events to callouts (same as Route Mode)
+    const result = filterEventsToCallouts(flowResult.events, { totalMiles }, fdZones)
+
+    // Step 3: Format callouts (same shape as Route Mode pipeline)
+    const formatted = result.callouts.map(c => ({
+      id: c.id,
+      position: c.position,
+      triggerDistance: c.triggerDistance,
+      triggerMile: c.triggerMile || c.mile,
+      text: c.text,
+      shortText: (c.text || '').substring(0, 35),
+      type: c.type,
+      priority: c.priority || 'medium',
+      reason: c.reason,
+      zone: c.zone || 'technical',
+      angle: c.angle,
+      direction: c.direction,
+    }))
+
+    // Step 4: Sort by triggerDistance
+    const sorted = [...formatted].sort((a, b) => {
+      const dA = a.triggerDistance ?? (a.triggerMile || 0) * 1609.34
+      const dB = b.triggerDistance ?? (b.triggerMile || 0) * 1609.34
+      return dA - dB
+    })
+
+    // Step 5: Merge close callouts (chains in technical zones, same as Route Mode)
+    const merged = mergeCloseCallouts(sorted, fdZones)
+
+    // Step 6: Offset triggerDistance by cumulative distance driven
+    // This makes the speech planner's ahead = triggerDistance - userDistanceAlongRoute
+    // = distance from driver to curve along the lookahead geometry
+    const offset = fdCumulativeDistRef.current
+    const offsetCallouts = merged.map(c => ({
+      ...c,
+      triggerDistance: (c.triggerDistance || 0) + offset,
+      triggerMile: ((c.triggerDistance || 0) + offset) / 1609.34,
+    }))
+
+    console.log(`[FreeDrive] Analysis: ${flowResult.events.length} events → ${result.callouts.length} callouts → ${merged.length} merged | offset=${Math.round(offset)}m`)
+    if (merged.length > 0) {
+      const preview = merged.slice(0, 4).map(c =>
+        `"${(c.text || '').substring(0, 30)}" @${Math.round(c.triggerDistance || 0)}m`
+      ).join(', ')
+      console.log(`[FreeDrive] Callouts: ${preview}`)
+    }
+
+    // Store in same Zustand field Route Mode uses — speech planner picks them up
+    useStore.getState().setCuratedHighwayCallouts(offsetCallouts)
+
+    // Set route zone covering the lookahead range (offset by cumulative distance)
+    useStore.getState().setRouteZones([{
+      character: 'technical',
+      startDistance: offset,
+      endDistance: offset + totalDist,
+      startMile: offset / 1609.34,
+      endMile: (offset + totalDist) / 1609.34,
+    }])
+  }, [])
+
   // v3: Free drive tick loop — stable interval, reads tick from ref
   // Only restarts when isRunning or isFreeDrive change (not on every render)
   useEffect(() => {
     if (!isRunning || !isFreeDrive) {
       freeDriveOpeningDoneRef.current = false
+      fdCumulativeDistRef.current = 0
+      fdLastPosRef.current = null
       return
     }
     let mounted = true
@@ -266,6 +373,8 @@ export default function App() {
       const result = await freeDriveTickRef.current()
       if (result) {
         freeDriveStateRef.current = result
+        // Run Route Mode analysis pipeline on the new geometry
+        analyzeFreeDriveGeometry(result.geometry, result.distance)
       }
     }, 2000)
 
@@ -273,7 +382,7 @@ export default function App() {
       mounted = false
       clearInterval(interval)
     }
-  }, [isRunning, isFreeDrive])
+  }, [isRunning, isFreeDrive, analyzeFreeDriveGeometry])
 
   // v5: Opening line — briefing voice profile, short and clean
   useEffect(() => {
@@ -290,10 +399,12 @@ export default function App() {
   // Free drive stop handler
   const handleStopFreeDrive = useCallback(() => {
     const stats = freeDrive.getTripStats()
-    setFreeDriveTripStats(stats)
+    // Get curve count from planner's announced set
+    const curveCount = announcedCuratedCalloutsRef.current?.size || 0
+    setFreeDriveTripStats({ ...stats, totalCurvesCalled: curveCount })
 
     // Closing line
-    const curvesText = stats.totalCurvesCalled === 1 ? '1 curve' : `${stats.totalCurvesCalled} curves`
+    const curvesText = curveCount === 1 ? '1 curve' : `${curveCount} curves`
     const distText = `${stats.totalDistanceMiles.toFixed(1)} miles`
     speak(`Nice drive. ${curvesText} over ${distText}.`, 'normal')
 
@@ -1127,22 +1238,18 @@ export default function App() {
         <div className="relative z-[1] w-full h-full">
           <Map
             freeDriveGeometry={isFreeDrive ? fdState?.geometry : null}
-            freeDriveCurves={isFreeDrive ? fdState?.detectedCurves : null}
           />
+          {/* CalloutOverlay handles curve display for BOTH modes */}
+          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
           {isFreeDrive ? (
             <FreeDriveHUD
               speed={currentSpeed}
               roadName={fdState?.roadName || ''}
-              curves={fdState?.detectedCurves || []}
               paused={fdState?.paused}
-              lastSpokenCallout={fdState?.lastSpokenCallout}
               onStop={handleStopFreeDrive}
             />
           ) : (
-            <>
-              <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
-              <BottomBar />
-            </>
+            <BottomBar />
           )}
           <SettingsPanel />
           <VoiceIndicator />
