@@ -24,13 +24,14 @@ const ZONE_COLORS = {
   urban: '#FF668C',
 }
 
-export default function Map({ freeDriveGeometry } = {}) {
+export default function Map({ freeDriveGeometry, freeDriveCurves } = {}) {
   const mapContainer = useRef(null)
   const map = useRef(null)
   const userMarker = useRef(null)
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const calloutMarkers = useRef([])
+  const fdMarkers = useRef([]) // Free Drive curve markers
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
   const isAnimatingRef = useRef(false)
@@ -305,14 +306,12 @@ export default function Map({ freeDriveGeometry } = {}) {
     }
   }, [curatedHighwayCallouts, mapLoaded, addCalloutMarkers])
 
-  // Free Drive: draw lookahead line
+  // Free Drive: draw lookahead line (technical green, glow + main like Route Mode)
   useEffect(() => {
     if (!map.current || !mapLoaded) return
     const m = map.current
 
     if (freeDriveGeometry && freeDriveGeometry.length >= 2) {
-      console.log(`[FreeDrive] 🗺️ Map: drawing lookahead line, ${freeDriveGeometry.length} pts`)
-
       const geojson = {
         type: 'Feature',
         geometry: { type: 'LineString', coordinates: freeDriveGeometry }
@@ -321,24 +320,33 @@ export default function Map({ freeDriveGeometry } = {}) {
       if (m.getSource('freedrive-lookahead')) {
         m.getSource('freedrive-lookahead').setData(geojson)
       } else {
-        console.log('[FreeDrive] 🗺️ Map: creating lookahead source + layer')
         m.addSource('freedrive-lookahead', { type: 'geojson', data: geojson })
+        // Glow layer (like Route Mode)
+        m.addLayer({
+          id: 'freedrive-lookahead-glow',
+          type: 'line',
+          source: 'freedrive-lookahead',
+          paint: {
+            'line-color': ZONE_COLORS.technical,
+            'line-width': 10,
+            'line-opacity': 0.25,
+            'line-blur': 5,
+          }
+        })
+        // Main line — dashed technical green
         m.addLayer({
           id: 'freedrive-lookahead',
           type: 'line',
           source: 'freedrive-lookahead',
           paint: {
-            'line-color': '#ffffff',
+            'line-color': ZONE_COLORS.technical,
             'line-width': 3,
-            'line-opacity': 0.5,
+            'line-opacity': 0.7,
             'line-dasharray': [2, 3],
           }
         })
       }
     } else {
-      if (freeDriveGeometry) {
-        console.log(`[FreeDrive] 🗺️ Map: geometry too short (${freeDriveGeometry.length} pts), skipping`)
-      }
       if (m.getSource('freedrive-lookahead')) {
         m.getSource('freedrive-lookahead').setData({
           type: 'Feature',
@@ -347,6 +355,41 @@ export default function Map({ freeDriveGeometry } = {}) {
       }
     }
   }, [mapLoaded, freeDriveGeometry])
+
+  // Free Drive: curve markers using same createCalloutMarkerElement as Route Mode
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return
+
+    // Clear old FD markers
+    fdMarkers.current.forEach(m => m.remove())
+    fdMarkers.current = []
+
+    if (!freeDriveCurves?.length) return
+
+    // Show max 5 nearest curves
+    const toShow = freeDriveCurves
+      .filter(c => c.distanceFromDriver > 0)
+      .sort((a, b) => a.distanceFromDriver - b.distanceFromDriver)
+      .slice(0, 5)
+
+    toShow.forEach(curve => {
+      if (!curve.position) return
+      // Build a callout-shaped object for the shared marker creator
+      const calloutObj = {
+        text: curve.text,
+        position: curve.position,
+        zone: 'technical',
+        type: 'curve',
+      }
+      const el = createCalloutMarkerElement(calloutObj)
+      if (!el) return
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat(curve.position)
+        .addTo(map.current)
+      fdMarkers.current.push(marker)
+    })
+  }, [mapLoaded, freeDriveCurves])
 
   // Create user marker
   useEffect(() => {
