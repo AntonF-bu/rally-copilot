@@ -6,9 +6,22 @@
 // Highway marker color matches zone route line (#66B3FF)
 const HIGHWAY_MARKER_COLOR = '#66B3FF'
 
+// Convert raw angle to rally grade for marker labels
+// Matches cleanForSpeech scale: 180+=HP, 120+=1, 80+=2, 60+=3, 40+=4, 20+=5, <20=6
+function angleToRallyGrade(angle) {
+  if (angle >= 180) return 'HP'
+  if (angle >= 120) return '1'
+  if (angle >= 80) return '2'
+  if (angle >= 60) return '3'
+  if (angle >= 40) return '4'
+  if (angle >= 20) return '5'
+  return '6'
+}
+
 /**
  * Get a short label for a callout marker on the map.
- * e.g. "L42", "HP", "SEQ", "G3". Returns null for transitions (no marker).
+ * Uses rally grades (R4, L2, HP) not raw degrees (R42, L19).
+ * Returns null for transitions (no marker).
  */
 export function getCalloutLabel(callout) {
   const text = callout.text || ''
@@ -21,7 +34,11 @@ export function getCalloutLabel(callout) {
     if (text.toLowerCase().includes('esses')) return 'ESS'
     if (text.includes('HARD')) {
       const match = text.match(/HARD\s+(LEFT|RIGHT)\s+(\d+)/i)
-      return match ? `H${match[1][0]}${match[2]}` : 'HRD'
+      if (match) {
+        const grade = angleToRallyGrade(parseInt(match[2]))
+        return `${match[1][0]}${grade}`
+      }
+      return 'HRD'
     }
     return `G${callout.groupedFrom.length}`
   }
@@ -31,12 +48,15 @@ export function getCalloutLabel(callout) {
   if (callout.type === 'sequence') return 'SEQ'
   if (callout.type === 'transition') return null
 
-  // Direction + angle from text
+  // Direction + rally grade from text
   const dirMatch = text.match(/\b(left|right|L|R)\b/i)
   const angleMatch = text.match(/(\d+)/)
 
-  if (dirMatch && angleMatch) return `${dirMatch[1][0].toUpperCase()}${angleMatch[1]}`
-  if (angleMatch) return angleMatch[1]
+  if (dirMatch && angleMatch) {
+    const grade = angleToRallyGrade(parseInt(angleMatch[1]))
+    return `${dirMatch[1][0].toUpperCase()}${grade}`
+  }
+  if (angleMatch) return angleToRallyGrade(parseInt(angleMatch[1]))
   if (dirMatch) return dirMatch[1][0].toUpperCase()
 
   return callout.type?.[0]?.toUpperCase() || '•'
