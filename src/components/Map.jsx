@@ -31,6 +31,7 @@ export default function Map({ freeDriveGeometry } = {}) {
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const calloutMarkers = useRef([])
+  const calloutMarkerMapRef = useRef(new Map()) // spatialId → marker (for diff-based rendering)
   // Free Drive curve markers now handled by curatedHighwayCallouts (same as Route Mode)
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
@@ -208,26 +209,33 @@ export default function Map({ freeDriveGeometry } = {}) {
   }, [routeData?.curves, routeZones, isInTransitZone, curatedHighwayCallouts])
 
   // ================================
-  // Add curated callout markers
-  // Matches RoutePreview style (simpler colors, G${count} labels)
+  // Add curated callout markers — diff-based rendering
+  // Only add/remove changed markers to prevent flicker
   // ================================
   const addCalloutMarkers = useCallback(() => {
     if (!map.current || !mapLoaded) return
 
-    // Clear old markers
-    calloutMarkers.current.forEach(m => m.remove())
-    calloutMarkers.current = []
+    const markerMap = calloutMarkerMapRef.current
+    const newIds = new Set()
 
     if (!curatedHighwayCallouts?.length) {
-      console.log('🗺️ No curated callouts to display')
+      // Remove all markers
+      markerMap.forEach(m => m.remove())
+      markerMap.clear()
+      calloutMarkers.current = []
       return
     }
 
-    console.log(`🗺️ Rendering ${curatedHighwayCallouts.length} curated callouts`)
-
-    curatedHighwayCallouts.forEach((callout) => {
+    // Build set of current callout IDs
+    curatedHighwayCallouts.forEach(callout => {
       if (!callout.position) return
+      const id = callout.spatialId || callout.id || `${callout.position[1].toFixed(4)}_${callout.position[0].toFixed(4)}`
+      newIds.add(id)
 
+      // Skip if marker already exists for this ID
+      if (markerMap.has(id)) return
+
+      // Create new marker
       const el = createCalloutMarkerElement(callout)
       if (!el) return
 
@@ -235,10 +243,19 @@ export default function Map({ freeDriveGeometry } = {}) {
         .setLngLat(callout.position)
         .addTo(map.current)
 
-      calloutMarkers.current.push(marker)
+      markerMap.set(id, marker)
     })
 
-    console.log(`🗺️ Added ${calloutMarkers.current.length} callout markers`)
+    // Remove markers no longer in callouts
+    for (const [id, marker] of markerMap) {
+      if (!newIds.has(id)) {
+        marker.remove()
+        markerMap.delete(id)
+      }
+    }
+
+    // Keep legacy array in sync
+    calloutMarkers.current = [...markerMap.values()]
   }, [curatedHighwayCallouts, mapLoaded])
 
   // Initialize map - matches RoutePreview style (flat view, no terrain)
@@ -331,16 +348,16 @@ export default function Map({ freeDriveGeometry } = {}) {
       } else {
         m.addSource(sourceId, { type: 'geojson', data: geojson })
 
-        // DEBUG: Bright red 5px solid test line — rules out styling issues
+        // Rally Orange lookahead line with glow
         m.addLayer({
           id: glowId,
           type: 'line',
           source: sourceId,
           paint: {
-            'line-color': '#ff0000',
+            'line-color': '#E8622C',
             'line-width': 8,
-            'line-opacity': 0.4,
-            'line-blur': 4,
+            'line-opacity': 0.35,
+            'line-blur': 5,
           }
         })
 
@@ -349,9 +366,9 @@ export default function Map({ freeDriveGeometry } = {}) {
           type: 'line',
           source: sourceId,
           paint: {
-            'line-color': '#ff0000',
-            'line-width': 5,
-            'line-opacity': 1.0,
+            'line-color': '#E8622C',
+            'line-width': 4,
+            'line-opacity': 0.9,
           }
         })
 

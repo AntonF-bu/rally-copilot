@@ -55,7 +55,7 @@ import RoutePreview from './components/RoutePreview'
 import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
-import FreeDriveHUD from './components/FreeDriveHUD'
+// FreeDriveHUD removed — CalloutOverlay handles both modes
 import FreeDriveSimControls from './components/FreeDriveSimControls'
 
 // URL param detection for Free Drive sim mode
@@ -222,6 +222,18 @@ export default function App() {
   })
 
   // ── FREE DRIVE MODE ──
+  // Accumulator helpers — stable spatial ID for callout matching across API refreshes
+  const getCalloutDirection = (c) => {
+    if (c.direction) return c.direction[0].toUpperCase()
+    const m = (c.text || '').match(/\b(left|right|L|R)\b/i)
+    return m ? m[1][0].toUpperCase() : 'X'
+  }
+  const makeSpatialId = (c) => {
+    if (!c.position) return null
+    const [lng, lat] = c.position
+    return `${lat.toFixed(4)}_${lng.toFixed(4)}_${getCalloutDirection(c)}`
+  }
+
   const isFreeDrive = driveMode === 'free'
   const freeDrive = useFreeDrive({
     isActive: isRunning && isFreeDrive,
@@ -235,6 +247,11 @@ export default function App() {
   // Free Drive cumulative distance tracking
   const fdCumulativeDistRef = useRef(0)
   const fdLastPosRef = useRef(null)
+  // Callout accumulator: Map<spatialId, accEntry> — stable across API refreshes
+  const fdAccumulatorRef = useRef(new Map())
+  // Zone briefing: fire once on start, then only on genuine zone change
+  const fdInitialBriefingDoneRef = useRef(false)
+  const fdLastZoneRef = useRef('technical')
 
   // Keep tick ref up to date (doesn't cause re-renders or effect re-runs)
   useEffect(() => { freeDriveTickRef.current = freeDrive.tick }, [freeDrive.tick])
@@ -272,17 +289,25 @@ export default function App() {
     fdLastPosRef.current = position
   }, [isRunning, isFreeDrive, position])
 
-  // Free Drive: analysis pipeline — runs Route Mode's curve detection on lookahead geometry
-  const analyzeFreeDriveGeometry = useCallback((geometry, distance) => {
+  // ── Free Drive: zone-adaptive analysis pipeline with callout accumulator ──
+  // Runs Route Mode's curve detection on lookahead geometry, then merges results
+  // into a stable accumulator so callouts survive API refreshes.
+  const analyzeFreeDriveGeometry = useCallback((geometry, distance, roadClass, offPath) => {
     if (!geometry?.length || geometry.length < 5) return
 
     const totalDist = distance || 3000
     const totalMiles = totalDist / 1609.34
 
-    // Single 'technical' zone for maximum curve detection sensitivity
-    // analyzeRoadFlow uses {startDistance, endDistance} format
+    // If off-path, reset accumulator — old callouts are for a different road
+    if (offPath) {
+      fdAccumulatorRef.current.clear()
+      console.log('[FreeDrive] Accumulator reset (off-path)')
+    }
+
+    // Map detected road class to zone character for the analysis pipeline
+    const zoneChar = roadClass === 'highway' ? 'transit' : roadClass === 'urban' ? 'urban' : 'technical'
     const fdZones = [{
-      character: 'technical',
+      character: zoneChar,
       startDistance: 0,
       endDistance: totalDist,
       startMile: 0,
@@ -293,14 +318,14 @@ export default function App() {
     const flowResult = analyzeRoadFlow(geometry, fdZones, totalDist)
     if (!flowResult.events.length) {
       console.log(`[FreeDrive] Analysis: 0 events from ${geometry.length} points`)
-      useStore.getState().setCuratedHighwayCallouts([])
+      // Don't clear accumulator — keep existing curves that are still ahead
       return
     }
 
     // Step 2: Filter events to callouts (same as Route Mode)
     const result = filterEventsToCallouts(flowResult.events, { totalMiles }, fdZones)
 
-    // Step 3: Format callouts (same shape as Route Mode pipeline)
+    // Step 3: Format callouts
     const formatted = result.callouts.map(c => ({
       id: c.id,
       position: c.position,
@@ -311,51 +336,121 @@ export default function App() {
       type: c.type,
       priority: c.priority || 'medium',
       reason: c.reason,
-      zone: c.zone || 'technical',
+      zone: c.zone || zoneChar,
       angle: c.angle,
       direction: c.direction,
     }))
 
-    // Step 4: Sort by triggerDistance
+    // Step 4: Sort + merge close callouts
     const sorted = [...formatted].sort((a, b) => {
       const dA = a.triggerDistance ?? (a.triggerMile || 0) * 1609.34
       const dB = b.triggerDistance ?? (b.triggerMile || 0) * 1609.34
       return dA - dB
     })
-
-    // Step 5: Merge close callouts (chains in technical zones, same as Route Mode)
     const merged = mergeCloseCallouts(sorted, fdZones)
 
+    // Step 5: Post-filter by zone-specific angle thresholds
+    const MIN_ANGLES = { highway: 40, technical: 25, urban: 60 }
+    const minAngle = MIN_ANGLES[roadClass] || 25
+    const angleFiltered = merged.filter(c => {
+      const angle = c.angle || parseInt(c.text?.match(/(\d+)°?/)?.[1]) || 0
+      return angle >= minAngle
+    })
+
     // Step 6: Offset triggerDistance by cumulative distance driven
-    // This makes the speech planner's ahead = triggerDistance - userDistanceAlongRoute
-    // = distance from driver to curve along the lookahead geometry
     const offset = fdCumulativeDistRef.current
-    const offsetCallouts = merged.map(c => ({
+    const offsetCallouts = angleFiltered.map(c => ({
       ...c,
       triggerDistance: (c.triggerDistance || 0) + offset,
       triggerMile: ((c.triggerDistance || 0) + offset) / 1609.34,
     }))
 
-    console.log(`[FreeDrive] Analysis: ${flowResult.events.length} events → ${result.callouts.length} callouts → ${merged.length} merged | offset=${Math.round(offset)}m`)
-    if (merged.length > 0) {
-      const preview = merged.slice(0, 4).map(c =>
-        `"${(c.text || '').substring(0, 30)}" @${Math.round(c.triggerDistance || 0)}m`
-      ).join(', ')
-      console.log(`[FreeDrive] Callouts: ${preview}`)
+    // Step 7: Merge into accumulator (stable across refreshes)
+    const acc = fdAccumulatorRef.current
+    const driverDist = fdCumulativeDistRef.current
+
+    for (const callout of offsetCallouts) {
+      const dir = getCalloutDirection(callout)
+      let foundMatch = false
+
+      // Check existing entries for spatial match (within 100m + same direction)
+      for (const [, existing] of acc) {
+        if (getCalloutDirection(existing) !== dir) continue
+        if (!existing.position || !callout.position) continue
+        const dist = haversine(existing.position, callout.position)
+        if (dist < 100) {
+          // Match — update distance, keep announced state
+          existing.triggerDistance = callout.triggerDistance
+          existing.triggerMile = callout.triggerMile
+          existing.text = callout.text
+          existing.distanceAhead = callout.triggerDistance - driverDist
+          foundMatch = true
+          break
+        }
+      }
+
+      if (!foundMatch) {
+        const spatialId = makeSpatialId(callout)
+        if (!spatialId) continue
+        acc.set(spatialId, {
+          ...callout,
+          spatialId,
+          distanceAhead: callout.triggerDistance - driverDist,
+          announced: false,
+          createdAt: Date.now(),
+        })
+        console.log(`[FreeDrive] New curve: ${callout.text} at ${Math.round(callout.triggerDistance)}m (id: ${spatialId})`)
+      }
     }
 
-    // Store in same Zustand field Route Mode uses — speech planner picks them up
-    useStore.getState().setCuratedHighwayCallouts(offsetCallouts)
+    // Clean up passed entries (behind driver by > 100m)
+    for (const [id, entry] of acc) {
+      entry.distanceAhead = entry.triggerDistance - driverDist
+      if (entry.distanceAhead < -100) {
+        console.log(`[FreeDrive] Curve passed: ${id} (removed)`)
+        acc.delete(id)
+      }
+    }
 
-    // Set route zone covering the lookahead range (offset by cumulative distance)
+    // Convert accumulator to sorted array → store
+    const accCallouts = [...acc.values()].sort((a, b) => a.triggerDistance - b.triggerDistance)
+
+    console.log(`[FreeDrive] Analysis: ${flowResult.events.length} events → ${angleFiltered.length} filtered (${roadClass} ≥${minAngle}°) → ${accCallouts.length} in accumulator`)
+
+    useStore.getState().setCuratedHighwayCallouts(accCallouts)
     useStore.getState().setRouteZones([{
-      character: 'technical',
+      character: zoneChar,
       startDistance: offset,
       endDistance: offset + totalDist,
       startMile: offset / 1609.34,
       endMile: (offset + totalDist) / 1609.34,
     }])
-  }, [])
+
+    // Zone briefing: fire once after first analysis, then only on genuine zone change
+    if (!fdInitialBriefingDoneRef.current) {
+      fdInitialBriefingDoneRef.current = true
+      fdLastZoneRef.current = roadClass
+      if (zoneChar === 'technical') {
+        const curveCount = accCallouts.length
+        if (curveCount > 0) {
+          speak(`Technical. ${curveCount} curve${curveCount === 1 ? '' : 's'} ahead. Stay sharp.`, 'normal', { voiceProfile: 'briefing' })
+        }
+      } else if (zoneChar === 'transit') {
+        speak('Open road ahead.', 'normal', { voiceProfile: 'briefing' })
+      }
+    } else if (roadClass !== fdLastZoneRef.current) {
+      // Genuine zone change (highway → technical, etc.)
+      const oldZone = fdLastZoneRef.current
+      fdLastZoneRef.current = roadClass
+      console.log(`[FreeDrive] Zone change: ${oldZone} → ${roadClass}`)
+      if (zoneChar === 'technical' && oldZone !== 'technical') {
+        const curveCount = accCallouts.length
+        speak(`Technical section. ${curveCount} curve${curveCount === 1 ? '' : 's'} ahead.`, 'normal', { voiceProfile: 'briefing' })
+      } else if (zoneChar === 'transit' && oldZone !== 'highway') {
+        speak('Open road.', 'normal', { voiceProfile: 'briefing' })
+      }
+    }
+  }, [speak])
 
   // v3: Free drive tick loop — stable interval, reads tick from ref
   // Only restarts when isRunning or isFreeDrive change (not on every render)
@@ -364,6 +459,9 @@ export default function App() {
       freeDriveOpeningDoneRef.current = false
       fdCumulativeDistRef.current = 0
       fdLastPosRef.current = null
+      fdAccumulatorRef.current.clear()
+      fdInitialBriefingDoneRef.current = false
+      fdLastZoneRef.current = 'technical'
       return
     }
 
@@ -379,8 +477,8 @@ export default function App() {
       const result = await freeDriveTickRef.current()
       if (result) {
         freeDriveStateRef.current = result
-        // Run Route Mode analysis pipeline on the new geometry
-        analyzeFreeDriveGeometry(result.geometry, result.distance)
+        // Run analysis pipeline with zone-adaptive thresholds
+        analyzeFreeDriveGeometry(result.geometry, result.distance, result.roadClass, result.offPath)
       }
     }, 2000)
 
@@ -1232,7 +1330,7 @@ export default function App() {
     )
   }
 
-  // Build free drive state for HUD
+  // Build free drive state for map
   const fdState = isFreeDrive ? freeDrive.getState() : null
 
   return (
@@ -1243,18 +1341,16 @@ export default function App() {
           <Map
             freeDriveGeometry={isFreeDrive ? fdState?.geometry : null}
           />
-          {/* CalloutOverlay handles curve display for BOTH modes */}
-          <CalloutOverlay currentDrivingMode={currentMode} userDistance={userDistanceAlongRoute} diagnosticLog={diagnosticLogRef} isSimulating={isSimulating} />
-          {isFreeDrive ? (
-            <FreeDriveHUD
-              speed={currentSpeed}
-              roadName={fdState?.roadName || ''}
-              paused={fdState?.paused}
-              onStop={handleStopFreeDrive}
-            />
-          ) : (
-            <BottomBar />
-          )}
+          {/* CalloutOverlay handles HUD for BOTH modes */}
+          <CalloutOverlay
+            currentDrivingMode={currentMode}
+            userDistance={userDistanceAlongRoute}
+            diagnosticLog={diagnosticLogRef}
+            isSimulating={isSimulating}
+            isFreeDrive={isFreeDrive}
+            onStop={isFreeDrive ? handleStopFreeDrive : undefined}
+          />
+          {!isFreeDrive && <BottomBar />}
           <SettingsPanel />
           <VoiceIndicator />
           {/* Free Drive Sim Controls */}
