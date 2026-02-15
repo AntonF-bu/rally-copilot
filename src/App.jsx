@@ -55,7 +55,7 @@ import RoutePreview from './components/RoutePreview'
 import TripSummary from './components/TripSummary'
 import RouteEditor from './components/RouteEditor'
 import AmbientBackground from './components/ui/AmbientBackground'
-// FreeDriveHUD removed — CalloutOverlay handles both modes
+import FreeDriveHUD from './components/FreeDriveHUD'
 import FreeDriveSimControls from './components/FreeDriveSimControls'
 
 // URL param detection for Free Drive sim mode
@@ -1341,15 +1341,22 @@ export default function App() {
           <Map
             freeDriveGeometry={isFreeDrive ? fdState?.geometry : null}
           />
-          {/* CalloutOverlay handles HUD for BOTH modes */}
-          <CalloutOverlay
-            currentDrivingMode={currentMode}
-            userDistance={userDistanceAlongRoute}
-            diagnosticLog={diagnosticLogRef}
-            isSimulating={isSimulating}
-            isFreeDrive={isFreeDrive}
-            onStop={isFreeDrive ? handleStopFreeDrive : undefined}
-          />
+          {/* Separate HUD components — avoids cascading state updates */}
+          {isFreeDrive ? (
+            <FreeDriveHUD
+              userDistance={userDistanceAlongRoute}
+              onStop={handleStopFreeDrive}
+              diagnosticLog={diagnosticLogRef}
+              isSimulating={isSimulating}
+            />
+          ) : (
+            <CalloutOverlay
+              currentDrivingMode={currentMode}
+              userDistance={userDistanceAlongRoute}
+              diagnosticLog={diagnosticLogRef}
+              isSimulating={isSimulating}
+            />
+          )}
           {!isFreeDrive && <BottomBar />}
           <SettingsPanel />
           <VoiceIndicator />

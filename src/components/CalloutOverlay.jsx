@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import useStore from '../store'
 import { getCurveColor } from '../data/routes'
 import { CHARACTER_COLORS, ROUTE_CHARACTER } from '../services/zoneService'
@@ -24,7 +24,7 @@ const CHARACTER_LABELS = {
   [ROUTE_CHARACTER.URBAN]: { label: 'URBAN', short: 'CITY', color: ZONE_COLORS.urban }
 }
 
-export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, diagnosticLog, isSimulating: isSimProp, isFreeDrive = false, onStop }) {
+export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, diagnosticLog, isSimulating: isSimProp }) {
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const handleTripleTap = useTripleTap(() => {
     if (!isSimProp && diagnosticLog?.current?.length > 0) {
@@ -208,43 +208,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
 
   const hasNetworkIssue = !isOnline
 
-  // Free Drive with no callouts yet — show minimal HUD
-  if (isFreeDrive && (!curatedHighwayCallouts?.length || !nextCallout) && !curatedHighwayCallouts?.length) {
-    return (
-      <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
-        <div className="hud-glass rounded-2xl px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <ZoneBadge color="#E8622C" label="FREE DRIVE" />
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#E8622C' }} />
-              <span className="text-white/50 text-sm">Scanning road...</span>
-            </div>
-            <div className="flex items-center gap-3">
-              {onStop && (
-                <button
-                  className="pointer-events-auto px-3 py-1 rounded text-[10px] font-bold tracking-wider"
-                  style={{ background: 'rgba(200,40,40,0.6)', color: '#fff', border: '1px solid rgba(200,40,40,0.4)' }}
-                  onClick={onStop}
-                >
-                  STOP
-                </button>
-              )}
-              {settings.showSpeedometer !== false && (
-                <div className="text-right pointer-events-auto" onClick={handleTripleTap}>
-                  <span className="text-2xl font-bold" style={{ color: '#E8622C' }}>
-                    {currentSpeedDisplay}
-                  </span>
-                  <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        <style>{hudStyles}</style>
-      </div>
-    )
-  }
-
   // ========================================
   // CURATED CALLOUT HUD - when we have curated callouts
   // ========================================
@@ -272,30 +235,15 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
           {/* Top row: Zone badge + stats */}
           <div className="px-4 pt-2 pb-1 flex items-center justify-between border-b border-white/5">
             <div className="flex items-center gap-2">
-              {isFreeDrive ? (
-                <ZoneBadge color="#E8622C" label="FREE DRIVE" />
-              ) : (
-                <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
+            </div>
+            <div className="flex items-center gap-4 text-white/40 text-xs">
+              <span>{routeProgress.percent}%</span>
+              <span>{routeProgress.remainingTime}min</span>
+              {settings.showElevation !== false && (
+                <span style={{ color: zoneColor }}>↑{elevationStats.current}{elevationUnit}</span>
               )}
             </div>
-            {!isFreeDrive && (
-              <div className="flex items-center gap-4 text-white/40 text-xs">
-                <span>{routeProgress.percent}%</span>
-                <span>{routeProgress.remainingTime}min</span>
-                {settings.showElevation !== false && (
-                  <span style={{ color: zoneColor }}>↑{elevationStats.current}{elevationUnit}</span>
-                )}
-              </div>
-            )}
-            {isFreeDrive && onStop && (
-              <button
-                className="pointer-events-auto px-3 py-1 rounded text-[10px] font-bold tracking-wider"
-                style={{ background: 'rgba(200,40,40,0.6)', color: '#fff', border: '1px solid rgba(200,40,40,0.4)' }}
-                onClick={onStop}
-              >
-                STOP
-              </button>
-            )}
           </div>
 
           {/* Main callout info */}
@@ -357,16 +305,14 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
             </div>
           </div>
           
-          {/* Progress bar at bottom (Route Mode only) */}
-          {!isFreeDrive && (
-            <div className="px-4 pb-2">
-              <ProgressBar
-                percent={routeProgress.percent}
-                modeColor={zoneColor}
-                compact
-              />
-            </div>
-          )}
+          {/* Progress bar at bottom */}
+          <div className="px-4 pb-2">
+            <ProgressBar
+              percent={routeProgress.percent}
+              modeColor={zoneColor}
+              compact
+            />
+          </div>
         </div>
 
         {/* Upcoming callouts */}
@@ -395,8 +341,6 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
   // CLEAR AHEAD - when we have curated callouts but none nearby
   // ========================================
   if (curatedHighwayCallouts?.length > 0 && !nextCallout) {
-    const clearBadgeColor = isFreeDrive ? '#E8622C' : zoneColor
-    const clearBadgeLabel = isFreeDrive ? 'FREE DRIVE' : (characterLabel?.short || 'TECH')
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
         {hasNetworkIssue && <StatusWarnings hasNetworkIssue={hasNetworkIssue} />}
@@ -404,23 +348,14 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
         <div className="hud-glass rounded-2xl px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <ZoneBadge color={clearBadgeColor} label={clearBadgeLabel} />
-              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: clearBadgeColor }} />
+              <ZoneBadge color={zoneColor} label={characterLabel?.short || 'TECH'} />
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: zoneColor }} />
               <span className="text-white/50 text-sm">Clear ahead</span>
             </div>
             <div className="flex items-center gap-3">
-              {isFreeDrive && onStop && (
-                <button
-                  className="pointer-events-auto px-3 py-1 rounded text-[10px] font-bold tracking-wider"
-                  style={{ background: 'rgba(200,40,40,0.6)', color: '#fff', border: '1px solid rgba(200,40,40,0.4)' }}
-                  onClick={onStop}
-                >
-                  STOP
-                </button>
-              )}
               {settings.showSpeedometer !== false && (
                 <div className="text-right pointer-events-auto" onClick={handleTripleTap}>
-                  <span className="text-2xl font-bold" style={{ color: clearBadgeColor }}>
+                  <span className="text-2xl font-bold" style={{ color: zoneColor }}>
                     {currentSpeedDisplay}
                   </span>
                   <span className="text-xs text-white/40 ml-1">{speedUnit}</span>
@@ -429,17 +364,15 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
             </div>
           </div>
 
-          {!isFreeDrive && (
-            <div className="mt-3">
-              <ProgressBar
-                percent={routeProgress.percent}
-                modeColor={zoneColor}
-                remainingDist={routeProgress.remainingDist}
-                remainingDistUnit={routeProgress.remainingDistUnit}
-                remainingTime={routeProgress.remainingTime}
-              />
-            </div>
-          )}
+          <div className="mt-3">
+            <ProgressBar
+              percent={routeProgress.percent}
+              modeColor={zoneColor}
+              remainingDist={routeProgress.remainingDist}
+              remainingDistUnit={routeProgress.remainingDistUnit}
+              remainingTime={routeProgress.remainingTime}
+            />
+          </div>
         </div>
 
         <style>{hudStyles}</style>
