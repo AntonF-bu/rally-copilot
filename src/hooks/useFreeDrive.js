@@ -333,7 +333,11 @@ export function useFreeDrive({ isActive, position, heading, speed }) {
         }
         state.roadName = name
         if (!state.roadsVisited[name]) {
-          state.roadsVisited[name] = { distance: 0, speedSamples: [] }
+          state.roadsVisited[name] = { distance: 0, speedSamples: [], curves: 0 }
+        }
+        // Track speed on current road
+        if (spd > MIN_SPEED_MPH) {
+          state.roadsVisited[name].speedSamples.push(spd)
         }
       }
 
@@ -401,7 +405,13 @@ export function useFreeDrive({ isActive, position, heading, speed }) {
       topSpeed: Math.round(state.topSpeed),
       apiCallCount: state.apiCallCount,
       totalDistanceMiles: avgSpeed * (elapsed / 3600000),
-      roadsVisited: Object.keys(state.roadsVisited).map(name => ({ name })),
+      roadsVisited: Object.entries(state.roadsVisited).map(([name, data]) => ({
+        name,
+        avgSpeed: data.speedSamples.length > 0
+          ? Math.round(data.speedSamples.reduce((a, b) => a + b, 0) / data.speedSamples.length)
+          : 0,
+        curves: data.curves || 0,
+      })),
     }
   }, [])
 

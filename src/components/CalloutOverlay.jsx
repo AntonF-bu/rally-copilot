@@ -261,6 +261,8 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
     
     const maxDistance = 500
     const progress = Math.min(100, Math.max(0, ((maxDistance - distanceToCallout) / maxDistance) * 100))
+    // Flash animation when callout is about to fire (within announcement range)
+    const isAnnouncing = distanceToCallout > 0 && distanceToCallout < 150
 
     return (
       <div className="absolute top-0 left-0 right-0 p-3 safe-top z-20 pointer-events-none">
@@ -303,10 +305,16 @@ export default function CalloutOverlay({ currentDrivingMode, userDistance = 0, d
               {/* Callout type display */}
               <CalloutDisplay callout={nextCallout} color={calloutColor} />
               
-              {/* Callout text and distance */}
+              {/* Callout text and distance — pulses when about to fire */}
               <div className="flex-1">
                 <div className="flex items-baseline gap-2">
-                  <span className="text-xl font-bold" style={{ color: calloutColor }}>
+                  <span
+                    className={`font-bold transition-all duration-300 ${isAnnouncing ? 'text-3xl callout-flash' : 'text-xl'}`}
+                    style={{
+                      color: calloutColor,
+                      textShadow: isAnnouncing ? `0 0 20px ${calloutColor}, 0 0 40px ${calloutColor}60` : 'none',
+                    }}
+                  >
                     {nextCallout.text}
                   </span>
                 </div>
@@ -877,6 +885,13 @@ const hudStyles = `
   }
   .safe-top {
     padding-top: env(safe-area-inset-top, 0px);
+  }
+  @keyframes calloutPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.9; transform: scale(1.05); }
+  }
+  .callout-flash {
+    animation: calloutPulse 0.8s ease-in-out infinite;
   }
 `
 

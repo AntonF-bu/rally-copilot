@@ -747,9 +747,23 @@ export function useSpeechPlanner({
         }
       }
 
-      // Adaptive trigger distance based on speed
+      // Adaptive trigger distance based on speed and zone
       const speedMps = Math.max(currentSpeed, MIN_SPEED_MPH) * 0.44704
-      const triggerDist = Math.max(100, Math.min(400, speedMps * 5)) // 5 seconds ahead
+      let triggerDist
+      if (skipLaunchSequence) {
+        // Free Drive: zone-adaptive announcement distances
+        // Highway: 600-800m (20s lead), Technical: 300-500m (12s), Urban: 100-300m (5s)
+        const zoneChar = zone?.character || 'technical'
+        if (zoneChar === 'transit') {
+          triggerDist = Math.max(200, Math.min(800, speedMps * 20))
+        } else if (zoneChar === 'urban') {
+          triggerDist = Math.max(100, Math.min(300, speedMps * 5))
+        } else {
+          triggerDist = Math.max(150, Math.min(500, speedMps * 12))
+        }
+      } else {
+        triggerDist = Math.max(100, Math.min(400, speedMps * 5)) // Route Mode: 5 seconds ahead
+      }
 
       if (curve.ahead > 0 && curve.ahead < triggerDist) {
         const callout = curve.originalCallout
