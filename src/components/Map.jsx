@@ -10,7 +10,14 @@ import { createCalloutMarkerElement } from '../utils/calloutMarkers'
 // Tramo Brand Design
 // - Direct color values (no theme.js)
 // - Route rendering matches RoutePreview style
+// IMPORTANT: Use NativeMap instead of Map() constructor inside this component.
+// The component is named "Map" which shadows the built-in Map in production
+// builds (Rollup minifier treats them as the same identifier), causing
+// infinite recursion: useRef(new NativeMap()) → useRef(new MapComponent()) → crash.
 // ================================
+
+// Alias built-in Map to avoid name collision with this component
+const NativeMap = globalThis.Map
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN || ''
 
@@ -31,7 +38,7 @@ export default function Map({ freeDriveGeometry } = {}) {
   const userMarkerEl = useRef(null)
   const curveMarkers = useRef([])
   const calloutMarkers = useRef([])
-  const calloutMarkerMapRef = useRef(new Map()) // spatialId → marker (for diff-based rendering)
+  const calloutMarkerMapRef = useRef(new NativeMap()) // spatialId → marker (for diff-based rendering)
   // Free Drive curve markers now handled by curatedHighwayCallouts (same as Route Mode)
   const routeLayersRef = useRef([])
   const lastCameraUpdateRef = useRef(0)
