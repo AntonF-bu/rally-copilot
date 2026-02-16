@@ -401,7 +401,12 @@ export default function TripSummary({ diagnosticLog }) {
 
         {/* Header Bar */}
         <div style={styles.headerBar}>
-          <span style={styles.driveComplete}>{driveCompleted ? 'DRIVE COMPLETE' : 'DRIVE ENDED'}</span>
+          <span style={styles.driveComplete}>
+            {isFreeDriveMode
+              ? `Free Drive · ${(freeDriveTripStats?.totalDistanceMiles || 0).toFixed(1)} mi · ${Math.round((freeDriveTripStats?.driveTime || 0) / 60000)} min`
+              : (driveCompleted ? 'DRIVE COMPLETE' : 'DRIVE ENDED')
+            }
+          </span>
           <span style={styles.headerDate}>
             {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
@@ -539,7 +544,7 @@ export default function TripSummary({ diagnosticLog }) {
                 <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px', letterSpacing: '0.5px' }}>ROADS</div>
                 {freeDriveTripStats.roadsVisited.filter(r => r.name).map((road, i) => (
                   <div key={i} style={{ fontSize: '12px', color: '#aaa', padding: '2px 0', fontFamily: "'JetBrains Mono', monospace" }}>
-                    {road.name} — {road.curves} curve{road.curves !== 1 ? 's' : ''}, avg {road.avgSpeed}mph
+                    {road.name}{road.avgSpeed > 0 ? ` — avg ${road.avgSpeed}mph` : ''}
                   </div>
                 ))}
               </div>
